@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing Test Guidelines"
+  short_description: "保持测试用例简洁克制，复用通用工具并聚焦关键边界断言"
+  default_prompt: "Use $aruing-test-guidelines when adding or modifying tests in this repository so cases, helpers, names, and assertions stay focused."
+
+policy:
+  allow_implicit_invocation: true
