@@ -42,6 +42,7 @@ description: Use when a task explicitly asks to add, rewrite, review, or preserv
 - 句末不需要使用句号或英文句点
 - 优先说明意图、边界、约束、原因和注意事项
 - 简单字段也必须说明含义，不要因为字段名看起来直观就省略注释
+- 结构体字段注释不要在每个字段之间机械空行，原则上连续书写；只有字段可以分为几个具有内在关联的逻辑部分时，才在各部分之间空一行
 - 有特殊用法、默认行为、单位、格式、并发约束、持久化语义或兼容性要求时，必须写清楚
 - 关键步骤注释要解释实现选择，不要复述代码已经表达清楚的内容
 - 注释要短，复杂逻辑可以拆成几条有顺序的注释
@@ -68,7 +69,6 @@ description: Use when a task explicitly asks to add, rewrite, review, or preserv
 type runtimeOptions struct {
     // 请求可等待的最长时间，零值表示使用执行层默认限制
     timeout time.Duration
-
     // 是否启用详细日志，仅用于排查问题，不应改变业务流程
     verbose bool
 }
@@ -129,6 +129,7 @@ func buildRuntimeOptions(cfg Config) RuntimeOptions {
 - 新模块顶部是否有模块注释
 - 新增或修改的结构体、类型定义是否有中文注释
 - 结构体每个字段是否都有中文注释，包括看起来很简单的字段
+- 结构体字段注释是否避免了频繁空行，只在有内在关联的字段分组之间空行
 - 每个新增或修改的函数、方法是否有中文注释
 - 关键步骤是否说明了目标、原因或注意事项
 - 修改代码后，相关注释是否仍然准确，是否需要同步补充或删改
