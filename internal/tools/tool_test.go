@@ -29,6 +29,20 @@ func (tool testEvidenceTool) Execute(context.Context, json.RawMessage) (*core.Ev
 	return tool.evidence, nil
 }
 
+// 模拟缺少名称的工具，用于验证注册阶段的名称约束
+type emptyNameTool struct{}
+
+// 返回空名称以触发注册表的名称校验
+func (emptyNameTool) Name() string { return "" }
+
+// 提供满足工具接口的最小说明，测试不依赖其具体内容
+func (emptyNameTool) Description() string { return "模拟缺少名称的工具" }
+
+// 返回空证据即可，因为名称校验应在执行前阻止该工具注册
+func (emptyNameTool) Execute(context.Context, json.RawMessage) (*core.Evidence, error) {
+	return nil, nil
+}
+
 // -------------------------- 工具函数 --------------------------
 
 // 构造满足执行条件的最小取证任务，让边界用例只暴露当前检查的字段
@@ -52,6 +66,40 @@ func requireErrorContains(t *testing.T, err error, want string) {
 }
 
 // -------------------------- 测试主要功能 --------------------------
+
+// 注册表必须保留唯一工具名称，避免后注册的工具覆盖已有执行能力
+func TestRegistryRegister(t *testing.T) {
+	registry := NewRegistry()
+	tool := testEvidenceTool{}
+
+	if err := registry.Register(tool); err != nil {
+		t.Fatalf("register tool: %v", err)
+	}
+	if err := registry.Register(tool); err == nil {
+		t.Fatal("register duplicate tool: error = nil")
+	} else {
+		requireErrorContains(t, err, "already registered")
+	}
+}
+
+// 无效工具应在注册阶段被拒绝，避免空名称污染注册表或空对象触发崩溃
+func TestRegistryValidate(t *testing.T) {
+	tests := []struct {
+		name      string
+		tool      Tool
+		wantError string
+	}{
+		{name: "nil tool", tool: nil, wantError: "tool is required"},
+		{name: "empty name", tool: emptyNameTool{}, wantError: "tool name is required"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := NewRegistry().Register(test.tool)
+			requireErrorContains(t, err, test.wantError)
+		})
+	}
+}
 
 // 归属字段必须由调度器根据任务和注册工具填写，避免工具返回的数据破坏证据链
 func TestDispatcherExecute(t *testing.T) {

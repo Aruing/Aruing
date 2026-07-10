@@ -53,9 +53,16 @@ func NewRegistry() *Registry {
 	return &Registry{tools: make(map[string]Tool)}
 }
 
-// 注册一个工具，如果工具名称已存在则返回错误，避免重复注册覆盖
+// 注册一个名称非空的工具，拒绝空对象和重复名称，避免无效能力进入白名单
 func (r *Registry) Register(t Tool) error {
+	if t == nil {
+		return errors.New("tool is required")
+	}
+
 	name := t.Name()
+	if name == "" {
+		return errors.New("tool name is required")
+	}
 	if _, exists := r.tools[name]; exists {
 		return fmt.Errorf("tool already registered: %s", name)
 	}
