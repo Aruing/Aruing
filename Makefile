@@ -9,7 +9,7 @@ BIN := $(BIN_DIR)/$(APP)
 ARGS ?= help
 QUESTION ?= why is demo-api unreachable in default namespace
 
-.PHONY: run help version diagnose
+.PHONY: run help version
 
 run:
 	go run $(CMD) $(ARGS)
@@ -19,9 +19,6 @@ help:
 
 version:
 	go run $(CMD) version
-
-diagnose:
-	go run $(CMD) diagnose "$(QUESTION)"
 
 # ---------------- build -----------------
 
