@@ -13,6 +13,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"aruing/internal/core"
@@ -85,10 +86,23 @@ func NewDispatcher(r *Registry) *Dispatcher {
 }
 
 // 执行一个取证任务，返回产出的证据
-// 任务中的工具名称必须在注册表中存在，否则返回错误
+// 调度器和任务的关联编号必须完整，任务中的工具名称必须在注册表中存在，否则返回错误
 // 任务参数由找到的工具负责校验，校验失败时透传带工具名称的上下文错误
 // 任务的 RunID 和 TaskID 会被写入证据，保持证据到任务的回溯链
 func (d *Dispatcher) Execute(ctx context.Context, task core.EvidenceTask) (*core.Evidence, error) {
+	if d == nil || d.registry == nil {
+		return nil, errors.New("dispatcher requires a registry")
+	}
+	if task.ID == "" {
+		return nil, errors.New("evidence task requires an ID")
+	}
+	if task.RunID == "" {
+		return nil, errors.New("evidence task requires a run ID")
+	}
+	if task.ToolName == "" {
+		return nil, errors.New("evidence task requires a tool name")
+	}
+
 	tool, err := d.registry.Get(task.ToolName)
 	if err != nil {
 		return nil, err
@@ -98,10 +112,14 @@ func (d *Dispatcher) Execute(ctx context.Context, task core.EvidenceTask) (*core
 	if err != nil {
 		return nil, fmt.Errorf("tool %s failed: %w", task.ToolName, err)
 	}
+	if evidence == nil {
+		return nil, fmt.Errorf("tool %s returned nil evidence", task.ToolName)
+	}
 
 	// 工具只产出证据内容，归属信息由调度器统一填充
 	evidence.RunID = task.RunID
 	evidence.TaskID = task.ID
+	evidence.ToolName = tool.Name()
 
 	return evidence, nil
 }
