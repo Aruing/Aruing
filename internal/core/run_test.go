@@ -14,15 +14,9 @@ func TestRunJSON(t *testing.T) {
 	raw := json.RawMessage(`{"pods":[{"name":"demo-api","ready":false}]}`)
 
 	run := Run{
-		ID:       runID,
-		Question: "demo-api 为什么访问不了",
-		Status:   RunStatusReported,
-		Scopes: []Scope{{
-			Namespace: "default",
-			Service:   "demo-api",
-			Selector:  map[string]string{"app": "demo-api"},
-			TimeRange: TimeRange{Since: "30m"},
-		}},
+		ID:        runID,
+		Question:  "demo-api 为什么访问不了",
+		Status:    RunStatusReported,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
@@ -122,7 +116,7 @@ func TestRunJSON(t *testing.T) {
 	if err := json.Unmarshal(runData, &runFields); err != nil {
 		t.Fatalf("unmarshal run: %v", err)
 	}
-	for _, field := range []string{"hypotheses", "tasks", "evidence", "verdicts", "report"} {
+	for _, field := range []string{"scopes", "targets", "hypotheses", "tasks", "evidence", "verdicts", "report"} {
 		if _, exists := runFields[field]; exists {
 			t.Fatalf("run should not carry nested field %q, entities are related by RunID", field)
 		}

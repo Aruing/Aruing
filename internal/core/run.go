@@ -49,7 +49,7 @@ const (
 
 // 承载一次运行从用户问题到最终报告的主体
 //
-// 该结构只保存运行自身的属性，不嵌装猜想、任务、证据和验证结果
+// 该结构只保存运行自身的属性，不嵌装问题、目标、猜想、任务、证据和验证结果
 // 子实体通过 RunID 反向关联到运行，编排层和存储层按 RunID 组装和查询
 // 这样未来引入迭代层或会话层时，只需要给子实体补充新的父级编号，不必改动运行结构
 //
@@ -64,9 +64,6 @@ type Run struct {
 
 	// 用户输入的原始问题，用于报告展示和后续复盘
 	Question string `json:"question"`
-	// 解析出的目标范围列表，工具执行时只应在这些范围内取证
-	// 即使只有一个目标对象也使用列表，避免后续跨服务或多资源场景再改模型形态
-	Scopes []Scope `json:"scopes,omitempty"`
 
 	// 当前运行阶段，调用方可以据此判断是否已经生成报告
 	Status RunStatus `json:"status"`
@@ -75,25 +72,6 @@ type Run struct {
 	CreatedAt time.Time `json:"createdAt"`
 	// 最近一次状态变化时间，便于后续持久化和审计
 	UpdatedAt time.Time `json:"updatedAt"`
-}
-
-// 描述一次运行应该查看的资源范围
-// 范围字段只表达查询边界，不承载推理结论
-type Scope struct {
-	// Kubernetes 命名空间，缺省策略由解析器或编排层决定
-	Namespace string `json:"namespace,omitempty"`
-	// 用户关注的服务名称，常用于查询 Service 和 Endpoints
-	Service string `json:"service,omitempty"`
-	// 用户关注的工作负载名称，常用于查询 Deployment 配置
-	Deployment string `json:"deployment,omitempty"`
-	// 用户明确指定的容器组名称，通常用于精确日志或事件查询
-	Pod string `json:"pod,omitempty"`
-
-	// 从服务或问题中推断出的标签选择器，用于定位相关容器组
-	Selector map[string]string `json:"selector,omitempty"`
-
-	// 本次运行默认查看的时间窗口，用于日志和指标查询
-	TimeRange TimeRange `json:"timeRange,omitempty"`
 }
 
 // 描述日志、事件和指标查询使用的时间窗口
