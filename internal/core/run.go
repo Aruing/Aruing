@@ -105,17 +105,17 @@ type Hypothesis struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// 描述一次只读工具调用需要完成的取证动作
-// 任务由规划阶段产生，执行阶段只负责校验和调用白名单工具
-type EvidenceTask struct {
+// 描述定位或诊断阶段需要完成的一次工具调用
+// 任务只引用相关数据并声明调用参数，不绑定具体处理阶段
+type Task struct {
 	// 任务编号，格式为 t_ + UUIDv7，创建时生成，同时作为数据库主键
 	// 证据通过它回连到具体取证动作
 	ID string `json:"id"`
 	// 所属运行编号，用于存储层和编排层按运行查询任务
 	RunID string `json:"runId"`
 
-	// 该任务服务于哪个故障猜想
-	HypothesisID string `json:"hypothesisId"`
+	// 相关数据的编号，可以引用问题节点、确认目标或故障猜想
+	Refs []string `json:"refs"`
 
 	// 白名单工具名称，例如 fake.list_pods 或 k8s.list_pods
 	ToolName string `json:"toolName"`

@@ -79,7 +79,7 @@ func (r *Registry) Get(name string) (Tool, error) {
 	return t, nil
 }
 
-// 工具调度器，负责接收取证任务、查找已注册工具、执行调用并产出证据
+// 工具调度器，负责接收任务、查找已注册工具、执行调用并产出证据
 // 编排层把任务交给调度器，调度器返回证据，编排层不需要直接接触工具实例
 // 具体参数约束由对应工具校验，调度器不依赖不同后端的参数结构
 // 调度器是实施读写策略的合适位置，例如只读模式下拒绝变更类工具的调用
@@ -92,22 +92,22 @@ func NewDispatcher(r *Registry) *Dispatcher {
 	return &Dispatcher{registry: r}
 }
 
-// 执行一个取证任务，返回产出的证据
+// 执行一个工具任务，返回产出的证据
 // 调度器和任务的关联编号必须完整，任务中的工具名称必须在注册表中存在，否则返回错误
 // 任务参数由找到的工具负责校验，校验失败时透传带工具名称的上下文错误
 // 任务的 RunID 和 TaskID 会被写入证据，保持证据到任务的回溯链
-func (d *Dispatcher) Execute(ctx context.Context, task core.EvidenceTask) (*core.Evidence, error) {
+func (d *Dispatcher) Execute(ctx context.Context, task core.Task) (*core.Evidence, error) {
 	if d == nil || d.registry == nil {
 		return nil, errors.New("dispatcher requires a registry")
 	}
 	if task.ID == "" {
-		return nil, errors.New("evidence task requires an ID")
+		return nil, errors.New("task requires an ID")
 	}
 	if task.RunID == "" {
-		return nil, errors.New("evidence task requires a run ID")
+		return nil, errors.New("task requires a run ID")
 	}
 	if task.ToolName == "" {
-		return nil, errors.New("evidence task requires a tool name")
+		return nil, errors.New("task requires a tool name")
 	}
 
 	tool, err := d.registry.Get(task.ToolName)

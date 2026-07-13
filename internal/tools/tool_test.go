@@ -45,9 +45,9 @@ func (emptyNameTool) Execute(context.Context, json.RawMessage) (*core.Evidence, 
 
 // -------------------------- 工具函数 --------------------------
 
-// 构造满足执行条件的最小取证任务，让边界用例只暴露当前检查的字段
-func newTestEvidenceTask() core.EvidenceTask {
-	return core.EvidenceTask{
+// 构造满足执行条件的最小任务，让边界用例只暴露当前检查的字段
+func newTestTask() core.Task {
+	return core.Task{
 		ID:       "t_test",
 		RunID:    "run_test",
 		ToolName: TestToolName,
@@ -111,7 +111,7 @@ func TestDispatcherExecute(t *testing.T) {
 		t.Fatalf("register test tool: %v", err)
 	}
 
-	task := newTestEvidenceTask()
+	task := newTestTask()
 	evidence, err := NewDispatcher(registry).Execute(context.Background(), task)
 	if err != nil {
 		t.Fatalf("execute task: %v", err)
@@ -137,37 +137,37 @@ func TestDispatcherValidate(t *testing.T) {
 	tests := []struct {
 		name       string
 		dispatcher *Dispatcher
-		task       core.EvidenceTask
+		task       core.Task
 		wantError  string
 	}{
 		{
 			name:       "nil dispatcher",
 			dispatcher: nil,
-			task:       core.EvidenceTask{ID: "t_test", RunID: "run_test", ToolName: "fake.list_pods"},
+			task:       core.Task{ID: "t_test", RunID: "run_test", ToolName: "fake.list_pods"},
 			wantError:  "requires a registry",
 		},
 		{
 			name:       "missing registry",
 			dispatcher: &Dispatcher{},
-			task:       core.EvidenceTask{ID: "t_test", RunID: "run_test", ToolName: "fake.list_pods"},
+			task:       core.Task{ID: "t_test", RunID: "run_test", ToolName: "fake.list_pods"},
 			wantError:  "requires a registry",
 		},
 		{
 			name:       "missing task ID",
 			dispatcher: NewDispatcher(registry),
-			task:       core.EvidenceTask{RunID: "run_test", ToolName: "fake.list_pods"},
+			task:       core.Task{RunID: "run_test", ToolName: "fake.list_pods"},
 			wantError:  "requires an ID",
 		},
 		{
 			name:       "missing run ID",
 			dispatcher: NewDispatcher(registry),
-			task:       core.EvidenceTask{ID: "t_test", ToolName: "fake.list_pods"},
+			task:       core.Task{ID: "t_test", ToolName: "fake.list_pods"},
 			wantError:  "requires a run ID",
 		},
 		{
 			name:       "missing tool name",
 			dispatcher: NewDispatcher(registry),
-			task:       core.EvidenceTask{ID: "t_test", RunID: "run_test"},
+			task:       core.Task{ID: "t_test", RunID: "run_test"},
 			wantError:  "requires a tool name",
 		},
 	}
@@ -187,6 +187,6 @@ func TestDispatcherNilEvidence(t *testing.T) {
 		t.Fatalf("register test tool: %v", err)
 	}
 
-	_, err := NewDispatcher(registry).Execute(context.Background(), newTestEvidenceTask())
+	_, err := NewDispatcher(registry).Execute(context.Background(), newTestTask())
 	requireErrorContains(t, err, "returned nil evidence")
 }

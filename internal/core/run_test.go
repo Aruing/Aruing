@@ -30,13 +30,13 @@ func TestRunJSON(t *testing.T) {
 		CreatedAt:       now,
 	}
 
-	task := EvidenceTask{
-		ID:           "t1",
-		RunID:        runID,
-		HypothesisID: "h1",
-		ToolName:     "fake.list_pods",
-		Arguments:    json.RawMessage(`{"namespace":"default"}`),
-		Purpose:      "查看后端 Pod 状态",
+	task := Task{
+		ID:        "t1",
+		RunID:     runID,
+		Refs:      []string{"target_demo", "h1"},
+		ToolName:  "fake.list_pods",
+		Arguments: json.RawMessage(`{"namespace":"default"}`),
+		Purpose:   "查看后端 Pod 状态",
 	}
 
 	evidence := Evidence{
@@ -120,5 +120,36 @@ func TestRunJSON(t *testing.T) {
 		if _, exists := runFields[field]; exists {
 			t.Fatalf("run should not carry nested field %q, entities are related by RunID", field)
 		}
+	}
+}
+
+// 任务引用必须兼容定位和诊断阶段，避免任务模型绑定某一种处理流程
+func TestTaskJSON(t *testing.T) {
+	want := Task{
+		ID:       "t_test",
+		RunID:    "run_test",
+		Refs:     []string{"node_demo", "target_demo", "h_demo"},
+		ToolName: "fake.list_pods",
+	}
+
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal task: %v", err)
+	}
+
+	var got Task
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal task: %v", err)
+	}
+	if len(got.Refs) != 3 || got.Refs[0] != "node_demo" || got.Refs[2] != "h_demo" {
+		t.Errorf("task refs were not preserved: %#v", got.Refs)
+	}
+
+	var fields map[string]any
+	if err := json.Unmarshal(data, &fields); err != nil {
+		t.Fatalf("unmarshal task fields: %v", err)
+	}
+	if _, exists := fields["hypothesisId"]; exists {
+		t.Errorf("hypothesisId should not be present: %s", data)
 	}
 }
