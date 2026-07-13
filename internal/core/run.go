@@ -102,9 +102,9 @@ type TimeRange struct {
 	// 相对当前时间向前查看的窗口，例如 30m 或 1h
 	Since string `json:"since,omitempty"`
 	// 绝对开始时间，只有调用方明确传入时才使用
-	Start time.Time `json:"start,omitempty"`
-	// 绝对结束时间，空值表示查询到当前时间
-	End time.Time `json:"end,omitempty"`
+	Start *time.Time `json:"start,omitempty"`
+	// 绝对结束时间，nil 表示查询到当前时间
+	End *time.Time `json:"end,omitempty"`
 }
 
 // 表达一个可被证据验证的候选故障原因
