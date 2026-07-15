@@ -7,12 +7,16 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+
+	"aruing/internal/core"
 )
 
 // 对外展示的版本号，发布时应作为命令行输出的唯一来源
@@ -77,7 +81,7 @@ func runVersion(args []string, stdout io.Writer) error {
 	return nil
 }
 
-// 解析 run 子命令的用户问题，并在编排器接入前返回可预期的占位输出
+// 解析运行子命令的用户问题，执行当前完整假闭环并输出结构化报告
 // 所有非标志参数拼接为问题文本，因此用户不需要用引号包裹带空格的问题
 // 标准错误用于参数错误和局部帮助，标准输出只承载正常命令结果
 func runRun(args []string, stdout, stderr io.Writer) error {
@@ -99,8 +103,33 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		return errors.New("run requires a question, e.g. aruing run why is demo-api unreachable")
 	}
 
-	// 后续在这里组装编排器并把 question 交给诊断流程
-	fmt.Fprintf(stdout, "run: %s\n", question)
-	fmt.Fprintln(stdout, "(skeleton: orchestrator not wired up yet)")
+	factory := core.NewFactory()
+	runID, err := factory.NewID("run")
+	if err != nil {
+		return fmt.Errorf("create run ID: %w", err)
+	}
+	now := factory.Now()
+	run := core.Run{
+		ID:        runID,
+		Question:  question,
+		Status:    core.RunStatusRunning,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	orchestrator, err := newFakeOrchestrator(factory)
+	if err != nil {
+		return fmt.Errorf("build orchestrator: %w", err)
+	}
+	report, err := orchestrator.Execute(context.Background(), run)
+	if err != nil {
+		return fmt.Errorf("execute diagnosis: %w", err)
+	}
+
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(report); err != nil {
+		return fmt.Errorf("write report: %w", err)
+	}
 	return nil
 }
