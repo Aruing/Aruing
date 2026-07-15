@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"aruing/internal/core"
 )
@@ -49,8 +50,13 @@ type reporter interface {
 	Report(context.Context, core.Run, []core.Verdict, []core.Evidence) (core.Report, error)
 }
 
-// 为新证据生成全局唯一编号，空值表示生成失败
-type evidenceIDFactory func() string
+// 描述编排器创建动态领域实体所需的最小元数据能力
+type entityFactory interface {
+	// 根据开放前缀生成全局唯一编号
+	NewID(string) (string, error)
+	// 返回统一时区的当前时间
+	Now() time.Time
+}
 
 // 保存完整假闭环所需的角色和执行依赖
 // 实例只控制调用顺序，不承担任何角色内部的业务判断
@@ -67,8 +73,8 @@ type Orchestrator struct {
 	verifier verifier
 	// 负责把判断整理为最终报告
 	reporter reporter
-	// 负责为工具返回的证据分配领域编号
-	newEvidenceID evidenceIDFactory
+	// 负责为工具返回的证据分配领域编号和创建时间
+	factory entityFactory
 }
 
 // 绑定完整闭环所需依赖并创建编排器
@@ -80,16 +86,16 @@ func NewOrchestrator(
 	executor taskExecutor,
 	verifierRole verifier,
 	reporterRole reporter,
-	newEvidenceID evidenceIDFactory,
+	factory entityFactory,
 ) *Orchestrator {
 	return &Orchestrator{
-		parser:        parserRole,
-		resolver:      resolverRole,
-		planner:       plannerRole,
-		executor:      executor,
-		verifier:      verifierRole,
-		reporter:      reporterRole,
-		newEvidenceID: newEvidenceID,
+		parser:   parserRole,
+		resolver: resolverRole,
+		planner:  plannerRole,
+		executor: executor,
+		verifier: verifierRole,
+		reporter: reporterRole,
+		factory:  factory,
 	}
 }
 
@@ -119,6 +125,13 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	// 当前按计划顺序执行，先保证证据链闭合，再单独设计任务依赖调度
 	evidence := make([]core.Evidence, 0, len(plan.Tasks))
 	for _, task := range plan.Tasks {
+		evidenceID, err := o.factory.NewID("e")
+		if err != nil {
+			return core.Report{}, fmt.Errorf("create evidence ID for task %q: %w", task.ID, err)
+		}
+		if evidenceID == "" {
+			return core.Report{}, fmt.Errorf("create evidence ID for task %q: ID is required", task.ID)
+		}
 		item, err := o.executor.Execute(ctx, task)
 		if err != nil {
 			return core.Report{}, fmt.Errorf("execute task %q: %w", task.ID, err)
@@ -126,10 +139,8 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 		if item == nil {
 			return core.Report{}, fmt.Errorf("execute task %q: evidence is required", task.ID)
 		}
-		item.ID = o.newEvidenceID()
-		if item.ID == "" {
-			return core.Report{}, fmt.Errorf("execute task %q: evidence ID is required", task.ID)
-		}
+		item.ID = evidenceID
+		item.CreatedAt = o.factory.Now()
 		evidence = append(evidence, *item)
 	}
 
@@ -155,8 +166,8 @@ func (o *Orchestrator) validate() error {
 	if o.executor == nil || o.verifier == nil || o.reporter == nil {
 		return errors.New("orchestrator requires executor, verifier, and reporter")
 	}
-	if o.newEvidenceID == nil {
-		return errors.New("orchestrator requires an evidence ID factory")
+	if o.factory == nil {
+		return errors.New("orchestrator requires an entity factory")
 	}
 	return nil
 }

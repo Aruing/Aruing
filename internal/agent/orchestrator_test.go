@@ -3,10 +3,38 @@ package agent
 import (
 	"context"
 	"testing"
+	"time"
 
 	"aruing/internal/core"
 	"aruing/internal/tools"
 )
+
+// 提供可观察的固定元数据，验证编排器是否统一生成证据身份和时间
+type testFactory struct {
+	// 返回给编排器的固定证据编号
+	id string
+	// 返回给编排器的固定创建时间
+	now time.Time
+	// 记录最近一次请求的实体前缀
+	prefix string
+	// 记录编号生成次数，防止一次任务重复创建身份
+	idCalls int
+	// 记录时间读取次数，确认动态证据具有创建时间
+	timeCalls int
+}
+
+// 返回固定编号并记录调用信息
+func (f *testFactory) NewID(prefix string) (string, error) {
+	f.prefix = prefix
+	f.idCalls++
+	return f.id, nil
+}
+
+// 返回固定时间并记录调用次数
+func (f *testFactory) Now() time.Time {
+	f.timeCalls++
+	return f.now
+}
 
 // 完整假闭环必须实际执行任务并让最终报告引用生成的证据
 func TestOrchestratorExecute(t *testing.T) {
@@ -64,7 +92,10 @@ func TestOrchestratorExecute(t *testing.T) {
 		}},
 	})
 
-	generatedIDs := 0
+	factory := &testFactory{
+		id:  "e_pods",
+		now: time.Date(2026, 7, 15, 10, 30, 0, 0, time.UTC),
+	}
 	orchestrator := NewOrchestrator(
 		parser,
 		resolver,
@@ -72,10 +103,7 @@ func TestOrchestratorExecute(t *testing.T) {
 		tools.NewDispatcher(registry),
 		verifier,
 		reporter,
-		func() string {
-			generatedIDs++
-			return "e_pods"
-		},
+		factory,
 	)
 	report, err := orchestrator.Execute(context.Background(), core.Run{
 		ID:       "run_demo",
@@ -91,7 +119,7 @@ func TestOrchestratorExecute(t *testing.T) {
 	if len(report.Conclusions) != 1 || report.Conclusions[0].EvidenceIDs[0] != "e_pods" {
 		t.Errorf("report evidence chain was not preserved: %#v", report.Conclusions)
 	}
-	if generatedIDs != 1 {
-		t.Errorf("generated evidence IDs = %d, want 1", generatedIDs)
+	if factory.prefix != "e" || factory.idCalls != 1 || factory.timeCalls != 1 {
+		t.Errorf("factory calls = prefix %q, IDs %d, times %d; want e, 1, 1", factory.prefix, factory.idCalls, factory.timeCalls)
 	}
 }
