@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing Code Comments"
+  short_description: "保持模块结构体字段函数关键步骤注释中文清晰一致简洁"
+  default_prompt: "Use $aruing-code-comments only for tasks that explicitly add, rewrite, review, or preserve source code comments, while keeping changes limited to the requested scope."
+
+policy:
+  allow_implicit_invocation: true
