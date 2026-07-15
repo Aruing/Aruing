@@ -1,7 +1,7 @@
-// 判断模块负责把候选猜想和已有证据转换为可回溯的验证结果
+// 判断模块负责把候选猜想、执行任务和已有证据转换为可回溯的验证结果
 //
 // 当前假实现只返回固定判断，不调用大模型，也不补充证据之外的事实
-// 调用方必须提供已保存的猜想和证据，所有引用都要属于同一次运行
+// 调用方必须提供同一轮规划的猜想、任务和证据，所有引用都要属于同一次运行
 package agent
 
 import (
@@ -15,7 +15,7 @@ import (
 // 保存假判断器使用的固定结果模板，可在多次运行之间安全复用
 // 每次验证都会返回独立副本，不根据输入内容重新推断结论
 type FakeVerifier struct {
-	// 验证时复制的结果模板，其中的运行编号会由对应猜想决定
+	// 验证时复制的结果模板，运行编号和证据编号会根据实际输入重新绑定
 	verdicts []core.Verdict
 }
 
@@ -25,11 +25,12 @@ func NewFakeVerifier(verdicts []core.Verdict) *FakeVerifier {
 	return &FakeVerifier{verdicts: cloneVerdicts(verdicts)}
 }
 
-// 校验判断引用的猜想和证据，并返回绑定正确运行编号的独立结果
-// 上下文取消、引用悬空或证据跨运行时返回错误，不产生部分结果
+// 根据任务引用找到每个猜想的实际证据，并返回绑定动态证据编号的独立结果
+// 上下文取消、任务没有产出证据或数据跨运行时返回错误，不产生部分结果
 func (v *FakeVerifier) Verify(
 	ctx context.Context,
 	hypotheses []core.Hypothesis,
+	tasks []core.Task,
 	evidence []core.Evidence,
 ) ([]core.Verdict, error) {
 	if err := ctx.Err(); err != nil {
@@ -42,10 +43,10 @@ func (v *FakeVerifier) Verify(
 			hypothesesByID[hypothesis.ID] = hypothesis
 		}
 	}
-	evidenceByID := make(map[string]core.Evidence, len(evidence))
+	evidenceByTaskID := make(map[string]core.Evidence, len(evidence))
 	for _, item := range evidence {
-		if item.ID != "" {
-			evidenceByID[item.ID] = item
+		if item.TaskID != "" {
+			evidenceByTaskID[item.TaskID] = item
 		}
 	}
 
@@ -56,17 +57,29 @@ func (v *FakeVerifier) Verify(
 		if !exists {
 			return nil, fmt.Errorf("verdict %q references unknown hypothesis %q", verdict.ID, verdict.HypothesisID)
 		}
-		if len(verdict.EvidenceIDs) == 0 {
-			return nil, fmt.Errorf("verdict %q requires evidence", verdict.ID)
-		}
-		for _, evidenceID := range verdict.EvidenceIDs {
-			item, exists := evidenceByID[evidenceID]
+
+		verdict.EvidenceIDs = verdict.EvidenceIDs[:0]
+		for _, task := range tasks {
+			if !slices.Contains(task.Refs, hypothesis.ID) {
+				continue
+			}
+			if task.RunID != hypothesis.RunID {
+				return nil, fmt.Errorf("task %q belongs to run %q, not %q", task.ID, task.RunID, hypothesis.RunID)
+			}
+			item, exists := evidenceByTaskID[task.ID]
 			if !exists {
-				return nil, fmt.Errorf("verdict %q references unknown evidence %q", verdict.ID, evidenceID)
+				return nil, fmt.Errorf("task %q has no evidence", task.ID)
+			}
+			if item.ID == "" {
+				return nil, fmt.Errorf("task %q produced evidence without an ID", task.ID)
 			}
 			if item.RunID != hypothesis.RunID {
 				return nil, fmt.Errorf("evidence %q belongs to run %q, not %q", item.ID, item.RunID, hypothesis.RunID)
 			}
+			verdict.EvidenceIDs = append(verdict.EvidenceIDs, item.ID)
+		}
+		if len(verdict.EvidenceIDs) == 0 {
+			return nil, fmt.Errorf("verdict %q requires evidence", verdict.ID)
 		}
 		verdict.RunID = hypothesis.RunID
 	}

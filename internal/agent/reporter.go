@@ -15,7 +15,7 @@ import (
 // 保存假报告器使用的固定报告模板，可在多次运行之间安全复用
 // 每次生成都会返回独立副本，不添加模板之外的结论和建议
 type FakeReporter struct {
-	// 生成时复制的报告模板，其中的运行编号会被当前运行覆盖
+	// 生成时复制的报告模板，运行编号和结论证据会根据实际输入重新绑定
 	report core.Report
 }
 
@@ -25,7 +25,7 @@ func NewFakeReporter(report core.Report) *FakeReporter {
 	return &FakeReporter{report: cloneReport(report)}
 }
 
-// 校验报告结论与已有判断和证据一致，并返回绑定当前运行的独立报告
+// 校验报告结论与已有判断和证据一致，并复制判断中的实际证据编号
 // 上下文取消、判断矛盾或引用无效时返回错误，不产生不完整报告
 func (r *FakeReporter) Report(
 	ctx context.Context,
@@ -54,7 +54,8 @@ func (r *FakeReporter) Report(
 	}
 
 	report := cloneReport(r.report)
-	for _, conclusion := range report.Conclusions {
+	for index := range report.Conclusions {
+		conclusion := &report.Conclusions[index]
 		verdict, exists := verdictsByHypothesis[conclusion.HypothesisID]
 		if !exists {
 			return core.Report{}, fmt.Errorf("report references unknown hypothesis verdict %q", conclusion.HypothesisID)
@@ -62,18 +63,10 @@ func (r *FakeReporter) Report(
 		if conclusion.Result != verdict.Result {
 			return core.Report{}, fmt.Errorf("report result for hypothesis %q does not match verdict", conclusion.HypothesisID)
 		}
-		if len(conclusion.EvidenceIDs) == 0 {
+		if len(verdict.EvidenceIDs) == 0 {
 			return core.Report{}, fmt.Errorf("report conclusion for hypothesis %q requires evidence", conclusion.HypothesisID)
 		}
-
-		verdictEvidence := make(map[string]struct{}, len(verdict.EvidenceIDs))
 		for _, evidenceID := range verdict.EvidenceIDs {
-			verdictEvidence[evidenceID] = struct{}{}
-		}
-		for _, evidenceID := range conclusion.EvidenceIDs {
-			if _, exists := verdictEvidence[evidenceID]; !exists {
-				return core.Report{}, fmt.Errorf("report evidence %q is not part of verdict", evidenceID)
-			}
 			item, exists := evidenceByID[evidenceID]
 			if !exists {
 				return core.Report{}, fmt.Errorf("report references unknown evidence %q", evidenceID)
@@ -82,6 +75,7 @@ func (r *FakeReporter) Report(
 				return core.Report{}, fmt.Errorf("evidence %q belongs to run %q, not %q", item.ID, item.RunID, run.ID)
 			}
 		}
+		conclusion.EvidenceIDs = slices.Clone(verdict.EvidenceIDs)
 	}
 	report.RunID = run.ID
 	return report, nil

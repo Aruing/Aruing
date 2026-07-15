@@ -78,7 +78,6 @@ func TestOrchestratorExecute(t *testing.T) {
 		HypothesisID: "h_pods",
 		Result:       core.VerdictSupported,
 		Reason:       "Pod 处于 CrashLoopBackOff",
-		EvidenceIDs:  []string{"e_pods"},
 	}})
 	reporter := NewFakeReporter(core.Report{
 		ID:      "report_demo",
@@ -88,12 +87,11 @@ func TestOrchestratorExecute(t *testing.T) {
 			HypothesisID: "h_pods",
 			Result:       core.VerdictSupported,
 			Reason:       "Pod 处于 CrashLoopBackOff",
-			EvidenceIDs:  []string{"e_pods"},
 		}},
 	})
 
 	factory := &testFactory{
-		id:  "e_pods",
+		id:  "e_runtime",
 		now: time.Date(2026, 7, 15, 10, 30, 0, 0, time.UTC),
 	}
 	orchestrator := NewOrchestrator(
@@ -116,7 +114,7 @@ func TestOrchestratorExecute(t *testing.T) {
 	if report.RunID != "run_demo" || report.Summary != "后端 Pod 未正常运行" {
 		t.Errorf("report was not bound to run: %#v", report)
 	}
-	if len(report.Conclusions) != 1 || report.Conclusions[0].EvidenceIDs[0] != "e_pods" {
+	if len(report.Conclusions) != 1 || report.Conclusions[0].EvidenceIDs[0] != "e_runtime" {
 		t.Errorf("report evidence chain was not preserved: %#v", report.Conclusions)
 	}
 	if factory.prefix != "e" || factory.idCalls != 1 || factory.timeCalls != 1 {

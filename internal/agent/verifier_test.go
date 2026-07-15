@@ -15,29 +15,29 @@ func TestFakeVerifierVerify(t *testing.T) {
 		HypothesisID: "h_demo",
 		Result:       core.VerdictSupported,
 		Reason:       "证据显示后端未就绪",
-		EvidenceIDs:  []string{"e_pods"},
 	}})
 	hypotheses := []core.Hypothesis{{ID: "h_demo", RunID: "run_test"}}
-	evidence := []core.Evidence{{ID: "e_pods", RunID: "run_test"}}
+	tasks := []core.Task{{ID: "task_pods", RunID: "run_test", Refs: []string{"target_demo", "h_demo"}}}
+	evidence := []core.Evidence{{ID: "e_runtime", RunID: "run_test", TaskID: "task_pods"}}
 
-	got, err := verifier.Verify(context.Background(), hypotheses, evidence)
+	got, err := verifier.Verify(context.Background(), hypotheses, tasks, evidence)
 	if err != nil {
 		t.Fatalf("verify evidence: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("verdicts length = %d, want 1", len(got))
 	}
-	if got[0].RunID != "run_test" || got[0].EvidenceIDs[0] != "e_pods" {
+	if got[0].RunID != "run_test" || got[0].EvidenceIDs[0] != "e_runtime" {
 		t.Errorf("verdict relation was not preserved: %#v", got[0])
 	}
 
 	// 多次验证不能共享证据编号列表，否则一次结果可能污染后续运行
 	got[0].EvidenceIDs[0] = "changed"
-	again, err := verifier.Verify(context.Background(), hypotheses, evidence)
+	again, err := verifier.Verify(context.Background(), hypotheses, tasks, evidence)
 	if err != nil {
 		t.Fatalf("verify evidence again: %v", err)
 	}
-	if again[0].EvidenceIDs[0] != "e_pods" {
+	if again[0].EvidenceIDs[0] != "e_runtime" {
 		t.Errorf("verdict template was mutated: %#v", again[0])
 	}
 }
@@ -48,6 +48,7 @@ func TestFakeVerifierValidate(t *testing.T) {
 		name       string
 		verdicts   []core.Verdict
 		hypotheses []core.Hypothesis
+		tasks      []core.Task
 		evidence   []core.Evidence
 	}{
 		{
@@ -55,26 +56,30 @@ func TestFakeVerifierValidate(t *testing.T) {
 			verdicts: []core.Verdict{{ID: "v_test", HypothesisID: "h_unknown"}},
 		},
 		{
-			name:       "unknown evidence",
-			verdicts:   []core.Verdict{{ID: "v_test", HypothesisID: "h_test", EvidenceIDs: []string{"e_unknown"}}},
-			hypotheses: []core.Hypothesis{{ID: "h_test", RunID: "run_test"}},
-		},
-		{
-			name:       "missing evidence refs",
+			name:       "unrelated task",
 			verdicts:   []core.Verdict{{ID: "v_test", HypothesisID: "h_test"}},
 			hypotheses: []core.Hypothesis{{ID: "h_test", RunID: "run_test"}},
+			tasks:      []core.Task{{ID: "task_test", RunID: "run_test", Refs: []string{"target_test"}}},
+			evidence:   []core.Evidence{{ID: "e_test", RunID: "run_test", TaskID: "task_test"}},
+		},
+		{
+			name:       "missing task evidence",
+			verdicts:   []core.Verdict{{ID: "v_test", HypothesisID: "h_test"}},
+			hypotheses: []core.Hypothesis{{ID: "h_test", RunID: "run_test"}},
+			tasks:      []core.Task{{ID: "task_test", RunID: "run_test", Refs: []string{"h_test"}}},
 		},
 		{
 			name:       "foreign evidence",
-			verdicts:   []core.Verdict{{ID: "v_test", HypothesisID: "h_test", EvidenceIDs: []string{"e_test"}}},
+			verdicts:   []core.Verdict{{ID: "v_test", HypothesisID: "h_test"}},
 			hypotheses: []core.Hypothesis{{ID: "h_test", RunID: "run_test"}},
-			evidence:   []core.Evidence{{ID: "e_test", RunID: "run_other"}},
+			tasks:      []core.Task{{ID: "task_test", RunID: "run_test", Refs: []string{"h_test"}}},
+			evidence:   []core.Evidence{{ID: "e_test", RunID: "run_other", TaskID: "task_test"}},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := NewFakeVerifier(test.verdicts).Verify(context.Background(), test.hypotheses, test.evidence)
+			_, err := NewFakeVerifier(test.verdicts).Verify(context.Background(), test.hypotheses, test.tasks, test.evidence)
 			if err == nil {
 				t.Fatal("verify evidence: error = nil")
 			}

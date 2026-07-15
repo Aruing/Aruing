@@ -40,8 +40,8 @@ type taskExecutor interface {
 
 // 描述编排器根据证据形成判断所需的最小能力
 type verifier interface {
-	// 校验猜想和证据并返回判断列表
-	Verify(context.Context, []core.Hypothesis, []core.Evidence) ([]core.Verdict, error)
+	// 根据猜想、任务和实际证据返回判断列表
+	Verify(context.Context, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
 }
 
 // 描述编排器生成最终用户输出所需的最小能力
@@ -144,7 +144,7 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 		evidence = append(evidence, *item)
 	}
 
-	verdicts, err := o.verifier.Verify(ctx, plan.Hypotheses, evidence)
+	verdicts, err := o.verifier.Verify(ctx, plan.Hypotheses, plan.Tasks, evidence)
 	if err != nil {
 		return core.Report{}, fmt.Errorf("verify evidence: %w", err)
 	}

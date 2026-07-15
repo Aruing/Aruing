@@ -18,7 +18,6 @@ func TestFakeReporterReport(t *testing.T) {
 			HypothesisID: "h_demo",
 			Result:       core.VerdictSupported,
 			Reason:       "后端未就绪",
-			EvidenceIDs:  []string{"e_pods"},
 		}},
 		Suggestions: []string{"检查应用启动日志"},
 	})
@@ -28,9 +27,9 @@ func TestFakeReporterReport(t *testing.T) {
 		RunID:        "run_test",
 		HypothesisID: "h_demo",
 		Result:       core.VerdictSupported,
-		EvidenceIDs:  []string{"e_pods"},
+		EvidenceIDs:  []string{"e_runtime"},
 	}}
-	evidence := []core.Evidence{{ID: "e_pods", RunID: "run_test"}}
+	evidence := []core.Evidence{{ID: "e_runtime", RunID: "run_test"}}
 
 	got, err := reporter.Report(context.Background(), run, verdicts, evidence)
 	if err != nil {
@@ -39,7 +38,7 @@ func TestFakeReporterReport(t *testing.T) {
 	if got.RunID != run.ID || len(got.Conclusions) != 1 {
 		t.Errorf("report relation was not preserved: %#v", got)
 	}
-	if got.Conclusions[0].EvidenceIDs[0] != "e_pods" || got.Suggestions[0] != "检查应用启动日志" {
+	if got.Conclusions[0].EvidenceIDs[0] != "e_runtime" || got.Suggestions[0] != "检查应用启动日志" {
 		t.Errorf("report content was not preserved: %#v", got)
 	}
 
@@ -50,7 +49,7 @@ func TestFakeReporterReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build report again: %v", err)
 	}
-	if again.Conclusions[0].EvidenceIDs[0] != "e_pods" || again.Suggestions[0] != "检查应用启动日志" {
+	if again.Conclusions[0].EvidenceIDs[0] != "e_runtime" || again.Suggestions[0] != "检查应用启动日志" {
 		t.Errorf("report template was mutated: %#v", again)
 	}
 }
@@ -96,7 +95,6 @@ func TestFakeReporterValidate(t *testing.T) {
 			name: "unknown evidence",
 			report: core.Report{Conclusions: []core.Conclusion{{
 				HypothesisID: "h_test",
-				EvidenceIDs:  []string{"e_unknown"},
 			}}},
 			verdicts: []core.Verdict{{
 				RunID:        "run_test",
@@ -118,7 +116,6 @@ func TestFakeReporterValidate(t *testing.T) {
 			name: "foreign evidence",
 			report: core.Report{Conclusions: []core.Conclusion{{
 				HypothesisID: "h_test",
-				EvidenceIDs:  []string{"e_test"},
 			}}},
 			verdicts: []core.Verdict{{
 				RunID:        "run_test",
