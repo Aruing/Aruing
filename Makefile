@@ -8,6 +8,11 @@ BIN_DIR := bin
 BIN := $(BIN_DIR)/$(APP)
 ARGS ?= help
 QUESTION ?= why is demo-api unreachable in default namespace
+GO ?= go
+GOLANGCI_LINT ?= golangci-lint
+GOVULNCHECK ?= govulncheck
+GO_PACKAGES := ./...
+GO_SOURCE_DIRS := cmd internal
 
 .PHONY: run help version
 
@@ -22,17 +27,50 @@ version:
 
 # ---------------- build -----------------
 
-.PHONY: build test fmt clean
+.PHONY: build test test-ci fmt fmt-check vet lint lint-fix tidy-check vuln check clean
 
 build:
 	@mkdir -p "$(BIN_DIR)"
-	go build -o "$(BIN)" $(CMD)
+	$(GO) build -o "$(BIN)" $(CMD)
 
 test:
-	go test ./...
+	$(GO) test $(GO_PACKAGES)
+
+test-ci:
+	$(GO) test -race -shuffle=on -count=1 $(GO_PACKAGES)
 
 fmt:
-	gofmt -w cmd internal
+	gofmt -w $(GO_SOURCE_DIRS)
+
+fmt-check:
+	@files="$$(gofmt -l $(GO_SOURCE_DIRS))"; \
+	if [ -n "$$files" ]; then \
+		echo "$$files"; \
+		exit 1; \
+	fi
+
+vet:
+	$(GO) vet $(GO_PACKAGES)
+
+lint:
+	$(GOLANGCI_LINT) run $(GO_PACKAGES)
+
+lint-fix:
+	$(GOLANGCI_LINT) run --fix $(GO_PACKAGES)
+
+tidy-check:
+	$(GO) mod tidy
+	git diff --exit-code -- go.mod go.sum
+	@files="$$(git ls-files --others --exclude-standard -- go.mod go.sum)"; \
+	if [ -n "$$files" ]; then \
+		echo "$$files"; \
+		exit 1; \
+	fi
+
+vuln:
+	$(GOVULNCHECK) $(GO_PACKAGES)
+
+check: tidy-check build test-ci fmt-check vet lint vuln
 
 clean:
 	rm -rf "$(BIN_DIR)"
