@@ -125,16 +125,16 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	// 当前按计划顺序执行，先保证证据链闭合，再单独设计任务依赖调度
 	evidence := make([]core.Evidence, 0, len(plan.Tasks))
 	for _, task := range plan.Tasks {
-		evidenceID, err := o.factory.NewID("e")
-		if err != nil {
-			return core.Report{}, fmt.Errorf("create evidence ID for task %q: %w", task.ID, err)
+		evidenceID, idErr := o.factory.NewID("e")
+		if idErr != nil {
+			return core.Report{}, fmt.Errorf("create evidence ID for task %q: %w", task.ID, idErr)
 		}
 		if evidenceID == "" {
 			return core.Report{}, fmt.Errorf("create evidence ID for task %q: ID is required", task.ID)
 		}
-		item, err := o.executor.Execute(ctx, task)
-		if err != nil {
-			return core.Report{}, fmt.Errorf("execute task %q: %w", task.ID, err)
+		item, executeErr := o.executor.Execute(ctx, task)
+		if executeErr != nil {
+			return core.Report{}, fmt.Errorf("execute task %q: %w", task.ID, executeErr)
 		}
 		if item == nil {
 			return core.Report{}, fmt.Errorf("execute task %q: evidence is required", task.ID)
