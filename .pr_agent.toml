@@ -1,6 +1,9 @@
 # PR-Agent 配置
 # 文档：https://github.com/the-pr-agent/pr-agent/blob/main/pr_agent/settings/configuration.toml
+#
+# 通过 OpenAI 兼容供应商调用，BaseURL 走 OPENAI_API_BASE env
+# model 加 openai/ 前缀让 litellm 走 OpenAI 兼容协议
 
 [config]
-model = "gpt-4.1-mini"
-fallback_model = "gpt-4o-mini"
+model = "openai/gpt-5.6-sol"
+fallback_models = []
