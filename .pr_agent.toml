@@ -1,0 +1,17 @@
+# PR-Agent 配置
+# 文档：https://github.com/the-pr-agent/pr-agent/blob/main/pr_agent/settings/configuration.toml
+#
+# 通过 OpenAI 兼容供应商调用，BaseURL 走 OPENAI_API_BASE env
+# model 加 openai/ 前缀让 litellm 走 OpenAI 兼容协议
+
+[config]
+# 本代理 OpenAI 系上游异常、DeepSeek/Kimi/Qwen/GLM/MiniMax/Mimo 配额耗尽；
+# grok-4.5-high 上游对大 prompt 返回 400；
+# gemini-3-pro-preview 实测能处理完整 pr-agent 大 prompt + UA 覆盖 bypass WAF
+model = "openai/gemini-3-pro-preview"
+fallback_models = []
+custom_model_max_tokens = 128000
+
+[litellm]
+# 本代理 WAF 拦 litellm 默认带的 `OpenAI/Python ...` UA，覆盖掉
+extra_headers = '{"User-Agent":"litellm/1.99.0"}'
