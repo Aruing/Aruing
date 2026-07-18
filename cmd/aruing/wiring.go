@@ -1,27 +1,42 @@
-// 假闭环组装模块负责为命令行入口连接当前所有确定性实现
+// 命令行入口的依赖组装模块
 //
-// 这里集中创建假问题、目标、计划、判断和报告模板，并注册假工具
-// 真实模块接入后应逐个替换对应依赖，不把组装细节移动到命令解析函数
+// 这一层负责把"用哪些角色实例组装 Orchestrator"集中收敛：
+// - 在没有 LLM 配置时，所有角色使用 fake，假闭环继续可跑、可测（CI、make test 默认走这条路径）
+// - 在 LLM 配置齐全时，把 parser 换成 LLMParser，其它角色仍走 fake，按计划逐个替换
+//
+// 不在本文件引 internal/config（计划放在工作单元 #8），当下只读 env，配置收敛留给后续阶段
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"aruing/internal/agent"
 	"aruing/internal/core"
+	"aruing/internal/llm"
 	"aruing/internal/tools"
 )
 
-// 使用统一元数据工厂组装可运行的完整假闭环
-// 返回值只用于当前命令行最小闭环，不代表真实模块的最终配置方式
-func newFakeOrchestrator(factory *core.Factory) (*agent.Orchestrator, error) {
-	// 假模板仍使用真实格式编号，避免命令行阶段形成第二套身份约定
+// 描述组装编排器所需的角色集合
+// fake 与 real 角色都满足同一接口，调用方按是否提供 LLM 配置自由替换 parser
+type orchestratorRoles struct {
+	parser   *agent.FakeParser
+	resolver *agent.FakeResolver
+	planner  *agent.FakePlanner
+	verifier *agent.FakeVerifier
+	reporter *agent.FakeReporter
+	registry *tools.Registry
+}
+
+// 构建全 fake 角色集合 + 工具注册表，所有角色共享一份 ID 表
+// 假角色之间共享身份约定，避免 wiring 层散落两套编号规则
+func buildFakeRoles(factory *core.Factory) (orchestratorRoles, error) {
 	ids := make(map[string]string, 7)
 	for _, prefix := range []string{"query", "node", "target", "h", "t", "v", "rep"} {
 		id, err := factory.NewID(prefix)
 		if err != nil {
-			return nil, fmt.Errorf("create %s ID: %w", prefix, err)
+			return orchestratorRoles{}, fmt.Errorf("create %s ID: %w", prefix, err)
 		}
 		ids[prefix] = id
 	}
@@ -84,19 +99,60 @@ func newFakeOrchestrator(factory *core.Factory) (*agent.Orchestrator, error) {
 		CreatedAt:   now,
 	})
 
-	// 工具注册失败属于启动配置错误，应在处理用户问题前直接返回
 	registry := tools.NewRegistry()
 	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
-		return nil, fmt.Errorf("register fake tool: %w", err)
+		return orchestratorRoles{}, fmt.Errorf("register fake tool: %w", err)
+	}
+
+	return orchestratorRoles{
+		parser:   parser,
+		resolver: resolver,
+		planner:  planner,
+		verifier: verifier,
+		reporter: reporter,
+		registry: registry,
+	}, nil
+}
+
+// 根据 LLM 配置是否齐全决定 parser 角色：
+// 配置齐全则用 LLMParser 替换 fake parser，其它角色继续走 fake
+// 配置不全直接退化到全 fake，保证 make test、CI 在无凭据时仍可运行
+func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestrator, error) {
+	roles, err := buildFakeRoles(factory)
+	if err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(llmCfg.BaseURL) == "" ||
+		strings.TrimSpace(llmCfg.APIKey) == "" ||
+		strings.TrimSpace(llmCfg.Model) == "" {
+		return agent.NewOrchestrator(
+			roles.parser,
+			roles.resolver,
+			roles.planner,
+			tools.NewDispatcher(roles.registry),
+			roles.verifier,
+			roles.reporter,
+			factory,
+		), nil
+	}
+
+	client, err := llm.NewClient(llmCfg)
+	if err != nil {
+		return nil, fmt.Errorf("build llm client: %w", err)
+	}
+	parser, err := agent.NewLLMParser(client, factory)
+	if err != nil {
+		return nil, fmt.Errorf("build llm parser: %w", err)
 	}
 
 	return agent.NewOrchestrator(
 		parser,
-		resolver,
-		planner,
-		tools.NewDispatcher(registry),
-		verifier,
-		reporter,
+		roles.resolver,
+		roles.planner,
+		tools.NewDispatcher(roles.registry),
+		roles.verifier,
+		roles.reporter,
 		factory,
 	), nil
 }
