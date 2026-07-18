@@ -1,0 +1,6 @@
+# PR-Agent 配置
+# 文档：https://github.com/the-pr-agent/pr-agent/blob/main/pr_agent/settings/configuration.toml
+
+[config]
+model = "gpt-4.1-mini"
+fallback_model = "gpt-4o-mini"

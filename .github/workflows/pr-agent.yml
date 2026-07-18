@@ -1,0 +1,27 @@
+name: PR Agent
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: pr-agent-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr_agent:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Run PR Agent
+        uses: the-pr-agent/pr-agent@v0.39.0
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
