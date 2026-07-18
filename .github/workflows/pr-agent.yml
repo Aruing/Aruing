@@ -23,16 +23,16 @@ jobs:
       - name: Run PR Agent
         uses: the-pr-agent/pr-agent@v0.39.0
         env:
-          # 凭据：key 进 secret，GITHUB_TOKEN 自动注入
+          # 凭据
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # OpenAI 兼容供应商：pr-agent 用双下划线解析 [openai] section
+          # OpenAI 兼容供应商：双下划线映射 [openai] section（pr-agent 的 Dynaconf envvar_prefix=False）
           OPENAI__API_BASE: https://newapi.pytrio.asia/v1
 
-          # 配置覆盖（env 优先级最高，避免 .pr_agent.toml 在 PR 分支还没合到 main 时不生效）
-          PR_AGENT__CONFIG__MODEL: openai/gpt-5.6-sol
-          PR_AGENT__CONFIG__FALLBACK_MODELS: '[]'
+          # 配置覆盖：env var 优先级最高，仅在 .pr_agent.toml 尚未合到 main 前兜底
+          CONFIG__MODEL: openai/gpt-5.6-sol
+          CONFIG__FALLBACK_MODELS: '[]'
 
-          # 默认 pr-agent 在 synchronize 事件不跑任何命令，这里显式打开
-          PR_AGENT__GITHUB_APP__HANDLE_PUSH_TRIGGER: 'true'
+          # 默认 pr-agent 在 synchronize 事件不跑命令，这里打开
+          GITHUB_APP__HANDLE_PUSH_TRIGGER: 'true'
