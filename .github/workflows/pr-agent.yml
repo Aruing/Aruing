@@ -20,6 +20,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Debug curl proxy from runner
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+        run: |
+          set -x
+          curl -sS -X POST https://newapi.pytrio.asia/v1/chat/completions \
+            -H "Authorization: Bearer $OPENAI_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"gemini-3-pro-preview","messages":[{"role":"user","content":"say hi"}],"max_tokens":16}'
+          echo
+          echo "--- second try with bigger body ---"
+          curl -sS -X POST https://newapi.pytrio.asia/v1/chat/completions \
+            -H "Authorization: Bearer $OPENAI_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"model":"gemini-3-pro-preview","temperature":0,"response_format":{"type":"json_object"},"messages":[{"role":"system","content":"You are PR-Reviewer."},{"role":"user","content":"Review: +name: PR Agent"}],"max_tokens":64}'
+          echo
       - name: Run PR Agent
         uses: the-pr-agent/pr-agent@v0.39.0
         env:
