@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"aruing/internal/core"
+	"aruing/internal/llm"
 )
 
 // 对外展示的版本号，发布时应作为命令行输出的唯一来源
@@ -117,7 +118,14 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		UpdatedAt: now,
 	}
 
-	orchestrator, err := newFakeOrchestrator(factory)
+	// LLM 配置只读 env，未配齐全时 newOrchestrator 自动退化到全 fake
+	// 等工作单元 #8 引入 internal/config 时再统一收敛，避免本阶段提前耦合
+	llmCfg := llm.Config{
+		BaseURL: os.Getenv("ARUING_LLM_BASE_URL"),
+		APIKey:  os.Getenv("ARUING_LLM_API_KEY"),
+		Model:   os.Getenv("ARUING_LLM_MODEL"),
+	}
+	orchestrator, err := newOrchestrator(factory, llmCfg)
 	if err != nil {
 		return fmt.Errorf("build orchestrator: %w", err)
 	}
