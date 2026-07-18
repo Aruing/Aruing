@@ -31,9 +31,11 @@ jobs:
           OPENAI__API_BASE: https://newapi.pytrio.asia/v1
 
           # 配置覆盖：env var 优先级最高，仅在 .pr_agent.toml 尚未合到 main 前兜底
-          CONFIG__MODEL: openai/gpt-5.6-sol
+          # 经验证：本代理的 OpenAI 系模型当前上游异常，DeepSeek/Kimi/Qwen/GLM/MiniMax/Mimo 配额已耗尽
+          # gemini-3-pro-preview 实测可用且标准输出，故选它
+          CONFIG__MODEL: openai/gemini-3-pro-preview
           CONFIG__FALLBACK_MODELS: '[]'
-          # gpt-5.6-sol 不在 pr-agent 内置 MAX_TOKENS 表，显式声明模型 token 上限
+          # gemini-3-pro-preview 不在 pr-agent 内置 MAX_TOKENS 表，显式声明
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: '128000'
 
           # 默认 pr-agent 在 synchronize 事件不跑命令，这里打开
