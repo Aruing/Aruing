@@ -52,6 +52,9 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
+          # 最新预编译包(v2.12.2)用 go1.25 构建，无法 lint go 1.26 模块
+          # 改为从源码用 setup-go 安装的 go 1.26 构建，规避工具链版本滞后
+          install-mode: goinstall
           version: v2.12.2
 
   security:
