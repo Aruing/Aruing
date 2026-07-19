@@ -21,6 +21,19 @@ import (
 //go:embed prompts/parser.md
 var parserPrompt string
 
+// 业务级重试次数上限：模型可能偶发产出结构合法但语义违规的输出（如 ref 重复）
+// 每次 attempt 内部 LLM 客户端还会按其配置做网络层重试，所以这里只覆盖"持续不合规"
+const maxParseAttempts = 3
+
+// 业务级重试耗尽时返回
+//
+// 调用方可以据此区分"网络抖动"和"模型持续产出不合规输出"：
+//   - 前者由 internal/llm.Client 自己重试后返回 transport 类 error
+//   - 后者由本包用 ErrLLMOutputInconsistent 包裹，提示 prompt 或模型能力问题
+//
+// errors.Is(err, ErrLLMOutputInconsistent) 为 true 时，建议检查 prompt 是否被改坏或更换模型
+var ErrLLMOutputInconsistent = errors.New("llm output inconsistent after retries")
+
 // 用大模型把用户问题解析为结构化线索的解析器
 //
 // 持有不可变依赖（模型客户端、元数据工厂、prompt 文本），可被多次运行复用
@@ -44,7 +57,10 @@ func NewLLMParser(client llm.Client, factory *core.Factory) (*LLMParser, error) 
 }
 
 // 把原始问题交给大模型，返回绑定当前运行编号的问题结构
+//
 // 系统编号（query/node/edge）由工厂统一生成，模型只负责产出线索内容
+// 模型若返回 ref 重复、缺 goal 等语义违规输出，会在业务级重试内重新请求；
+// 重试 maxParseAttempts 次仍不合规则返回 ErrLLMOutputInconsistent
 func (p *LLMParser) Parse(ctx context.Context, run core.Run) (core.Query, error) {
 	if ctx == nil {
 		return core.Query{}, errors.New("parser requires a context")
@@ -67,19 +83,46 @@ func (p *LLMParser) Parse(ctx context.Context, run core.Run) (core.Query, error)
 		return core.Query{}, fmt.Errorf("create query ID: %w", err)
 	}
 
-	var output parserOutput
 	req := llm.Request{
 		System: p.prompt,
 		User:   run.Question,
 	}
-	if err := p.client.GenerateJSON(ctx, req, &output); err != nil {
-		return core.Query{}, fmt.Errorf("parse question with LLM: %w", err)
+
+	// 业务级重试：模型偶尔会忽略硬约束（如重复 ref），重新请求通常能恢复
+	// 网络层错误由 llm.Client 自己重试，本循环只覆盖"模型合规性"问题
+	var lastOutput parserOutput
+	var lastValidateErr error
+	for attempt := 0; attempt < maxParseAttempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return core.Query{}, fmt.Errorf("parse query: %w", err)
+		}
+
+		// 每轮用零值 output 接收，避免上一轮残留字段污染下一轮校验
+		var output parserOutput
+		if gErr := p.client.GenerateJSON(ctx, req, &output); gErr != nil {
+			// 运输层错误（含 LLM 客户端自身的重试耗尽）直接上抛，不在业务层重试
+			return core.Query{}, fmt.Errorf("parse question with LLM: %w", gErr)
+		}
+
+		if vErr := validateParserOutput(output); vErr != nil {
+			lastOutput = output
+			lastValidateErr = vErr
+			continue
+		}
+
+		return p.fillQuery(run, queryID, output)
 	}
 
-	if err := validateParserOutput(output); err != nil {
-		return core.Query{}, fmt.Errorf("parse output: %w", err)
-	}
+	// 重试耗尽：把最后一次产出和原因带出去，方便定位是 prompt 还是模型能力问题
+	return core.Query{}, fmt.Errorf("%w: last error: %v, last output: %+v",
+		ErrLLMOutputInconsistent, lastValidateErr, lastOutput)
+}
 
+// 把校验通过的模型输出回填为带系统编号的 Query
+//
+// 模型用 ref 引用节点，回填时建立 ref→id 映射供 edge 解析使用
+// 校验已保证 ref 唯一，此处不再重复查重；edge.From/To 仍需查表以防模型越界引用
+func (p *LLMParser) fillQuery(run core.Run, queryID string, output parserOutput) (core.Query, error) {
 	query := core.Query{
 		ID:        queryID,
 		RunID:     run.ID,
@@ -88,7 +131,6 @@ func (p *LLMParser) Parse(ctx context.Context, run core.Run) (core.Query, error)
 		CreatedAt: p.factory.Now(),
 	}
 
-	// 模型用 ref 引用节点，回填系统编号时建立 ref->id 映射，供后续 edge 解析使用
 	refToID := make(map[string]string, len(output.Nodes))
 	for _, node := range output.Nodes {
 		id, err := p.factory.NewID("node")
@@ -137,6 +179,13 @@ func (p *LLMParser) Parse(ctx context.Context, run core.Run) (core.Query, error)
 }
 
 // 校验模型输出满足后续模块的最小契约，避免半成品进入诊断流
+//
+// 校验项：
+//   - goal 非空
+//   - nodes 至少 1 个
+//   - 每个 node.ref 非空且唯一（重复 ref 会让回填静默覆盖，造成上下文关系混乱）
+//
+// 缺失或重复都返回错误，调用方（Parse）会触发业务级重试
 func validateParserOutput(out parserOutput) error {
 	if strings.TrimSpace(out.Goal) == "" {
 		return errors.New("goal is required")
@@ -144,10 +193,15 @@ func validateParserOutput(out parserOutput) error {
 	if len(out.Nodes) == 0 {
 		return errors.New("at least one node is required")
 	}
+	seen := make(map[string]struct{}, len(out.Nodes))
 	for i, node := range out.Nodes {
 		if strings.TrimSpace(node.Ref) == "" {
 			return fmt.Errorf("node[%d] ref is required", i)
 		}
+		if _, dup := seen[node.Ref]; dup {
+			return fmt.Errorf("node[%d] ref %q is duplicated", i, node.Ref)
+		}
+		seen[node.Ref] = struct{}{}
 	}
 	return nil
 }
