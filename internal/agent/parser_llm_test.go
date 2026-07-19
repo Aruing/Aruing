@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"aruing/internal/core"
@@ -206,16 +208,17 @@ func TestLLMParserGenerateError(t *testing.T) {
 	}
 }
 
-// 模型返回缺少 goal 或缺少节点应被 validateParserOutput 拦下
+// 模型返回缺 goal、缺节点、缺 ref 或 ref 重复都应触发业务级重试，最终 ErrLLMOutputInconsistent
 func TestLLMParserInvalidOutput(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
-		want string
+		want string // 期望 error 链中包含的语义片段
 	}{
 		{name: "empty goal", body: `{"goal":"","nodes":[{"ref":"n1","type":"r","text":"x"}]}`, want: "goal"},
 		{name: "empty nodes", body: `{"goal":"x","nodes":[]}`, want: "node"},
 		{name: "node missing ref", body: `{"goal":"x","nodes":[{"ref":"","type":"r","text":"x"}]}`, want: "ref"},
+		{name: "duplicated ref", body: `{"goal":"x","nodes":[{"ref":"n1","type":"r","text":"a"},{"ref":"n1","type":"r","text":"b"}]}`, want: "duplicated"},
 	}
 
 	for _, test := range tests {
@@ -227,15 +230,136 @@ func TestLLMParserInvalidOutput(t *testing.T) {
 			parser := mustNewLLMParser(t, client)
 			_, err := parser.Parse(context.Background(), core.Run{ID: "run_test", Question: "x"})
 			if err == nil {
-				t.Fatal("error = nil, want output validation failure")
+				t.Fatal("error = nil, want inconsistency error")
 			}
-			if !strings.Contains(err.Error(), "parse output") {
-				t.Errorf("error = %q, want parse output wrapping", err)
+			// 业务重试耗尽：调用方靠 errors.Is 识别，error 文本里要带原始校验原因
+			if !errors.Is(err, ErrLLMOutputInconsistent) {
+				t.Errorf("error = %q, want errors.Is ErrLLMOutputInconsistent", err)
 			}
 			if !strings.Contains(err.Error(), test.want) {
 				t.Errorf("error = %q, want containing %q", err, test.want)
 			}
 		})
+	}
+}
+
+// 模型偶发产出重复 ref 后第二次自愈，应在重试次数内成功，并只发 2 次请求
+func TestLLMParserDuplicateRefRetry(t *testing.T) {
+	dirty := `{"goal":"x","nodes":[{"ref":"n1","type":"r","text":"a"},{"ref":"n1","type":"r","text":"b"}]}`
+	clean := `{"goal":"x","nodes":[{"ref":"n1","type":"r","text":"a"},{"ref":"n2","type":"r","text":"b"}],"edges":[{"from":"n1","to":"n2","type":"rel"}]}`
+
+	calls := 0
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			writeChatCompletion(w, dirty)
+			return
+		}
+		writeChatCompletion(w, clean)
+	})
+	parser := mustNewLLMParser(t, client)
+
+	query, err := parser.Parse(context.Background(), core.Run{ID: "run_test", Question: "x"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if calls != 2 {
+		t.Errorf("LLM calls = %d, want 2 (first dirty, retry clean)", calls)
+	}
+	if len(query.Nodes) != 2 || len(query.Edges) != 1 {
+		t.Errorf("query = %+v, want 2 nodes + 1 edge", query)
+	}
+	// 第二个节点的 text 必须是干净输出里的 "b"，证明脏的那次被丢掉
+	if query.Nodes[1].Text != "b" {
+		t.Errorf("node[1] Text = %q, want b (clean retry output)", query.Nodes[1].Text)
+	}
+}
+
+// 连续 maxParseAttempts 次都返回重复 ref 应返回 ErrLLMOutputInconsistent，且恰好调用 3 次
+func TestLLMParserRetryExhausted(t *testing.T) {
+	dirty := `{"goal":"x","nodes":[{"ref":"n1","type":"r","text":"a"},{"ref":"n1","type":"r","text":"b"}]}`
+
+	calls := 0
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		writeChatCompletion(w, dirty)
+	})
+	parser := mustNewLLMParser(t, client)
+
+	_, err := parser.Parse(context.Background(), core.Run{ID: "run_test", Question: "x"})
+	if err == nil {
+		t.Fatal("error = nil, want inconsistency error")
+	}
+	if !errors.Is(err, ErrLLMOutputInconsistent) {
+		t.Errorf("error = %q, want errors.Is ErrLLMOutputInconsistent", err)
+	}
+	if !strings.Contains(err.Error(), "duplicated") {
+		t.Errorf("error = %q, want containing duplicated", err)
+	}
+	if calls != maxParseAttempts {
+		t.Errorf("LLM calls = %d, want %d", calls, maxParseAttempts)
+	}
+}
+
+// 运输层错误（如 HTTP 400 不可重试）不应触发业务级重试，直接返回
+// 选用 400 而不是 500：500 在 llm.Client 内部仍会被重试，calls 不易断言；
+// 400 是 OpenAI 协议的不可重试错误，能精确验证"Parser 不把 transport 错误当业务重试"
+func TestLLMParserTransportErrorNotRetried(t *testing.T) {
+	calls := 0
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"bad request","type":"invalid_request_error","code":"invalid_api_key"}}`))
+	})
+	parser := mustNewLLMParser(t, client)
+
+	_, err := parser.Parse(context.Background(), core.Run{ID: "run_test", Question: "x"})
+	if err == nil {
+		t.Fatal("error = nil, want transport error")
+	}
+	if errors.Is(err, ErrLLMOutputInconsistent) {
+		t.Errorf("error classified as inconsistency, want transport: %q", err)
+	}
+	if !strings.Contains(err.Error(), "parse question with LLM") {
+		t.Errorf("error = %q, want transport wrapping", err)
+	}
+	if calls != 1 {
+		t.Errorf("LLM calls = %d, want 1 (transport errors not business-retried)", calls)
+	}
+}
+
+// 业务重试中上下文取消应立即停，不再发下一次请求
+//
+// 让 mock 在第一次返回后自己调用 cancel，取消时机完全确定：
+//
+//	第一次 HTTP 调用完成 → mock 调 cancel → Parse 进入下一次循环开头 → ctx.Err() 命中 → 返回
+//
+// 这样 LLM 调用次数必然为 1，严格小于 maxParseAttempts，断言才有意义。
+//
+// calls 用 atomic，避免 mock handler goroutine 与 test goroutine 之间的数据竞争。
+func TestLLMParserContextCancelMidRetry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dirty := `{"goal":"x","nodes":[{"ref":"n1","type":"r","text":"a"},{"ref":"n1","type":"r","text":"b"}]}`
+
+	var calls atomic.Int32
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			// 第一次返回后立即取消，下一次循环开头必然命中 ctx.Err()
+			defer cancel()
+		}
+		writeChatCompletion(w, dirty)
+	})
+	parser := mustNewLLMParser(t, client)
+
+	_, err := parser.Parse(ctx, core.Run{ID: "run_test", Question: "x"})
+	if err == nil {
+		t.Fatal("error = nil, want context cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %q, want errors.Is(context.Canceled)", err)
+	}
+	if got := int(calls.Load()); got >= maxParseAttempts {
+		t.Errorf("LLM calls = %d, want < %d (cancellation should stop the loop early)", got, maxParseAttempts)
 	}
 }
 
