@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"aruing/internal/core"
@@ -328,31 +329,37 @@ func TestLLMParserTransportErrorNotRetried(t *testing.T) {
 }
 
 // 业务重试中上下文取消应立即停，不再发下一次请求
+//
+// 让 mock 在第一次返回后自己调用 cancel，取消时机完全确定：
+//
+//	第一次 HTTP 调用完成 → mock 调 cancel → Parse 进入下一次循环开头 → ctx.Err() 命中 → 返回
+//
+// 这样 LLM 调用次数必然为 1，严格小于 maxParseAttempts，断言才有意义。
+//
+// calls 用 atomic，避免 mock handler goroutine 与 test goroutine 之间的数据竞争。
 func TestLLMParserContextCancelMidRetry(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
 	dirty := `{"goal":"x","nodes":[{"ref":"n1","type":"r","text":"a"},{"ref":"n1","type":"r","text":"b"}]}`
 
-	calls := 0
+	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		calls++
+		if calls.Add(1) == 1 {
+			// 第一次返回后立即取消，下一次循环开头必然命中 ctx.Err()
+			defer cancel()
+		}
 		writeChatCompletion(w, dirty)
 	})
 	parser := mustNewLLMParser(t, client)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	// 用 done 同步：第一次请求返回后立即 cancel，让循环到第 2 次前命中 ctx.Err()
-	done := make(chan struct{})
-	go func() {
-		_, _ = parser.Parse(ctx, core.Run{ID: "run_test", Question: "x"})
-		close(done)
-	}()
-
-	// 等第一次请求完成（dirty 已被消费），然后取消
-	// 注意：parser 是同步调用，这里不能精确插队在两次循环之间，但 ctx 取消一定能在下次循环开头被捕获
-	cancel()
-	<-done
-
-	if calls > maxParseAttempts {
-		t.Errorf("LLM calls = %d, want <= %d after ctx cancel", calls, maxParseAttempts)
+	_, err := parser.Parse(ctx, core.Run{ID: "run_test", Question: "x"})
+	if err == nil {
+		t.Fatal("error = nil, want context cancellation error")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %q, want errors.Is(context.Canceled)", err)
+	}
+	if got := int(calls.Load()); got >= maxParseAttempts {
+		t.Errorf("LLM calls = %d, want < %d (cancellation should stop the loop early)", got, maxParseAttempts)
 	}
 }
 
