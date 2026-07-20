@@ -105,11 +105,20 @@ description: Use when <触发条件>. Triggered by <示例任务>.
 
 ## 更新时机
 
-| 触发 | 更新动作 |
-| --- | --- |
-| PR 改了架构 / 完成工作单元 | 更新 `docs/project-state.md` 工作单元表 + 已完成 PR 列表 |
-| PR 改了 `internal/core/*.go` exported type 或 Orchestrator | 检查 `docs/architecture.md` 数据结构段或模块职责段 |
-| 创建新 skill | 遵守本 skill 的 §Skill 自身规范 |
-| 阶段切换（如 beta2 → beta3） | 重写 `docs/project-state.md`，更新 `README.md` 当前阶段段 |
+文档与代码改动放在**同一 PR** 内同步更新，不分离。作者负责在自己 PR 内判断该改哪些文档；reviewer 和 pr-agent 检查"该改的有没有改"。
 
-更新文档与代码改动放在同一 PR 内，不分离
+判定 PR 是否动架构 / 属于什么类型的方法见 `aruing-pr-description` skill；本表只列"触发条件 → 该改哪份文档"的映射。
+
+| 触发条件（任一即触发） | 该改的文档 | 改什么 |
+| --- | --- | --- |
+| 改 `internal/core/*.go` 的 exported type 字段或新增结构 | `architecture.md` 核心数据结构段 | 同步字段表 |
+| 改 `internal/agent/orchestrator.go` 角色接口签名 | `architecture.md` 模块职责段 + 诊断流程段 | 同步职责表 / 流程图 |
+| 新增 `internal/<新包>/` | `architecture.md` 模块职责表 | 加一行 |
+| 新增 / 替换角色实现（如 FakeParser → LLMParser） | `project-state.md` 工作单元表 + 已完成 PR | 状态置 ✅，加 PR 编号 |
+| 新增 / 修改 / 删除硬约束 | `architecture.md` 硬约束段；若是关键的 3~5 条，同步 `README.md` 关键约束摘要 + `project-state.md` 当前硬约束摘要段 | 三处联动 |
+| 改信任边界（如新增证据来源类型） | `architecture.md` 信任边界段 | 同步 |
+| 完成工作单元 | `project-state.md` 工作单元表 + 已完成 PR 列表 + 下一步 | 三处同步 |
+| 阶段切换（如 beta2 → beta3） | `project-state.md`（重写）+ `README.md` 当前阶段段 | 两处联动 |
+| 创建 / 修改 skill | 本 skill 的 §Skill 自身规范；若改的是文档规范本身，同步本 skill | 遵守元规范 |
+
+不确定某项改动是否影响文档时，**先在 PR 描述里说明**（"本 PR 不影响架构文档，因为 ..."），让 reviewer 显式确认，而不是默认漏改。
