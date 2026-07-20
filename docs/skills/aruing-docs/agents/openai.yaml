@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing Docs"
+  short_description: "仓库内文档分工与规范，含各文档内容结构、skill 自身规范、更新时机"
+  default_prompt: "Use $aruing-docs when adding, updating, reviewing, or restructuring documentation files in this repository, including creating new skills."
+
+policy:
+  allow_implicit_invocation: true
