@@ -37,7 +37,7 @@ flowchart LR
 | `internal/agent` | 推理角色：`Parser` / `Resolver` / `Planner` / `Verifier` / `Reporter` 及 `Orchestrator` 编排 | 不直接查集群、不持久化 |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
 | `internal/tools` | `Tool` 接口、`Registry`、`Dispatcher`、`FakeListPodsTool` | 不判断业务、不做推理 |
-| `internal/tools/k8s` | 真实 Kubernetes 只读工具（占位，等接入 client-go） | 当前未实现 |
+| `internal/tools/k8s` | Kubernetes 工具（占位，等接入 client-go）；接口不限定读写，当前阶段只实现读工具 | 当前未实现 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
 | `internal/store` | 持久化诊断状态和证据（占位） | 当前未实现 |
@@ -107,6 +107,6 @@ Run ──RunID──→ Query ──NodeID──→ Target
 9. prompt 必须从外部文件加载，不写死在代码里（`//go:embed` 满足该约束）
 10. LLM 输出的节点 / 关系用局部 ref，系统编号由 `core.Factory` 统一回填
 11. 多节点不得在 Parser 实现层做 `len==1` 限制，`core.Query.Nodes` / `Edges` 保持切片
-12. 工具只读，禁止 `delete / update / patch / exec` 等写操作
+12. 工具接口不限定读写；当前阶段只注册读工具，读写策略由注册和调度层面控制（后续"辅助修复"阶段会加入需用户确认的写工具）
 
 与约束冲突时按 `arui-note` 既有"禁止回退"流程处理：未经维护者重新批准不得违反。

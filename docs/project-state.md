@@ -37,7 +37,7 @@
 
 ## 下一步
 
-`feat/k8s-tools`：接入 client-go 实现 `internal/tools/k8s`，提供第一批只读工具（`list_pods` / `get_service` / `get_endpoints` / `get_events` / `get_logs` 等）。
+`feat/k8s-tools`：接入 client-go 实现 `internal/tools/k8s`，提供第一批读工具（覆盖 Pod / Service / Deployment / Event / 日志查询）。
 
 理由：`#4 Resolver` 真实化需要真实 K8s 工具查集群确认 `Target`；先有工具，才能在 Resolver 多轮协议设计中真正端到端验证，避免设计了协议却没法跑。
 
@@ -50,7 +50,7 @@
 - 模型输出不能冒充 `Evidence`
 - `Verdict` 必须引用 `Evidence`
 - prompt 从文件加载（`//go:embed`），不写死代码
-- 工具只读
+- 工具接口不限定读写；当前阶段只注册读工具
 
 ## 预留问题入口
 
