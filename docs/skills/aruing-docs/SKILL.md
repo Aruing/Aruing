@@ -81,7 +81,7 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 | 结构 | `SKILL.md`（frontmatter + 规则正文）+ `agents/openai.yaml`（metadata） |
 | 安装 | `make install-aruing-skills` 同步到 `.agents/skills/`，不要手动复制 |
 | 不 ignore | `docs/skills/` 必须进版本控制，不要加 `.gitignore` |
-| 不 ignore | `.agents/` 由 Makefile 管理，按 `AGENTS.md` 约束不提交 |
+| ignore | `.agents/` 由 Makefile 管理，按 `AGENTS.md` 约束不提交，应加入 `.gitignore` |
 
 `SKILL.md` frontmatter 必须含：
 
@@ -101,7 +101,7 @@ description: Use when <触发条件>. Triggered by <示例任务>.
 - AI 看的文档前 20 行必须能让工具抓住本质：项目是什么、当前阶段、下一步
 - 表格 / 列表优先，避免长段落
 - 硬约束用"必须 / 不得"，不用"应该 / 建议"
-- 链接到笔记仓用相对路径（如 `../../arui-note/aruing/plan/`）或文字说明位置，不复制笔记内容
+- 引用笔记仓用文字说明路径位置（如"位于 `arui-note/aruing/plan/`"），不写相对路径链接（笔记仓非本仓库子目录，相对路径在 GitHub 渲染时是死链）；不复制笔记内容
 
 ## 更新时机
 
