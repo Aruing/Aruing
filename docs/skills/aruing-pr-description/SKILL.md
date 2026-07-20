@@ -73,6 +73,20 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 用下面的模板。所有标题必须是 `###`，不允许 `#` 和 `##`
 
+### 7. 创建 PR
+
+把填充好的模板作为 `--body` 传给 `gh pr create`：
+
+```bash
+gh pr create --base main --head <当前分支名> --title "<commit message 主题或一句话概括>" --body "<模板内容>"
+```
+
+- `--title` 用本分支第一个 commit 的主题，或基于工作内容一句话改写
+- `--body` 用第 6 步填好的模板原文
+- 不要在 `--body` 里转义 `###`（GitHub 会正常渲染 markdown）
+- 如果分支还没 push，先 `git push -u origin <分支名>`
+- PR 创建后向用户返回 PR URL
+
 ## 模板
 
 ```markdown
@@ -129,6 +143,6 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 ## 与 pr-agent 的关系
 
 - pr-agent 是**外部评审**，跑在 CI 里，用 LLM 自由生成 describe / review / improve
-- 本 skill 是**作者自检**，在 `gh pr create` 前生成**模板化、约束化**的描述
+- 本 skill 是**作者自检**，生成模板化、约束化的描述并创建 PR
 - 两者互补：本 skill 保证关键信息（类型 / 架构影响 / 破坏性变更）一定暴露；pr-agent 看到这些信息后能做更准的评审
 - 如果 pr-agent 的 `/describe` 与本 skill 输出冲突，以本 skill 输出为准（作者意图优先）
