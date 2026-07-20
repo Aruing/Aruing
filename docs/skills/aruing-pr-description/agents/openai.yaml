@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing PR Description"
+  short_description: "为当前分支生成结构化 PR 描述：类型、架构影响、破坏性变更、文档同步检查"
+  default_prompt: "Use $aruing-pr-description when creating or updating a pull request for this repository."
+
+policy:
+  allow_implicit_invocation: true
