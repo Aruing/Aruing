@@ -1,6 +1,6 @@
 # aruing
 
-云原生 Kubernetes 故障诊断助手。用户用自然语言提问，系统提出故障猜想、调用只读工具收集证据、基于证据生成可追溯的诊断报告。
+云原生 Kubernetes 故障诊断助手。用户用自然语言提问，系统提出故障猜想、调用工具收集证据、基于证据生成可追溯的诊断报告。
 
 ## 当前阶段
 
@@ -47,7 +47,7 @@ export ARUING_LLM_MODEL=gpt-4o-mini
 - 模型输出不能冒充 `Evidence`
 - `Verdict` 必须引用 `Evidence`
 - `Task` 只用通用 `Refs` 关联数据，不增加阶段专用引用字段
-- 工具只读，禁止 `delete / update / exec` 等写操作
+- 工具接口不限定读写；当前阶段只注册读工具，后续"辅助修复"阶段会加入需用户确认的写工具
 
 完整硬约束见 [`docs/architecture.md`](docs/architecture.md#硬约束)。
 
