@@ -39,7 +39,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 3. 识别架构影响
 
-以下任一条件成立时，`### 架构影响` 标"有"，并用一句话简述：
+以下任一条件成立时，`#### 架构影响` 标"有"，并用一句话简述：
 
 - 改了 `internal/core/*.go` 的 exported type 字段或新增结构
 - 改了 `internal/agent/orchestrator.go` 角色接口签名
@@ -52,7 +52,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 4. 识别破坏性变更
 
-以下任一条件成立时，`### 破坏性变更` 标"有"，并简述影响范围：
+以下任一条件成立时，`#### 破坏性变更` 标"有"，并简述影响范围：
 
 - 删除或重命名 exported type / 函数 / 字段
 - 改了 exported 函数签名
@@ -63,7 +63,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 5. 判定该同步哪些文档
 
-按 `aruing-docs` §更新时机 的映射表判断本 PR 是否触发文档同步。在 `### 检查` 段如实反映：
+按 `aruing-docs` §更新时机 的映射表判断本 PR 是否触发文档同步。在 `#### 检查` 段如实反映：
 
 - 触发了哪些文档更新（说明已做）
 - 没触发任何文档更新（说明"不适用"）
@@ -71,7 +71,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 6. 填充模板
 
-用下面的模板。所有标题必须是 `###`，不允许 `#` 和 `##`
+用下面的模板。所有标题必须是 `####`，不允许 `#`、`##`、`###`
 
 ### 7. 创建 PR
 
@@ -83,38 +83,38 @@ gh pr create --base main --head <当前分支名> --title "<commit message 主�
 
 - `--title` 用本分支第一个 commit 的主题，或基于工作内容一句话改写
 - `--body` 用第 6 步填好的模板原文
-- 不要在 `--body` 里转义 `###`（GitHub 会正常渲染 markdown）
+- 不要在 `--body` 里转义 `####`（GitHub 会正常渲染 markdown）
 - 如果分支还没 push，先 `git push -u origin <分支名>`
 - PR 创建后向用户返回 PR URL
 
 ## 模板
 
 ```markdown
-### 类型
+#### 类型
 
 <开放标签，可多个>
 
-### 工作内容
+#### 工作内容
 
 <一句话，不超过 2 行>
 
-### 改动范围
+#### 改动范围
 
 <简短描述改了哪几块，不列具体文件路径；reviewer 直接看 github diff>
 
-### 架构影响
+#### 架构影响
 
 <无 / 有：简述>
 
-### 破坏性变更
+#### 破坏性变更
 
 <无 / 有：简述>
 
-### 检查
+#### 检查
 
 - [ ] 已按 `aruing-docs` §更新时机 同步相关文档（如适用，说明哪些；不适用则写"不适用"）
 
-### 关联
+#### 关联
 
 - 工作单元：<#编号 或 "计划外">
 - 预留问题：<P/L/C/S-x 或 无>
@@ -123,7 +123,7 @@ gh pr create --base main --head <当前分支名> --title "<commit message 主�
 
 ## 约束
 
-- 所有标题必须 `###`，不允许 `#` 和 `##`
+- 所有标题必须 `####`，不允许 `#`、`##`、`###`
 - "工作内容"一句话，不展开细节（细节在 commit message）
 - "改动范围"简短描述，不列具体文件路径
 - "架构影响"和"破坏性变更"必填，"无"也要写明
