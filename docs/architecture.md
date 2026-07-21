@@ -37,7 +37,7 @@ flowchart LR
 | `internal/agent` | 推理角色：`Parser` / `Resolver` / `Planner` / `Verifier` / `Reporter` 及 `Orchestrator` 编排 | 不直接查集群、不持久化 |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
 | `internal/tools` | `Tool` 接口、`Registry`、`Dispatcher`、`FakeListPodsTool` | 不判断业务、不做推理 |
-| `internal/tools/k8s` | Kubernetes 工具（占位，等接入 client-go）；接口不限定读写，当前阶段只实现读工具 | 当前未实现 |
+| `internal/tools/k8s` | Kubernetes 工具（占位）；接口不限定读写，当前阶段只实现读工具 | 当前未实现 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
 | `internal/store` | 持久化诊断状态和证据（占位） | 当前未实现 |

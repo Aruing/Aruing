@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-20（PR #7）
+> 最后更新：2026-07-21（Kubernetes Tool 设计确认；代码未实施）
 
 ## 当前阶段
 
@@ -16,7 +16,8 @@
 | - | PR-Agent 自动评审基建 | ✅ | PR #4 计划外插入，每个 PR 自动评审 |
 | 3 | Parser | ✅ | PR #5 `dc09495` 接 LLM；PR #6 `8fad9ea` 补 ref 校验 + 业务重试 |
 | - | 仓库文档规范 skill | ✅ | PR #7 `aruing-docs` skill |
-| 2 | Kubernetes 工具 | 未开始 | `internal/tools/k8s` 接 client-go |
+| - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
+| 2 | Kubernetes 工具 | 未开始 | 设计已确认：统一 ToolSpec/Registry + 单一 shell-less kubectl Tool；代码未实施 |
 | 4 | Resolver | 未开始 | 多轮协议，最复杂，可能拆 2 PR |
 | 5 | Planner | 未开始 | 依赖 #1 #2 |
 | 6 | Verifier | 未开始 | 依赖 #1 |
@@ -27,6 +28,9 @@
 
 ## 已完成 PR
 
+- #10 fix: correct tool readonly constraint（`fcf8421`）
+- #9 docs: add aruing-pr-description skill（`3775e7e`）
+- #8 docs: add repo documentation per aruing-docs skill（`19b8973`）
 - #7 docs: add aruing-docs skill for repo documentation conventions（`a9b74a8`）
 - #6 fix(parser): validate ref uniqueness and retry on inconsistent LLM output（`8fad9ea`）
 - #5 feat: replace FakeParser with LLMParser（`dc09495`）
@@ -37,9 +41,9 @@
 
 ## 下一步
 
-`feat/k8s-tools`：接入 client-go 实现 `internal/tools/k8s`，提供第一批读工具（覆盖 Pod / Service / Deployment / Event / 日志查询）。
+`feat/k8s-tools`：先建立所有后端共用的 `ToolSpec + Tool + Registry` 调用协议，再实现单一后端级 `k8s` Tool，以结构化 argv 直接调用 kubectl（不经 shell、不枚举资源和子命令）。
 
-理由：`#4 Resolver` 真实化需要真实 K8s 工具查集群确认 `Target`；先有工具，才能在 Resolver 多轮协议设计中真正端到端验证，避免设计了协议却没法跑。
+理由：`#4 Resolver` 既需要真实集群证据，也需要从 Registry 动态发现 Tool 及其 JSON Schema；先建立开放调用协议，避免当前查询范围固化成未来能力上限。完整设计位于 `arui-note/aruing/plan/0.0.1-beta2/2026-7-21.md`。
 
 ## 当前硬约束摘要
 
