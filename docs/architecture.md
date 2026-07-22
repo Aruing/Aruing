@@ -36,8 +36,8 @@ flowchart LR
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
 | `internal/agent` | 推理角色：`Parser` / `Resolver` / `Planner` / `Verifier` / `Reporter` 及 `Orchestrator` 编排 | 不直接查集群、不持久化 |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
-| `internal/tools` | `Tool` 接口、`Registry`、`Dispatcher`、`FakeListPodsTool` | 不判断业务、不做推理 |
-| `internal/tools/k8s` | Kubernetes 工具（占位，等接入 client-go）；接口不限定读写，当前阶段只实现读工具 | 当前未实现 |
+| `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema | 不判断业务、不做推理、不枚举资源/子命令 |
+| `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不接入主编排（当前 wiring 仍只注册假工具）；读写策略由上层 Policy/注册控制 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
 | `internal/store` | 持久化诊断状态和证据（占位） | 当前未实现 |
@@ -58,7 +58,8 @@ flowchart LR
 | `Target` | `ID / RunID / NodeID / Type / Attrs / EvidenceIDs`；定位阶段在真实环境中确认的对象 |
 | `Hypothesis` | `ID / RunID / Statement / Reason / ExpectedSignals`；待证据验证的候选原因 |
 | `Task` | `ID / RunID / Refs / ToolName / Arguments / Purpose / DependsOn`；通用 `Refs` 关联 Node / Target / Hypothesis |
-| `Evidence` | `ID / RunID / TaskID / ToolName / CommandView / Summary / Raw / Error`；工具产出的证据 |
+| `Evidence` | `ID / RunID / TaskID / Source / ToolName / CommandView / Summary / Raw / Error`；工具产出的证据 |
+| `ToolSpec` | `Name / Description / InputSchema`；注册表可发现的工具元数据，`InputSchema` 为 JSON Schema |
 | `Verdict` | `ID / RunID / HypothesisID / Result / Reason / EvidenceIDs`；`Result` ∈ {supported, refuted, insufficient} |
 | `Report` | `ID / RunID / Title / Summary / Conclusions / Suggestions` |
 | `Conclusion` | `HypothesisID / Result / Reason / EvidenceIDs`；`Report` 中的结论条目 |
@@ -108,5 +109,7 @@ Run ──RunID──→ Query ──NodeID──→ Target
 10. LLM 输出的节点 / 关系用局部 ref，系统编号由 `core.Factory` 统一回填
 11. 多节点不得在 Parser 实现层做 `len==1` 限制，`core.Query.Nodes` / `Edges` 保持切片
 12. 工具接口不限定读写；当前阶段只注册读工具，读写策略由注册和调度层面控制（后续"辅助修复"阶段会加入需用户确认的写工具）
+13. 工具按后端粒度注册，通过 `ToolSpec.InputSchema`（JSON Schema）声明参数；不得在接口层按资源类型或子命令拆成多个工具
+14. 后端工具调用不得经 shell；`k8s` 使用结构化 argv + `exec` 直调 kubectl，由部署侧配置二进制路径
 
 与约束冲突时按 `arui-note` 既有"禁止回退"流程处理：未经维护者重新批准不得违反。

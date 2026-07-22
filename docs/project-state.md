@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-20（PR #7）
+> 最后更新：2026-07-21（#2 Kubernetes 工具：协议 + shell-less k8s Tool 已实现）
 
 ## 当前阶段
 
@@ -16,8 +16,9 @@
 | - | PR-Agent 自动评审基建 | ✅ | PR #4 计划外插入，每个 PR 自动评审 |
 | 3 | Parser | ✅ | PR #5 `dc09495` 接 LLM；PR #6 `8fad9ea` 补 ref 校验 + 业务重试 |
 | - | 仓库文档规范 skill | ✅ | PR #7 `aruing-docs` skill |
-| 2 | Kubernetes 工具 | 未开始 | `internal/tools/k8s` 接 client-go |
-| 4 | Resolver | 未开始 | 多轮协议，最复杂，可能拆 2 PR |
+| - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
+| 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；未接入主编排 |
+| 4 | Resolver | 未开始 | 多轮协议，最复杂，可能拆 2 PR；依赖 #2 的真实取证与 Specs 发现 |
 | 5 | Planner | 未开始 | 依赖 #1 #2 |
 | 6 | Verifier | 未开始 | 依赖 #1 |
 | 7 | Reporter | 未开始 | 依赖 #1 |
@@ -27,6 +28,9 @@
 
 ## 已完成 PR
 
+- #10 fix: correct tool readonly constraint（`fcf8421`）
+- #9 docs: add aruing-pr-description skill（`3775e7e`）
+- #8 docs: add repo documentation per aruing-docs skill（`19b8973`）
 - #7 docs: add aruing-docs skill for repo documentation conventions（`a9b74a8`）
 - #6 fix(parser): validate ref uniqueness and retry on inconsistent LLM output（`8fad9ea`）
 - #5 feat: replace FakeParser with LLMParser（`dc09495`）
@@ -37,9 +41,9 @@
 
 ## 下一步
 
-`feat/k8s-tools`：接入 client-go 实现 `internal/tools/k8s`，提供第一批读工具（覆盖 Pod / Service / Deployment / Event / 日志查询）。
+`#4 Resolver`：用多轮协议把 `Query` 线索确认成 `Target`，并从 `Registry.Specs` 发现 `k8s` 工具做真实取证。
 
-理由：`#4 Resolver` 真实化需要真实 K8s 工具查集群确认 `Target`；先有工具，才能在 Resolver 多轮协议设计中真正端到端验证，避免设计了协议却没法跑。
+前提：#2 已提供开放 Tool 协议与 shell-less `k8s` 执行器；本阶段假闭环 wiring 仍只注册 `fake.list_pods`，Resolver 接入时再挂真实工具与 Policy。
 
 ## 当前硬约束摘要
 
@@ -50,7 +54,8 @@
 - 模型输出不能冒充 `Evidence`
 - `Verdict` 必须引用 `Evidence`
 - prompt 从文件加载（`//go:embed`），不写死代码
-- 工具接口不限定读写；当前阶段只注册读工具
+- 工具接口不限定读写；能力按后端 Tool + Schema 开放，读写由注册/调度策略控制
+- 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
 
 ## 预留问题入口
 
