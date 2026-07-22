@@ -5,8 +5,8 @@
 # model 加 openai/ 前缀让 litellm 走 OpenAI 兼容协议
 
 [config]
-# 默认走 glm-5.2（OpenAI 兼容代理）；UA 覆盖仍用于 bypass WAF
-model = "openai/glm-5.2"
+# 默认走 grok-4.5（OpenAI 兼容代理）；UA 覆盖仍用于 bypass WAF
+model = "openai/grok-4.5"
 fallback_models = []
 custom_model_max_tokens = 128000
 
