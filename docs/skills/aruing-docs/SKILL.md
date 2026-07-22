@@ -49,9 +49,9 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 3. 核心数据结构（Run / Query / Node / Edge / Target / Hypothesis / Task / Evidence / Verdict / Report / Factory 各字段职责）
 4. 信任边界（用户输入 / 线索 / 已确认目标 / 待验证猜想 / 工具产出证据 / 基于证据的判断）
 5. 数据关联（扁平 ID 关联，子实体不嵌套）
-6. 硬约束清单（8~12 条，从 beta1 继承 + beta2 新增）
+6. 硬约束清单（当前约 17 条：beta1 继承 + beta2 工具/编排演进；含 #15–#17 线性 Orchestrator 临时驱动与禁止固化）
 
-长度：100~200 行。只放当前事实，不放设计推理过程
+长度：100~200 行。只放当前事实，不放设计推理过程。诊断流程图后若编排形态与终态不同，须用一段标明**当前事实 vs 临时驱动**，并链到对应硬约束编号
 
 ### `docs/project-state.md`
 
@@ -60,11 +60,12 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 1. **当前阶段**：阶段名 + 一句话目标（如 "把假角色逐个换成真实现"）
 2. **工作单元**：表格，列 `# / 模块 / 状态 / 备注`，状态用 ✅ / ⏳ / ❌ / 未开始
 3. **已完成 PR**：列表，每条 `#编号 标题（commit）`
-4. **下一步**：明确写下一个该做什么、为什么（不超过 5 行）
-5. **当前硬约束摘要**：3~5 条，链接到 `docs/architecture.md` 硬约束段
-6. **预留问题入口**：按类别（P/L/C/S）列出编号 + 一句话，详细表格链接到 `arui-note/aruing/plan/`
+4. **下一步**：明确写下一个该做什么、为什么；若触碰 Tool 接线 / Resolver 多轮 / 编排，点名须遵守 architecture #15–#17
+5. **编排与多轮**（若决策已确认）：当前是否单轮、是否延后 Session、是否禁止固化直线契约；详细链接笔记 plan
+6. **当前硬约束摘要**：含信任边界与编排相关条目，链接到 `docs/architecture.md` 硬约束段
+7. **预留问题入口**：按类别（P/L/C/S/**O**）列出编号 + 一句话，详细表格链接到 `arui-note/aruing/plan/`
 
-长度：50~80 行。每个 PR 合并时更新，是 AI 工具的 5 分钟对齐入口
+长度：约 50~100 行。每个 PR 合并时更新，是 AI 工具的 5 分钟对齐入口
 
 ### `docs/README.md`
 

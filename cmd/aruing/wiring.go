@@ -3,6 +3,7 @@
 // 这一层负责把"用哪些角色实例组装 Orchestrator"集中收敛：
 // - 在没有 LLM 配置时，所有角色使用 fake，假闭环继续可跑、可测（CI、make test 默认走这条路径）
 // - 在 LLM 配置齐全时，把 parser 换成 LLMParser，其它角色仍走 fake，按计划逐个替换
+// - 工具始终经 Dispatcher + 只读 Policy；kubectl 可用时可额外注册 k8s 工具（本阶段假 Planner 仍只调 fake.list_pods）
 //
 // 不在本文件引 internal/config（计划放在工作单元 #8），当下只读 env，配置收敛留给后续阶段
 package main
@@ -10,12 +11,16 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
+	"time"
 
 	"aruing/internal/agent"
 	"aruing/internal/core"
 	"aruing/internal/llm"
 	"aruing/internal/tools"
+	"aruing/internal/tools/k8s"
 )
 
 // 描述组装编排器所需的角色集合
@@ -103,6 +108,10 @@ func buildFakeRoles(factory *core.Factory) (orchestratorRoles, error) {
 	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
 		return orchestratorRoles{}, fmt.Errorf("register fake tool: %w", err)
 	}
+	// 可选注册真实 k8s：默认闭环仍只调用 fake.list_pods；#4b 定位循环会真正用到 k8s
+	if err := maybeRegisterK8s(registry); err != nil {
+		return orchestratorRoles{}, err
+	}
 
 	return orchestratorRoles{
 		parser:   parser,
@@ -114,14 +123,43 @@ func buildFakeRoles(factory *core.Factory) (orchestratorRoles, error) {
 	}, nil
 }
 
+// 当 kubectl 可用时注册后端级 k8s 工具；不可用则跳过，保证无集群环境仍可跑假闭环
+// 路径：ARUING_KUBECTL_PATH > PATH 中的 kubectl；不强制 CI 安装 kubectl
+func maybeRegisterK8s(registry *tools.Registry) error {
+	path := strings.TrimSpace(os.Getenv("ARUING_KUBECTL_PATH"))
+	if path == "" {
+		looked, err := exec.LookPath("kubectl")
+		if err != nil {
+			return nil
+		}
+		path = looked
+	}
+	tool, err := k8s.New(k8s.Config{
+		KubectlPath:    path,
+		DefaultTimeout: 30 * time.Second,
+		MaxTimeout:     2 * time.Minute,
+	})
+	if err != nil {
+		// 配置不合法时不拖垮假闭环：记录为可跳过，调用方仍可用 fake
+		return nil
+	}
+	if err := registry.Register(tool); err != nil {
+		return fmt.Errorf("register k8s tool: %w", err)
+	}
+	return nil
+}
+
 // 根据 LLM 配置是否齐全决定 parser 角色：
 // 配置齐全则用 LLMParser 替换 fake parser，其它角色继续走 fake
 // 配置不全直接退化到全 fake，保证 make test、CI 在无凭据时仍可运行
+// 工具执行一律经只读 Policy，禁止写类 kubectl 进入 Evidence 链
 func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestrator, error) {
 	roles, err := buildFakeRoles(factory)
 	if err != nil {
 		return nil, err
 	}
+
+	dispatcher := tools.NewDispatcher(roles.registry, tools.NewReadonlyPolicy())
 
 	if strings.TrimSpace(llmCfg.BaseURL) == "" ||
 		strings.TrimSpace(llmCfg.APIKey) == "" ||
@@ -130,7 +168,7 @@ func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestra
 			roles.parser,
 			roles.resolver,
 			roles.planner,
-			tools.NewDispatcher(roles.registry),
+			dispatcher,
 			roles.verifier,
 			roles.reporter,
 			factory,
@@ -150,7 +188,7 @@ func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestra
 		parser,
 		roles.resolver,
 		roles.planner,
-		tools.NewDispatcher(roles.registry),
+		dispatcher,
 		roles.verifier,
 		roles.reporter,
 		factory,

@@ -98,7 +98,7 @@ func TestOrchestratorExecute(t *testing.T) {
 		parser,
 		resolver,
 		planner,
-		tools.NewDispatcher(registry),
+		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier,
 		reporter,
 		factory,

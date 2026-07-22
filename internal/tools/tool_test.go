@@ -179,7 +179,7 @@ func TestDispatcherExecute(t *testing.T) {
 	}
 
 	task := newTestTask()
-	evidence, err := NewDispatcher(registry).Execute(context.Background(), task)
+	evidence, err := NewDispatcher(registry, nil).Execute(context.Background(), task)
 	if err != nil {
 		t.Fatalf("execute task: %v", err)
 	}
@@ -221,19 +221,19 @@ func TestDispatcherValidate(t *testing.T) {
 		},
 		{
 			name:       "missing task ID",
-			dispatcher: NewDispatcher(registry),
+			dispatcher: NewDispatcher(registry, nil),
 			task:       core.Task{RunID: "run_test", ToolName: "fake.list_pods"},
 			wantError:  "requires an ID",
 		},
 		{
 			name:       "missing run ID",
-			dispatcher: NewDispatcher(registry),
+			dispatcher: NewDispatcher(registry, nil),
 			task:       core.Task{ID: "t_test", ToolName: "fake.list_pods"},
 			wantError:  "requires a run ID",
 		},
 		{
 			name:       "missing tool name",
-			dispatcher: NewDispatcher(registry),
+			dispatcher: NewDispatcher(registry, nil),
 			task:       core.Task{ID: "t_test", RunID: "run_test"},
 			wantError:  "requires a tool name",
 		},
@@ -254,7 +254,7 @@ func TestDispatcherNilEvidence(t *testing.T) {
 		t.Fatalf("register test tool: %v", err)
 	}
 
-	_, err := NewDispatcher(registry).Execute(context.Background(), newTestTask())
+	_, err := NewDispatcher(registry, nil).Execute(context.Background(), newTestTask())
 	requireErrorContains(t, err, "returned nil evidence")
 }
 
