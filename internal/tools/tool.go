@@ -3,37 +3,46 @@
 // 规划器只能生成白名单内的取证任务，工具调度器负责查找并执行已注册工具，具体工具负责校验自身参数
 // 模型输出不能绕过这里直接执行命令
 //
-// 当前阶段所有工具实现都只读，但工具接口本身不限定只读
-// 后续可能扩展需要用户确认的变更性操作，例如执行修复命令或触发探测性变更
-// 读写策略应在注册和调度层面控制，而不是在工具接口上限定
+// 工具按后端粒度注册（例如 k8s、prometheus），通过 Spec 暴露名称、描述和 JSON Schema
+// 规划器从 Registry.Specs 发现可用能力，不在接口层枚举资源类型或子命令
 //
-// 当前阶段先提供假工具结果，证明报告中的结论可以引用真实存在的证据编号
+// 工具接口本身不限定只读；读写策略由注册和调度层面控制
+// 当前阶段假闭环仍使用假工具；真实后端工具按工作单元逐步接入
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+
+	"github.com/santhosh-tekuri/jsonschema/v6"
 
 	"aruing/internal/core"
 )
+
+// 描述一个已注册工具的可发现元数据，供规划器构造 prompt 或工具列表
+// InputSchema 必须是合法 JSON Schema 对象，约束 Execute 的 args
+type ToolSpec struct {
+	// 工具名称，标识一个后端数据源，例如 k8s 或 prometheus
+	Name string `json:"name"`
+	// 工具描述，供规划器理解能力与用途
+	Description string `json:"description"`
+	// 调用参数的 JSON Schema，注册时校验合法性，执行时由工具按该契约校验实例
+	InputSchema json.RawMessage `json:"inputSchema"`
+}
 
 // 工具统一接口，所有取证和变更工具都必须实现
 // 编排层通过该接口调用工具，可以知道但不关心具体数据来源是 Kubernetes、Prometheus 还是什么
 // 工具接口不限定只读或写入，读写策略由注册和调度层面控制
 //
 // 工具粒度应该是后端级别，不是命令级别
-// 例如一个 k8s 工具接受结构化查询参数（资源类型、命名空间、名称等），内部翻译为对应的 API 调用
-// 而不是为 list_pods、get_service、get_events 各封装一个独立工具
-// 这样模型只需要知道有哪些后端可用，由工具内部处理具体的命令差异和版本兼容
+// 例如 k8s 工具接受结构化 argv 并直接调用 kubectl，不在 aruing 内按 get/list/logs 拆成多个工具
 type Tool interface {
-	// 工具名称，标识一个后端数据源，例如 k8s 或 prometheus
-	// 规划器生成的任务通过该名称在注册表中查找对应工具
-	Name() string
-
-	// 工具描述，供规划器理解工具能力和用途，决定是否生成该工具的取证任务
-	Description() string
+	// 返回工具的可发现元数据，名称必须与注册表键一致
+	Spec() ToolSpec
 
 	// 执行工具调用，输入为规划器生成的结构化参数，输出为证据
 	// 参数描述具体要查询什么，由工具内部校验并翻译为后端实际的调用方式
@@ -53,20 +62,23 @@ func NewRegistry() *Registry {
 	return &Registry{tools: make(map[string]Tool)}
 }
 
-// 注册一个名称非空的工具，拒绝空对象和重复名称，避免无效能力进入白名单
+// 注册一个名称非空且 Schema 合法的工具，拒绝空对象和重复名称，避免无效能力进入白名单
 func (r *Registry) Register(t Tool) error {
 	if t == nil {
 		return errors.New("tool is required")
 	}
 
-	name := t.Name()
-	if name == "" {
+	spec := t.Spec()
+	if spec.Name == "" {
 		return errors.New("tool name is required")
 	}
-	if _, exists := r.tools[name]; exists {
-		return fmt.Errorf("tool already registered: %s", name)
+	if err := validateInputSchema(spec.InputSchema); err != nil {
+		return fmt.Errorf("tool %s: %w", spec.Name, err)
 	}
-	r.tools[name] = t
+	if _, exists := r.tools[spec.Name]; exists {
+		return fmt.Errorf("tool already registered: %s", spec.Name)
+	}
+	r.tools[spec.Name] = t
 	return nil
 }
 
@@ -77,6 +89,30 @@ func (r *Registry) Get(name string) (Tool, error) {
 		return nil, fmt.Errorf("tool not found: %s", name)
 	}
 	return t, nil
+}
+
+// 返回已注册工具规格的稳定排序副本，调用方修改返回值不会影响注册表
+func (r *Registry) Specs() []ToolSpec {
+	if r == nil || len(r.tools) == 0 {
+		return nil
+	}
+
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	out := make([]ToolSpec, 0, len(names))
+	for _, name := range names {
+		spec := r.tools[name].Spec()
+		out = append(out, ToolSpec{
+			Name:        spec.Name,
+			Description: spec.Description,
+			InputSchema: append(json.RawMessage(nil), spec.InputSchema...),
+		})
+	}
+	return out
 }
 
 // 工具调度器，负责接收任务、查找已注册工具、执行调用并产出证据
@@ -126,9 +162,39 @@ func (d *Dispatcher) Execute(ctx context.Context, task core.Task) (*core.Evidenc
 	// 工具只产出证据内容，归属信息由调度器统一填充
 	evidence.RunID = task.RunID
 	evidence.TaskID = task.ID
-	evidence.ToolName = tool.Name()
+	evidence.ToolName = tool.Spec().Name
 
 	return evidence, nil
+}
+
+// 编译并校验 InputSchema 是否为合法 JSON Schema 对象
+func validateInputSchema(schema json.RawMessage) error {
+	if len(bytes.TrimSpace(schema)) == 0 {
+		return errors.New("input schema is required")
+	}
+
+	var probe any
+	if err := json.Unmarshal(schema, &probe); err != nil {
+		return fmt.Errorf("input schema is not valid JSON: %w", err)
+	}
+	if _, ok := probe.(map[string]any); !ok {
+		return errors.New("input schema must be a JSON object")
+	}
+
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(schema))
+	if err != nil {
+		return fmt.Errorf("input schema: %w", err)
+	}
+
+	compiler := jsonschema.NewCompiler()
+	const schemaURL = "tool-input-schema.json"
+	if err := compiler.AddResource(schemaURL, doc); err != nil {
+		return fmt.Errorf("input schema: %w", err)
+	}
+	if _, err := compiler.Compile(schemaURL); err != nil {
+		return fmt.Errorf("input schema is not a valid JSON Schema: %w", err)
+	}
+	return nil
 }
 
 // ---------- 假工具，用于最小闭环阶段验证证据链是否完整
@@ -136,10 +202,13 @@ func (d *Dispatcher) Execute(ctx context.Context, task core.Task) (*core.Evidenc
 // 返回固定的 Pod 列表数据，模拟 demo-api 未就绪的场景
 type fakeListPodsTool struct{}
 
-func (t *fakeListPodsTool) Name() string { return "fake.list_pods" }
-
-func (t *fakeListPodsTool) Description() string {
-	return "模拟查询 Pod 列表，返回固定数据：demo-api 未就绪，restartCount=8"
+// 返回假工具的固定规格，参数可忽略
+func (t *fakeListPodsTool) Spec() ToolSpec {
+	return ToolSpec{
+		Name:        "fake.list_pods",
+		Description: "模拟查询 Pod 列表，返回固定数据：demo-api 未就绪，restartCount=8",
+		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
+	}
 }
 
 // 执行假查询，忽略参数，返回固定证据
@@ -149,7 +218,7 @@ func (t *fakeListPodsTool) Execute(ctx context.Context, args json.RawMessage) (*
 
 	return &core.Evidence{
 		Source:      "fake",
-		ToolName:    t.Name(),
+		ToolName:    t.Spec().Name,
 		CommandView: "kubectl get pods -n default -l app=demo-api",
 		Summary:     "找到 1 个 Pod：demo-api-7c8f9d，状态 CrashLoopBackOff，restartCount=8",
 		Raw:         raw,

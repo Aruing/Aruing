@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-21（Kubernetes Tool 设计确认；代码未实施）
+> 最后更新：2026-07-21（#2 Kubernetes 工具：协议 + shell-less k8s Tool 已实现）
 
 ## 当前阶段
 
@@ -17,8 +17,8 @@
 | 3 | Parser | ✅ | PR #5 `dc09495` 接 LLM；PR #6 `8fad9ea` 补 ref 校验 + 业务重试 |
 | - | 仓库文档规范 skill | ✅ | PR #7 `aruing-docs` skill |
 | - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
-| 2 | Kubernetes 工具 | 未开始 | 设计已确认：统一 ToolSpec/Registry + 单一 shell-less kubectl Tool；代码未实施 |
-| 4 | Resolver | 未开始 | 多轮协议，最复杂，可能拆 2 PR |
+| 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；未接入主编排 |
+| 4 | Resolver | 未开始 | 多轮协议，最复杂，可能拆 2 PR；依赖 #2 的真实取证与 Specs 发现 |
 | 5 | Planner | 未开始 | 依赖 #1 #2 |
 | 6 | Verifier | 未开始 | 依赖 #1 |
 | 7 | Reporter | 未开始 | 依赖 #1 |
@@ -41,9 +41,9 @@
 
 ## 下一步
 
-`feat/k8s-tools`：先建立所有后端共用的 `ToolSpec + Tool + Registry` 调用协议，再实现单一后端级 `k8s` Tool，以结构化 argv 直接调用 kubectl（不经 shell、不枚举资源和子命令）。
+`#4 Resolver`：用多轮协议把 `Query` 线索确认成 `Target`，并从 `Registry.Specs` 发现 `k8s` 工具做真实取证。
 
-理由：`#4 Resolver` 既需要真实集群证据，也需要从 Registry 动态发现 Tool 及其 JSON Schema；先建立开放调用协议，避免当前查询范围固化成未来能力上限。完整设计位于 `arui-note/aruing/plan/0.0.1-beta2/2026-7-21.md`。
+前提：#2 已提供开放 Tool 协议与 shell-less `k8s` 执行器；本阶段假闭环 wiring 仍只注册 `fake.list_pods`，Resolver 接入时再挂真实工具与 Policy。
 
 ## 当前硬约束摘要
 
@@ -54,7 +54,8 @@
 - 模型输出不能冒充 `Evidence`
 - `Verdict` 必须引用 `Evidence`
 - prompt 从文件加载（`//go:embed`），不写死代码
-- 工具接口不限定读写；当前阶段只注册读工具
+- 工具接口不限定读写；能力按后端 Tool + Schema 开放，读写由注册/调度策略控制
+- 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
 
 ## 预留问题入口
 
