@@ -48,6 +48,7 @@ export ARUING_LLM_MODEL=gpt-4o-mini
 - `Verdict` 必须引用 `Evidence`
 - `Task` 只用通用 `Refs` 关联数据，不增加阶段专用引用字段
 - 工具接口不限定读写；当前阶段只注册读工具，后续"辅助修复"阶段会加入需用户确认的写工具
+- 当前 `Orchestrator` 为线性单轮驱动（临时）；多轮对话与系统内连查通过后续编排升级实现，不推翻扁平领域模型与工具协议
 
 完整硬约束见 [`docs/architecture.md`](docs/architecture.md#硬约束)。
 

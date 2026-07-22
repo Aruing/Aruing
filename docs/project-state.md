@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-21（#2 Kubernetes 工具：协议 + shell-less k8s Tool 已实现）
+> 最后更新：2026-07-22（编排：确认线性 Orchestrator 为单轮临时驱动；多轮延后、禁止固化）
 
 ## 当前阶段
 
@@ -18,7 +18,7 @@
 | - | 仓库文档规范 skill | ✅ | PR #7 `aruing-docs` skill |
 | - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
 | 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；未接入主编排 |
-| 4 | Resolver | 未开始 | 多轮协议，最复杂，可能拆 2 PR；依赖 #2 的真实取证与 Specs 发现 |
+| 4 | Resolver | 未开始 | 定位协议，可能拆 PR；依赖 #2；系统内多轮取证可在此切入，用户侧 Session 对话不在本里程碑必做 |
 | 5 | Planner | 未开始 | 依赖 #1 #2 |
 | 6 | Verifier | 未开始 | 依赖 #1 |
 | 7 | Reporter | 未开始 | 依赖 #1 |
@@ -41,9 +41,20 @@
 
 ## 下一步
 
-`#4 Resolver`：用多轮协议把 `Query` 线索确认成 `Target`，并从 `Registry.Specs` 发现 `k8s` 工具做真实取证。
+`#4 Resolver`：把 `Query` 线索确认成 `Target`，并从 `Registry.Specs` 发现 `k8s` 工具做真实取证。
 
 前提：#2 已提供开放 Tool 协议与 shell-less `k8s` 执行器；本阶段假闭环 wiring 仍只注册 `fake.list_pods`，Resolver 接入时再挂真实工具与 Policy。
+
+## 编排与多轮（2026-7-22 已确认）
+
+| 项 | 结论 |
+| --- | --- |
+| 当前目标 | 最小**单轮**真实诊断；线性 `Orchestrator` 可继续用 |
+| 会否大规模重构 | **否（非必然）**；主要改编排 + 角色调用方式，core/tools 多半保留 |
+| 延后成本量级 | 系统内多轮约数人日；完整 Session 对话约 1–3 周；若把直线冻成全局契约则更高 |
+| 现在是否开多轮大改 | **否**；多轮是编排升级，不是推翻领域模型/工具层 |
+
+单轮期禁止事项与详细推理见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-22.md`；公开硬约束见 `architecture.md` #15–#17。
 
 ## 当前硬约束摘要
 
@@ -56,12 +67,14 @@
 - prompt 从文件加载（`//go:embed`），不写死代码
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，读写由注册/调度策略控制
 - 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
+- 线性 Orchestrator 是单轮临时驱动器；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（见 architecture #15–#17）
 
 ## 预留问题入口
 
-详细表格位于 `arui-note/aruing/plan/0.0.1-beta2/2026-7-18.md` §4。索引：
+详细表格位于 `arui-note/aruing/plan/0.0.1-beta2/2026-7-18.md` §4；编排决策见 `plan/0.0.1-beta2/2026-7-22.md`。索引：
 
 - **P-1 / P-2 / P-3**：pr-agent 自身 review 提出但未修（concurrency group 跨 PR 互相取消、OPENAI_KEY 走第三方代理暴露面、pr-agent 锁死单模型）
 - **L-1 ~ L-9**：LLMParser 相关；L-6 / L-7 已在 PR #6 关闭；L-1（下游 fake 角色与新节点 ID 不匹配）等 #4 Resolver 解决；L-8（CLI 翻译 LLM error）等 #8 config；L-9（模型能力作为 Report 指标）留正式版之后
 - **C-1**：env 散在 `main.go`，等 #8 `internal/config` 收敛
 - **S-1**：曾贴出的 key 仍建议撤换
+- **O-1**：用户侧多轮对话 / Session 状态机延后；单轮期遵守 architecture #15–#17，避免直线编排固化导致升级成本飙升
