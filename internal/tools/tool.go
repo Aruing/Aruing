@@ -6,7 +6,7 @@
 // 工具按后端粒度注册（例如 k8s、prometheus），通过 Spec 暴露名称、描述和 JSON Schema
 // 规划器从 Registry.Specs 发现可用能力，不在接口层枚举资源类型或子命令
 //
-// 工具接口本身不限定只读；读写策略由注册和调度层面控制
+// 工具接口本身不限定只读；读写策略由 Policy（挂在 Dispatcher 执行前）与注册层面控制
 // 当前阶段假闭环仍使用假工具；真实后端工具按工作单元逐步接入
 package tools
 
@@ -118,19 +118,25 @@ func (r *Registry) Specs() []ToolSpec {
 // 工具调度器，负责接收任务、查找已注册工具、执行调用并产出证据
 // 编排层把任务交给调度器，调度器返回证据，编排层不需要直接接触工具实例
 // 具体参数约束由对应工具校验，调度器不依赖不同后端的参数结构
-// 调度器是实施读写策略的合适位置，例如只读模式下拒绝变更类工具的调用
+// 调度器在执行前调用 Policy：能力由 Registry 开放，授权由 Policy 决定
 type Dispatcher struct {
 	registry *Registry
+	// 执行前授权；nil 时视为全部允许（仅便于测试）
+	policy Policy
 }
 
-// 创建调度器，绑定一个工具注册表
-func NewDispatcher(r *Registry) *Dispatcher {
-	return &Dispatcher{registry: r}
+// 创建调度器，绑定工具注册表与可选策略
+// policy 为 nil 时使用 AllowAll，避免测试样板代码；生产 wiring 应传入 ReadonlyPolicy
+func NewDispatcher(r *Registry, policy Policy) *Dispatcher {
+	if policy == nil {
+		policy = NewAllowAllPolicy()
+	}
+	return &Dispatcher{registry: r, policy: policy}
 }
 
 // 执行一个工具任务，返回产出的证据
 // 调度器和任务的关联编号必须完整，任务中的工具名称必须在注册表中存在，否则返回错误
-// 任务参数由找到的工具负责校验，校验失败时透传带工具名称的上下文错误
+// 授权未通过时返回错误且不调用工具；参数校验失败时透传带工具名称的上下文错误
 // 任务的 RunID 和 TaskID 会被写入证据，保持证据到任务的回溯链
 func (d *Dispatcher) Execute(ctx context.Context, task core.Task) (*core.Evidence, error) {
 	if d == nil || d.registry == nil {
@@ -144,6 +150,25 @@ func (d *Dispatcher) Execute(ctx context.Context, task core.Task) (*core.Evidenc
 	}
 	if task.ToolName == "" {
 		return nil, errors.New("task requires a tool name")
+	}
+
+	decision, reason := d.policy.Check(task.ToolName, task.Arguments)
+	switch decision {
+	case DecisionAllow:
+		// continue
+	case DecisionDeny:
+		if reason == "" {
+			reason = "denied by policy"
+		}
+		return nil, fmt.Errorf("tool %s denied by policy: %s", task.ToolName, reason)
+	case DecisionRequireApproval:
+		// 本阶段无审批通道，与 Deny 同等处理，避免静默放行
+		if reason == "" {
+			reason = "requires approval"
+		}
+		return nil, fmt.Errorf("tool %s requires approval: %s", task.ToolName, reason)
+	default:
+		return nil, fmt.Errorf("tool %s: unknown policy decision %v", task.ToolName, decision)
 	}
 
 	tool, err := d.registry.Get(task.ToolName)

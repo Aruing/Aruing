@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-22（编排：确认线性 Orchestrator 为单轮临时驱动；多轮延后、禁止固化）
+> 最后更新：2026-07-22（#4a Policy + k8s wiring 已提交；#4b 待做；编排决策见 O-1）
 
 ## 当前阶段
 
@@ -17,8 +17,8 @@
 | 3 | Parser | ✅ | PR #5 `dc09495` 接 LLM；PR #6 `8fad9ea` 补 ref 校验 + 业务重试 |
 | - | 仓库文档规范 skill | ✅ | PR #7 `aruing-docs` skill |
 | - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
-| 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；未接入主编排 |
-| 4 | Resolver | 未开始 | 定位协议，可能拆 PR；依赖 #2；系统内多轮取证可在此切入，用户侧 Session 对话不在本里程碑必做 |
+| 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；#4a 起 wiring 可按需注册 |
+| 4 | Resolver | #4a 已完成（待合入） | 笔记 `plan/0.0.1-beta2/2026-7-22-resolver.md`：方案 A；**#4a** Policy + Dispatcher 挂点 + wiring 可选 `k8s`；**#4b** LLMResolver + 定位循环；用户 Session 不在范围 |
 | 5 | Planner | 未开始 | 依赖 #1 #2 |
 | 6 | Verifier | 未开始 | 依赖 #1 |
 | 7 | Reporter | 未开始 | 依赖 #1 |
@@ -41,9 +41,14 @@
 
 ## 下一步
 
-`#4 Resolver`：把 `Query` 线索确认成 `Target`，并从 `Registry.Specs` 发现 `k8s` 工具做真实取证。
+`#4 Resolver`：设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-22-resolver.md`。
 
-前提：#2 已提供开放 Tool 协议与 shell-less `k8s` 执行器；本阶段假闭环 wiring 仍只注册 `fake.list_pods`，Resolver 接入时再挂真实工具与 Policy。
+当前进度：
+
+1. **#4a（本 PR）**：`tools.Policy` + `ReadonlyPolicy`（k8s argv 子命令白名单）挂在 `Dispatcher.Execute` 前；`wiring` 在 kubectl 可用时可选注册 `k8s`；默认假闭环仍只调 `fake.list_pods`，`make test` 无集群可绿
+2. **#4b（待做）**：编排可见定位循环 + `LLMResolver`（`GenerateJSON` + `Registry.Specs`）+ Fake 按 Query 节点出 Target（关 L-1）
+
+前提：#2 已提供 Tool 协议与 shell-less `k8s`；须遵守 architecture **#15–#17** 与 `plan/0.0.1-beta2/2026-7-22.md` §4（禁止 `Resolve` 内私自多轮调 Tool）。
 
 ## 编排与多轮（2026-7-22 已确认）
 
@@ -65,7 +70,7 @@
 - 模型输出不能冒充 `Evidence`
 - `Verdict` 必须引用 `Evidence`
 - prompt 从文件加载（`//go:embed`），不写死代码
-- 工具接口不限定读写；能力按后端 Tool + Schema 开放，读写由注册/调度策略控制
+- 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`（挂在 Dispatcher 执行前）与注册控制；当前默认 `ReadonlyPolicy`
 - 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
 - 线性 Orchestrator 是单轮临时驱动器；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（见 architecture #15–#17）
 
