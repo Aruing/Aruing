@@ -28,20 +28,22 @@ flowchart LR
 
 一次诊断：用户提问 → Parser 提取线索 → Resolver 在集群中确认目标 → Planner 生成猜想和取证任务 → Dispatcher 调工具拿证据 → Verifier 基于证据判断 → Reporter 整理报告。每条结论可回溯到具体 `Evidence` 和工具调用。
 
+**当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。这是最小单轮闭环的驱动方式，不是产品终态。多轮对话、系统内部多次取证、用户澄清与审批，将来通过编排升级（可步进 / 可挂起的状态机，`internal/graph` 占位）实现；领域实体仍按 `RunID` 扁平关联，`Run.SessionID` 预留会话。演进约定见下方硬约束 #15–#17。
+
 ## 模块职责
 
 | 包 | 负责 | 不负责 |
 | --- | --- | --- |
 | `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`） | 不承担推理、不查集群 |
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
-| `internal/agent` | 推理角色：`Parser` / `Resolver` / `Planner` / `Verifier` / `Reporter` 及 `Orchestrator` 编排 | 不直接查集群、不持久化 |
+| `internal/agent` | 推理角色：`Parser` / `Resolver` / `Planner` / `Verifier` / `Reporter` 及 `Orchestrator` 编排（当前为线性管道） | 不直接查集群、不持久化；不把线性 `Execute→Report` 当成永久对外契约 |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
 | `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema | 不判断业务、不做推理、不枚举资源/子命令 |
 | `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不接入主编排（当前 wiring 仍只注册假工具）；读写策略由上层 Policy/注册控制 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
 | `internal/store` | 持久化诊断状态和证据（占位） | 当前未实现 |
-| `internal/graph` | 流程编排状态机（占位） | 当前由 `Orchestrator` 承担线性流程 |
+| `internal/graph` | 流程编排状态机（占位） | 当前未用；线性流程暂由 `Orchestrator` 承担，多轮升级时承接状态机 |
 | `internal/config` | 集中收敛运行参数（占位） | 当前由 `cmd/aruing/main.go` 直接读 env |
 | `internal/api` | HTTP / 网络入口（占位） | 当前仅 CLI |
 
@@ -111,5 +113,8 @@ Run ──RunID──→ Query ──NodeID──→ Target
 12. 工具接口不限定读写；当前阶段只注册读工具，读写策略由注册和调度层面控制（后续"辅助修复"阶段会加入需用户确认的写工具）
 13. 工具按后端粒度注册，通过 `ToolSpec.InputSchema`（JSON Schema）声明参数；不得在接口层按资源类型或子命令拆成多个工具
 14. 后端工具调用不得经 shell；`k8s` 使用结构化 argv + `exec` 直调 kubectl，由部署侧配置二进制路径
+15. 当前线性 `Orchestrator` 是最小单轮诊断的**临时驱动器**，不是永久骨架；允许在单轮阶段保留，但不得将其固化为对外长期 API、唯一持久化入口或全项目默认契约
+16. 角色不得在编排层不可见的情况下私自多轮调用工具；Tool 只经 Registry / Dispatcher（及后续统一执行环 / Policy）进入 `Evidence` 链
+17. 多轮升级（系统内连查、用户澄清、Session 对话）以编排改造为主，须保留扁平 `RunID` 关联、`Task`/`Evidence` 形态与工具协议；不得为此恢复嵌套 `Run` 或另起与 Dispatcher 平行的执行通道
 
 与约束冲突时按 `arui-note` 既有"禁止回退"流程处理：未经维护者重新批准不得违反。
