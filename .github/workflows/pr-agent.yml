@@ -31,9 +31,10 @@ jobs:
           OPENAI__API_BASE: https://newapi.pytrio.asia/v1
 
           # 配置覆盖：env var 优先级最高，与 .pr_agent.toml 保持一致
-          CONFIG__MODEL: openai/gpt-5.6-sol
+          # gemini-3-pro-preview 实测可跑通；其余模型多 405/401/no channel
+          CONFIG__MODEL: openai/gemini-3-pro-preview
           CONFIG__FALLBACK_MODELS: '[]'
-          # 自定义模型不在 pr-agent 内置 MAX_TOKENS 表，显式声明
+          # gemini-3-pro-preview 不在 pr-agent 内置 MAX_TOKENS 表，显式声明
           CONFIG__CUSTOM_MODEL_MAX_TOKENS: '128000'
 
           # 默认 pr-agent 在 synchronize 事件不跑命令，这里打开
