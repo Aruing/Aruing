@@ -105,16 +105,16 @@ func TestLLMPlannerPlan(t *testing.T) {
 	// h1 应被替换为系统 h_ id；其余透传
 	foundH, foundTarget, foundNode, foundQuery := false, false, false, false
 	for _, ref := range task.Refs {
-		switch {
-		case ref == h.ID:
+		switch ref {
+		case h.ID:
 			foundH = true
-		case ref == "target_1":
+		case "target_1":
 			foundTarget = true
-		case ref == "node_1":
+		case "node_1":
 			foundNode = true
-		case ref == "query_1":
+		case "query_1":
 			foundQuery = true
-		case ref == "h1":
+		case "h1":
 			t.Errorf("task refs still contain local hyp ref: %v", task.Refs)
 		}
 	}
