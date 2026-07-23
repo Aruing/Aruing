@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-23（#6 LLMVerifier 完成）
+> 最后更新：2026-07-23（#7 LLMReporter 完成）
 
 ## 当前阶段
 
@@ -21,10 +21,10 @@
 | 4 | Resolver | ✅ #4a+#4b | 方案 A：编排可见定位循环 + `ResolveDriver`；`LLMResolver`（`GenerateJSON` + `Registry.Specs`）；`FakeResolver` 按 Query 节点出 Target（关 L-1）；Policy + 可选 k8s 注册 |
 | 5 | Planner | ✅ | `LLMPlanner`：单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 6 | Verifier | ✅ | `LLMVerifier`：单次 `Verify`；只引用已登记 Evidence；Factory 回填 Verdict ID；业务重试；wiring 在 LLM 齐备时启用 |
-| 7 | Reporter | 未开始 | 依赖 #1 |
+| 7 | Reporter | ✅ | `LLMReporter`：单次 `Report`；结论对齐 Verdict；证据引用不得越界；Factory 回填 Report ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 8 | 配置层 | 未开始 | `internal/config` 集中收敛 env |
 
-替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier，reporter 仍为 fake。
+替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
 ## 已完成 PR
 
@@ -41,9 +41,9 @@
 
 ## 下一步
 
-`#7 Reporter`：用 LLM 替换假报告器，根据 Verdict 与 Evidence 生成不编造证据的诊断报告。
+`#8 配置层`：新增 `internal/config`，集中收敛 LLM / 工具相关 env，消除 wiring 与 CLI 的重复读取；可一并处理 L-8（CLI 翻译 LLM error）。
 
-#4 设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-22-resolver.md`。
+设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-23-reporter.md`（#7 已落地）。
 
 已落地要点：
 
@@ -51,6 +51,7 @@
 2. **#4b**：`Orchestrator.resolveTargets` 循环；`ResolveDriver` / `LLMResolver` / 按节点的 `FakeResolver`；Target ID 与定位阶段 Task/Evidence ID 由编排发放；L-1 关闭
 3. **#5**：`LLMPlanner` 单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；不在规划阶段多轮调 Tool（#15–#16）
 4. **#6**：`LLMVerifier` 单次 `Verify`；每条 Hypothesis 恰好一条 Verdict；`evidence_ids` 必须属于输入 Evidence；Factory 回填 Verdict ID；业务重试
+5. **#7**：`LLMReporter` 单次 `Report`；结论覆盖每条 Verdict 且 `result` 一致；`evidence_ids` ⊆ 对应 Verdict 证据集；Factory 回填 Report ID；业务重试；CLI 仍输出结构化 JSON（Markdown 渲染可 follow-up）
 
 ## 编排与多轮（2026-7-22 已确认）
 
@@ -76,14 +77,17 @@
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`（挂在 Dispatcher 执行前）与注册控制；当前默认 `ReadonlyPolicy`
 - 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
 - 线性 Orchestrator 是单轮临时驱动器；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（见 architecture #15–#17）
-- 编号与执行：Tool 只经 Dispatcher；定位阶段 `ResolveDriver` 只返回意图，`Target`/定位 `Task`/`Evidence` ID 由编排发放；规划阶段 `Hypothesis`/`Task` ID 由 `LLMPlanner` 经 `Factory` 回填；验证阶段 `Verdict` ID 由 `LLMVerifier` 经 `Factory` 回填，且只能引用已登记 Evidence
+- 编号与执行：Tool 只经 Dispatcher；定位阶段 `ResolveDriver` 只返回意图，`Target`/定位 `Task`/`Evidence` ID 由编排发放；规划阶段 `Hypothesis`/`Task` ID 由 `LLMPlanner` 经 `Factory` 回填；验证阶段 `Verdict` ID 由 `LLMVerifier` 经 `Factory` 回填，且只能引用已登记 Evidence；报告阶段 `Report` ID 由 `LLMReporter` 经 `Factory` 回填，结论对齐 Verdict 且证据引用不得越界
 
 ## 预留问题入口
 
-详细表格位于 `arui-note/aruing/plan/0.0.1-beta2/2026-7-18.md` §4；编排决策见 `plan/0.0.1-beta2/2026-7-22.md`。索引：
+详细表在笔记 `arui-note/aruing/plan/`（含 P/L/C/S/O）。公开侧一句话：
 
-- **P-1 / P-2 / P-3**：pr-agent 自身 review 提出但未修（concurrency group 跨 PR 互相取消、OPENAI_KEY 走第三方代理暴露面、pr-agent 锁死单模型）
-- **L-1 ~ L-9**：LLMParser 相关；L-6 / L-7 已在 PR #6 关闭；**L-1 已在 #4b 关闭**（FakeResolver 按 Query 节点动态出 Target）；L-8（CLI 翻译 LLM error）等 #8 config；L-9（模型能力作为 Report 指标）留正式版之后
-- **C-1**：env 散在 `main.go`，等 #8 `internal/config` 收敛
-- **S-1**：曾贴出的 key 仍建议撤换
-- **O-1**：用户侧多轮对话 / Session 状态机延后；单轮期遵守 architecture #15–#17，避免直线编排固化导致升级成本飙升
+| 编号 | 一句话 |
+| --- | --- |
+| L-8 | CLI 对 LLM 错误的翻译仍可能偏薄 |
+| C-1 | env 读取尚未收敛到 `internal/config`（#8） |
+| O-1 | 用户侧多轮 / Session 未开 |
+| R-1 | CLI 默认 JSON 与「Markdown 报告」产品文案的展示缺口（可 follow-up 纯函数渲染） |
+
+更多条目与关闭条件见笔记仓 plan。

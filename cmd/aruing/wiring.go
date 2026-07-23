@@ -2,7 +2,7 @@
 //
 // 这一层负责把"用哪些角色实例组装 Orchestrator"集中收敛：
 // - 在没有 LLM 配置时，所有角色使用 fake，假闭环继续可跑、可测（CI、make test 默认走这条路径）
-// - 在 LLM 配置齐全时，把 parser / resolver / planner / verifier 换成 LLM 实现，reporter 仍走 fake
+// - 在 LLM 配置齐全时，把 parser / resolver / planner / verifier / reporter 换成 LLM 实现
 // - 工具始终经 Dispatcher + 只读 Policy；kubectl 可用时可额外注册 k8s 工具
 //
 // 不在本文件引 internal/config（计划放在工作单元 #8），当下只读 env，配置收敛留给后续阶段
@@ -25,8 +25,7 @@ import (
 )
 
 // 描述组装编排器所需的角色集合
-// parser / resolver / planner / verifier 在有 LLM 配置时可替换为真实现；reporter 本阶段仍为 fake
-// 字段类型放宽为 Orchestrator 构造所需的最小能力，便于 LLM 与 fake 互换
+// 各角色在有 LLM 配置时可替换为真实现；字段类型放宽为 Orchestrator 构造所需的最小能力
 type orchestratorRoles struct {
 	parser interface {
 		Parse(context.Context, core.Run) (core.Query, error)
@@ -38,7 +37,9 @@ type orchestratorRoles struct {
 	verifier interface {
 		Verify(context.Context, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
 	}
-	reporter *agent.FakeReporter
+	reporter interface {
+		Report(context.Context, core.Run, []core.Verdict, []core.Evidence) (core.Report, error)
+	}
 	registry *tools.Registry
 }
 
@@ -159,9 +160,9 @@ func maybeRegisterK8s(registry *tools.Registry) error {
 	return nil
 }
 
-// 根据 LLM 配置是否齐全决定 parser / resolver / planner / verifier：
-// 配置齐全则用 LLM 实现替换对应 fake，reporter 继续走 fake
-// 配置不全直接退化到全 fake，保证 make test、CI 在无凭据时仍可运行
+// 根据 LLM 配置是否齐全决定各角色：
+// 配置齐全则用 LLM 实现替换对应 fake（含 Reporter）；配置不全直接退化到全 fake
+// 保证 make test、CI 在无凭据时仍可运行
 // 工具执行一律经只读 Policy，禁止写类 kubectl 进入 Evidence 链
 // LLMResolver / LLMPlanner 的工具规格取自 Registry.Specs，与 Dispatcher 白名单同源
 func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestrator, error) {
@@ -207,6 +208,10 @@ func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestra
 	if err != nil {
 		return nil, fmt.Errorf("build llm verifier: %w", err)
 	}
+	reporter, err := agent.NewLLMReporter(client, factory)
+	if err != nil {
+		return nil, fmt.Errorf("build llm reporter: %w", err)
+	}
 
 	return agent.NewOrchestrator(
 		parser,
@@ -214,7 +219,7 @@ func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestra
 		planner,
 		dispatcher,
 		verifier,
-		roles.reporter,
+		reporter,
 		factory,
 	), nil
 }
