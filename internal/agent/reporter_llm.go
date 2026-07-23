@@ -170,7 +170,7 @@ func buildReporterUserPayload(
 			Result:       string(v.Result),
 			Reason:       v.Reason,
 			// 用非 nil 空切片起步，避免 EvidenceIDs 为 nil 时 JSON 编成 null
-		EvidenceIDs: append([]string{}, v.EvidenceIDs...),
+			EvidenceIDs: append([]string{}, v.EvidenceIDs...),
 		})
 	}
 	for _, e := range evidence {
