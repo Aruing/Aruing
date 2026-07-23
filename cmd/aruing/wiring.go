@@ -2,13 +2,14 @@
 //
 // 这一层负责把"用哪些角色实例组装 Orchestrator"集中收敛：
 // - 在没有 LLM 配置时，所有角色使用 fake，假闭环继续可跑、可测（CI、make test 默认走这条路径）
-// - 在 LLM 配置齐全时，把 parser 换成 LLMParser，其它角色仍走 fake，按计划逐个替换
-// - 工具始终经 Dispatcher + 只读 Policy；kubectl 可用时可额外注册 k8s 工具（本阶段假 Planner 仍只调 fake.list_pods）
+// - 在 LLM 配置齐全时，把 parser / resolver 换成 LLM 实现，planner 及之后仍走 fake
+// - 工具始终经 Dispatcher + 只读 Policy；kubectl 可用时可额外注册 k8s 工具
 //
 // 不在本文件引 internal/config（计划放在工作单元 #8），当下只读 env，配置收敛留给后续阶段
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -24,10 +25,13 @@ import (
 )
 
 // 描述组装编排器所需的角色集合
-// fake 与 real 角色都满足同一接口，调用方按是否提供 LLM 配置自由替换 parser
+// parser / resolver 在有 LLM 配置时可替换为真实现；planner 及之后角色本阶段仍为 fake
+// 字段类型放宽为 Orchestrator 构造所需的最小能力，便于 LLM 与 fake 互换
 type orchestratorRoles struct {
-	parser   *agent.FakeParser
-	resolver *agent.FakeResolver
+	parser interface {
+		Parse(context.Context, core.Run) (core.Query, error)
+	}
+	resolver agent.ResolveDriver
 	planner  *agent.FakePlanner
 	verifier *agent.FakeVerifier
 	reporter *agent.FakeReporter
@@ -68,6 +72,8 @@ func buildFakeRoles(factory *core.Factory) (orchestratorRoles, error) {
 		},
 		CreatedAt: now,
 	}})
+	// 任务 Refs 只引用本模板内的猜想（及 Parser 节点若需要），不引用预生成 target ID
+	// Target 编号由编排在定位阶段发放，假规划器无法在组装时预知
 	planner := agent.NewFakePlanner(agent.Plan{
 		Hypotheses: []core.Hypothesis{{
 			ID:              ids["h"],
@@ -78,7 +84,7 @@ func buildFakeRoles(factory *core.Factory) (orchestratorRoles, error) {
 		}},
 		Tasks: []core.Task{{
 			ID:        ids["t"],
-			Refs:      []string{ids["target"], ids["h"]},
+			Refs:      []string{ids["h"]},
 			ToolName:  "fake.list_pods",
 			Arguments: json.RawMessage(`{"namespace":"default","selector":"app=demo-api"}`),
 			Purpose:   "检查后端 Pod 状态",
@@ -149,10 +155,11 @@ func maybeRegisterK8s(registry *tools.Registry) error {
 	return nil
 }
 
-// 根据 LLM 配置是否齐全决定 parser 角色：
-// 配置齐全则用 LLMParser 替换 fake parser，其它角色继续走 fake
+// 根据 LLM 配置是否齐全决定 parser / resolver：
+// 配置齐全则用 LLMParser + LLMResolver 替换对应 fake，planner 及之后继续走 fake
 // 配置不全直接退化到全 fake，保证 make test、CI 在无凭据时仍可运行
 // 工具执行一律经只读 Policy，禁止写类 kubectl 进入 Evidence 链
+// LLMResolver 的工具规格取自 Registry.Specs，与 Dispatcher 白名单同源
 func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestrator, error) {
 	roles, err := buildFakeRoles(factory)
 	if err != nil {
@@ -183,10 +190,14 @@ func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestra
 	if err != nil {
 		return nil, fmt.Errorf("build llm parser: %w", err)
 	}
+	resolver, err := agent.NewLLMResolver(client, roles.registry.Specs())
+	if err != nil {
+		return nil, fmt.Errorf("build llm resolver: %w", err)
+	}
 
 	return agent.NewOrchestrator(
 		parser,
-		roles.resolver,
+		resolver,
 		roles.planner,
 		dispatcher,
 		roles.verifier,

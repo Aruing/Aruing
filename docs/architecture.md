@@ -28,7 +28,7 @@ flowchart LR
 
 一次诊断：用户提问 → Parser 提取线索 → Resolver 在集群中确认目标 → Planner 生成猜想和取证任务 → Dispatcher 调工具拿证据 → Verifier 基于证据判断 → Reporter 整理报告。每条结论可回溯到具体 `Evidence` 和工具调用。
 
-**当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。这是最小单轮闭环的驱动方式，不是产品终态。多轮对话、系统内部多次取证、用户澄清与审批，将来通过编排升级（可步进 / 可挂起的状态机，`internal/graph` 占位）实现；领域实体仍按 `RunID` 扁平关联，`Run.SessionID` 预留会话。演进约定见下方硬约束 #15–#17。
+**当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。阶段之间仍是直线管道；**定位阶段内部**是编排可见的小循环（`ResolveDriver.Next` → 可选 `Dispatcher.Execute` → 回喂 → `submit_targets` / `fail`），默认最多 8 轮（`SetResolveMaxRounds`）。这是最小单轮诊断的驱动方式，不是产品终态。用户侧多轮对话、Session、跨阶段挂起，将来通过编排升级（可步进 / 可挂起的状态机，`internal/graph` 占位）实现；领域实体仍按 `RunID` 扁平关联，`Run.SessionID` 预留会话。演进约定见下方硬约束 #15–#17。
 
 ## 模块职责
 
@@ -36,7 +36,7 @@ flowchart LR
 | --- | --- | --- |
 | `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`） | 不承担推理、不查集群 |
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
-| `internal/agent` | 推理角色：`Parser` / `Resolver` / `Planner` / `Verifier` / `Reporter` 及 `Orchestrator` 编排（当前为线性管道） | 不直接查集群、不持久化；不把线性 `Execute→Report` 当成永久对外契约 |
+| `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner` / `Verifier` / `Reporter` 及 `Orchestrator` 编排；Parser 与 Resolver 可接 LLM（prompt `//go:embed`） | 不直接查集群、不持久化；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
 | `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`Policy`（`ReadonlyPolicy` / `AllowAll`）、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema；执行前经 Policy 授权 | 不判断业务、不做推理、不枚举资源类型 |
 | `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
@@ -114,7 +114,7 @@ Run ──RunID──→ Query ──NodeID──→ Target
 13. 工具按后端粒度注册，通过 `ToolSpec.InputSchema`（JSON Schema）声明参数；不得在接口层按资源类型或子命令拆成多个工具
 14. 后端工具调用不得经 shell；`k8s` 使用结构化 argv + `exec` 直调 kubectl，由部署侧配置二进制路径
 15. 当前线性 `Orchestrator` 是最小单轮诊断的**临时驱动器**，不是永久骨架；允许在单轮阶段保留，但不得将其固化为对外长期 API、唯一持久化入口或全项目默认契约
-16. 角色不得在编排层不可见的情况下私自多轮调用工具；Tool 只经 Registry / Dispatcher（及后续统一执行环 / Policy）进入 `Evidence` 链；`Task`/`Evidence` 的领域编号与创建时间由编排边界通过 `Factory` 发放，角色与工具不得私自编造身份
+16. 角色不得在编排层不可见的情况下私自多轮调用工具；Tool 只经 Registry / Dispatcher（及后续统一执行环 / Policy）进入 `Evidence` 链；`Task`/`Evidence`/`Target` 的领域编号与创建时间由编排边界通过 `Factory` 发放，角色与工具不得私自编造身份。定位阶段当前实现：`ResolveDriver` 只返回 `call_tool` / `submit_targets` / `fail` 意图；编排执行工具、写 `Evidence`、在 `submit` 时发放 `Target.ID`
 17. 多轮升级（系统内连查、用户澄清、Session 对话）以编排改造为主，须保留扁平 `RunID` 关联、`Task`/`Evidence` 形态与工具协议；不得为此恢复嵌套 `Run` 或另起与 Dispatcher 平行的执行通道
 
 与约束冲突时按 `arui-note` 既有"禁止回退"流程处理：未经维护者重新批准不得违反。
