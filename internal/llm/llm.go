@@ -64,7 +64,10 @@ type Config struct {
 }
 
 // 默认整体请求超时，覆盖 Config.Timeout 零值
-const defaultTimeout = 30 * time.Second
+//
+// 强制非流式后，带 reasoning 的兼容模型常需数十秒才返回完整 JSON；
+// 30s 会导致首包未到就 Client.Timeout，诊断在 Planner 阶段误失败
+const defaultTimeout = 120 * time.Second
 
 // 默认最大重试次数，覆盖 Config.MaxRetries 零值，即最多发起 3 次请求
 const defaultMaxRetries = 2

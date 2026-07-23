@@ -8,16 +8,42 @@ BIN_DIR := bin
 BIN := $(BIN_DIR)/$(APP)
 ARGS ?= help
 QUESTION ?= why is demo-api unreachable in default namespace
+# 真链路 smoke 使用的 env 文件；可用 make run-llm ENV_FILE=.env.ollama 切换
+ENV_FILE ?= .env
 GO ?= go
 GOLANGCI_LINT ?= golangci-lint
 GOVULNCHECK ?= govulncheck
 GO_PACKAGES := ./...
 GO_SOURCE_DIRS := cmd internal
 
-.PHONY: run help version
+# 在当前 recipe 的 shell 中加载 dotenv（set -a 使赋值自动 export）
+# 必须与后续命令写在同一 shell 行串里（用 ; \），否则 Make 换行会开新 shell 丢掉变量
+# 文件不存在时静默跳过，便于无密钥时仍走 fake
+define load-dotenv
+	set -a; \
+	if [ -f "$(ENV_FILE)" ]; then . ./$(ENV_FILE); fi; \
+	set +a
+endef
+
+.PHONY: run run-llm print-env help version
 
 run:
 	go run $(CMD) $(ARGS)
+
+# 加载 ENV_FILE（默认 .env）后跑一次诊断；无文件或 LLM 三件套不全时与现行为一致（fake）
+run-llm:
+	$(load-dotenv); \
+	go run $(CMD) run $(QUESTION)
+
+# 确认 dotenv 是否生效；不打印 API key 全文
+print-env:
+	@$(load-dotenv); \
+	echo "ENV_FILE=$(ENV_FILE)"; \
+	if [ -f "$(ENV_FILE)" ]; then echo "file: present"; else echo "file: missing (fake path)"; fi; \
+	echo "LLM base: $${ARUING_LLM_BASE_URL:-<empty>}"; \
+	echo "LLM model: $${ARUING_LLM_MODEL:-<empty>}"; \
+	if [ -n "$$ARUING_LLM_API_KEY" ]; then echo "API key set: yes"; else echo "API key set: no"; fi; \
+	echo "kubectl path: $${ARUING_KUBECTL_PATH:-<PATH lookup>}"
 
 help:
 	go run $(CMD) help

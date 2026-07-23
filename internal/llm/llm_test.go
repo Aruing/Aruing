@@ -165,6 +165,31 @@ func TestGenerateJSON(t *testing.T) {
 	if !ok || format["type"] != "json_object" {
 		t.Errorf("response_format = %v, want type=json_object", got["response_format"])
 	}
+	// go-openai 默认省略 stream=false；我们强制写入，兼容「缺省即流式」的网关
+	if got["stream"] != false {
+		t.Errorf("stream = %v, want false", got["stream"])
+	}
+}
+
+// ensureStreamFalse 只在缺省时补 false，已有 stream 字段时不覆盖
+func TestEnsureStreamFalse(t *testing.T) {
+	t.Parallel()
+	got := ensureStreamFalse([]byte(`{"model":"m","messages":[]}`))
+	var m map[string]any
+	if err := json.Unmarshal(got, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["stream"] != false {
+		t.Fatalf("stream = %v, want false", m["stream"])
+	}
+
+	got = ensureStreamFalse([]byte(`{"model":"m","stream":true}`))
+	if err := json.Unmarshal(got, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m["stream"] != true {
+		t.Fatalf("stream = %v, want true (must not override)", m["stream"])
+	}
 }
 
 // GenerateJSON 应处理被围栏包裹的 JSON 输出
