@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-22（#4b 定位循环 + LLMResolver 完成；编排决策见 O-1）
+> 最后更新：2026-07-23（#6 LLMVerifier 完成）
 
 ## 当前阶段
 
@@ -19,12 +19,12 @@
 | - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
 | 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；#4a 起 wiring 可按需注册 |
 | 4 | Resolver | ✅ #4a+#4b | 方案 A：编排可见定位循环 + `ResolveDriver`；`LLMResolver`（`GenerateJSON` + `Registry.Specs`）；`FakeResolver` 按 Query 节点出 Target（关 L-1）；Policy + 可选 k8s 注册 |
-| 5 | Planner | 未开始 | 依赖 #1 #2 |
-| 6 | Verifier | 未开始 | 依赖 #1 |
+| 5 | Planner | ✅ | `LLMPlanner`：单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；wiring 在 LLM 齐备时启用 |
+| 6 | Verifier | ✅ | `LLMVerifier`：单次 `Verify`；只引用已登记 Evidence；Factory 回填 Verdict ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 7 | Reporter | 未开始 | 依赖 #1 |
 | 8 | 配置层 | 未开始 | `internal/config` 集中收敛 env |
 
-替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver，planner 及之后仍为 fake。
+替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier，reporter 仍为 fake。
 
 ## 已完成 PR
 
@@ -41,7 +41,7 @@
 
 ## 下一步
 
-`#5 Planner`：用 LLM 替换假规划器，从 `Registry.Specs` 发现工具并生成 Hypothesis + Task；仍遵守 #15–#17（角色不私自多轮调 Tool）。
+`#7 Reporter`：用 LLM 替换假报告器，根据 Verdict 与 Evidence 生成不编造证据的诊断报告。
 
 #4 设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-22-resolver.md`。
 
@@ -49,6 +49,8 @@
 
 1. **#4a**：`tools.Policy` + `ReadonlyPolicy` 挂在 `Dispatcher.Execute` 前；`wiring` 在 kubectl 可用时可选注册 `k8s`
 2. **#4b**：`Orchestrator.resolveTargets` 循环；`ResolveDriver` / `LLMResolver` / 按节点的 `FakeResolver`；Target ID 与定位阶段 Task/Evidence ID 由编排发放；L-1 关闭
+3. **#5**：`LLMPlanner` 单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；不在规划阶段多轮调 Tool（#15–#16）
+4. **#6**：`LLMVerifier` 单次 `Verify`；每条 Hypothesis 恰好一条 Verdict；`evidence_ids` 必须属于输入 Evidence；Factory 回填 Verdict ID；业务重试
 
 ## 编排与多轮（2026-7-22 已确认）
 
@@ -74,7 +76,7 @@
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`（挂在 Dispatcher 执行前）与注册控制；当前默认 `ReadonlyPolicy`
 - 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
 - 线性 Orchestrator 是单轮临时驱动器；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（见 architecture #15–#17）
-- 定位：`ResolveDriver` 只返回意图；Tool 经 Dispatcher；`Target`/`Task`/`Evidence` ID 由编排 `Factory` 发放
+- 编号与执行：Tool 只经 Dispatcher；定位阶段 `ResolveDriver` 只返回意图，`Target`/定位 `Task`/`Evidence` ID 由编排发放；规划阶段 `Hypothesis`/`Task` ID 由 `LLMPlanner` 经 `Factory` 回填；验证阶段 `Verdict` ID 由 `LLMVerifier` 经 `Factory` 回填，且只能引用已登记 Evidence
 
 ## 预留问题入口
 

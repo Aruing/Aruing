@@ -2,7 +2,7 @@
 //
 // 这一层负责把"用哪些角色实例组装 Orchestrator"集中收敛：
 // - 在没有 LLM 配置时，所有角色使用 fake，假闭环继续可跑、可测（CI、make test 默认走这条路径）
-// - 在 LLM 配置齐全时，把 parser / resolver 换成 LLM 实现，planner 及之后仍走 fake
+// - 在 LLM 配置齐全时，把 parser / resolver / planner / verifier 换成 LLM 实现，reporter 仍走 fake
 // - 工具始终经 Dispatcher + 只读 Policy；kubectl 可用时可额外注册 k8s 工具
 //
 // 不在本文件引 internal/config（计划放在工作单元 #8），当下只读 env，配置收敛留给后续阶段
@@ -25,15 +25,19 @@ import (
 )
 
 // 描述组装编排器所需的角色集合
-// parser / resolver 在有 LLM 配置时可替换为真实现；planner 及之后角色本阶段仍为 fake
+// parser / resolver / planner / verifier 在有 LLM 配置时可替换为真实现；reporter 本阶段仍为 fake
 // 字段类型放宽为 Orchestrator 构造所需的最小能力，便于 LLM 与 fake 互换
 type orchestratorRoles struct {
 	parser interface {
 		Parse(context.Context, core.Run) (core.Query, error)
 	}
 	resolver agent.ResolveDriver
-	planner  *agent.FakePlanner
-	verifier *agent.FakeVerifier
+	planner  interface {
+		Plan(context.Context, core.Query, []core.Target) (agent.Plan, error)
+	}
+	verifier interface {
+		Verify(context.Context, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
+	}
 	reporter *agent.FakeReporter
 	registry *tools.Registry
 }
@@ -155,11 +159,11 @@ func maybeRegisterK8s(registry *tools.Registry) error {
 	return nil
 }
 
-// 根据 LLM 配置是否齐全决定 parser / resolver：
-// 配置齐全则用 LLMParser + LLMResolver 替换对应 fake，planner 及之后继续走 fake
+// 根据 LLM 配置是否齐全决定 parser / resolver / planner / verifier：
+// 配置齐全则用 LLM 实现替换对应 fake，reporter 继续走 fake
 // 配置不全直接退化到全 fake，保证 make test、CI 在无凭据时仍可运行
 // 工具执行一律经只读 Policy，禁止写类 kubectl 进入 Evidence 链
-// LLMResolver 的工具规格取自 Registry.Specs，与 Dispatcher 白名单同源
+// LLMResolver / LLMPlanner 的工具规格取自 Registry.Specs，与 Dispatcher 白名单同源
 func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestrator, error) {
 	roles, err := buildFakeRoles(factory)
 	if err != nil {
@@ -190,17 +194,26 @@ func newOrchestrator(factory *core.Factory, llmCfg llm.Config) (*agent.Orchestra
 	if err != nil {
 		return nil, fmt.Errorf("build llm parser: %w", err)
 	}
-	resolver, err := agent.NewLLMResolver(client, roles.registry.Specs())
+	specs := roles.registry.Specs()
+	resolver, err := agent.NewLLMResolver(client, specs)
 	if err != nil {
 		return nil, fmt.Errorf("build llm resolver: %w", err)
+	}
+	planner, err := agent.NewLLMPlanner(client, factory, specs)
+	if err != nil {
+		return nil, fmt.Errorf("build llm planner: %w", err)
+	}
+	verifier, err := agent.NewLLMVerifier(client, factory)
+	if err != nil {
+		return nil, fmt.Errorf("build llm verifier: %w", err)
 	}
 
 	return agent.NewOrchestrator(
 		parser,
 		resolver,
-		roles.planner,
+		planner,
 		dispatcher,
-		roles.verifier,
+		verifier,
 		roles.reporter,
 		factory,
 	), nil
