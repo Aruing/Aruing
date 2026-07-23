@@ -55,14 +55,14 @@ func (r *LLMReporter) Report(
 	verdicts []core.Verdict,
 	evidence []core.Evidence,
 ) (core.Report, error) {
+	if r == nil {
+		return core.Report{}, errors.New("reporter is required")
+	}
 	if ctx == nil {
 		return core.Report{}, errors.New("reporter requires a context")
 	}
 	if err := ctx.Err(); err != nil {
 		return core.Report{}, fmt.Errorf("build report: %w", err)
-	}
-	if r == nil {
-		return core.Report{}, errors.New("reporter is required")
 	}
 	if strings.TrimSpace(run.ID) == "" {
 		return core.Report{}, errors.New("reporter requires a run ID")
@@ -80,6 +80,10 @@ func (r *LLMReporter) Report(
 		}
 		if strings.TrimSpace(verdict.HypothesisID) == "" {
 			return core.Report{}, fmt.Errorf("verdict[%d] hypothesis id is required", i)
+		}
+		// 与 Verifier / FakeReporter 一致：Verdict 必须带证据；空集无法构造合法结论子集
+		if len(verdict.EvidenceIDs) == 0 {
+			return core.Report{}, fmt.Errorf("verdict %q requires evidence", verdict.ID)
 		}
 	}
 	for i, item := range evidence {
@@ -165,7 +169,8 @@ func buildReporterUserPayload(
 			HypothesisID: v.HypothesisID,
 			Result:       string(v.Result),
 			Reason:       v.Reason,
-			EvidenceIDs:  append([]string(nil), v.EvidenceIDs...),
+			// 用非 nil 空切片起步，避免 EvidenceIDs 为 nil 时 JSON 编成 null
+		EvidenceIDs: append([]string{}, v.EvidenceIDs...),
 		})
 	}
 	for _, e := range evidence {
@@ -261,6 +266,10 @@ func validateReporterOutput(
 		}
 		if strings.TrimSpace(c.Reason) == "" {
 			return fmt.Errorf("conclusion[%d] reason is required", i)
+		}
+		// Verdict 无证据时 fail-fast（正常路径由 Report 入口已拦）；不放宽为空结论
+		if len(verdict.EvidenceIDs) == 0 {
+			return fmt.Errorf("verdict for hypothesis %q has no evidence", hypID)
 		}
 		if len(c.EvidenceIDs) == 0 {
 			return fmt.Errorf("conclusion[%d] requires at least one evidence_id", i)

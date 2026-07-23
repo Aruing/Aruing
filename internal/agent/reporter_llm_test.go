@@ -294,3 +294,37 @@ func TestLLMReporterCanceledContext(t *testing.T) {
 		t.Errorf("should not be inconsistent: %v", err)
 	}
 }
+
+// Verdict 无证据时在入口拒绝，不进入 LLM 重试
+func TestLLMReporterVerdictWithoutEvidence(t *testing.T) {
+	var calls atomic.Int32
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeChatCompletion(w, `{}`)
+	})
+	reporter, err := NewLLMReporter(client, newTestFactory(t))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	verdicts := []core.Verdict{{
+		ID:           "v_empty",
+		RunID:        "run_1",
+		HypothesisID: "h_1",
+		Result:       core.VerdictInsufficient,
+		Reason:       "no data",
+		EvidenceIDs:  nil,
+	}}
+	_, err = reporter.Report(context.Background(), testReportRun(), verdicts, testReportEvidence())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "requires evidence") {
+		t.Errorf("err = %v", err)
+	}
+	if errors.Is(err, ErrLLMOutputInconsistent) {
+		t.Errorf("should fail before LLM retries: %v", err)
+	}
+	if calls.Load() != 0 {
+		t.Errorf("LLM calls = %d, want 0", calls.Load())
+	}
+}
