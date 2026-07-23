@@ -34,9 +34,9 @@ flowchart LR
 
 | 包 | 负责 | 不负责 |
 | --- | --- | --- |
-| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`：无 LLM 全 fake；有 LLM 时 Parser/Resolver/Planner/Verifier 换真实现） | 不承担推理、不查集群 |
+| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`：无 LLM 全 fake；有 LLM 时 Parser/Resolver/Planner/Verifier/Reporter 换真实现） | 不承担推理、不查集群 |
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
-| `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner`（`LLMPlanner` / `FakePlanner`）/ `Verifier`（`LLMVerifier` / `FakeVerifier`）/ `Reporter` 及 `Orchestrator` 编排；Parser、Resolver、Planner、Verifier 可接 LLM（prompt `//go:embed`）；规划与验证均为单次调用，工具规格来自 `Registry.Specs` | 不直接查集群、不持久化；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool |
+| `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner`（`LLMPlanner` / `FakePlanner`）/ `Verifier`（`LLMVerifier` / `FakeVerifier`）/ `Reporter`（`LLMReporter` / `FakeReporter`）及 `Orchestrator` 编排；Parser、Resolver、Planner、Verifier、Reporter 可接 LLM（prompt `//go:embed`）；规划、验证与报告均为单次调用，工具规格来自 `Registry.Specs` | 不直接查集群、不持久化；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
 | `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`Policy`（`ReadonlyPolicy` / `AllowAll`）、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema；执行前经 Policy 授权 | 不判断业务、不做推理、不枚举资源类型 |
 | `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
@@ -108,13 +108,13 @@ Run ──RunID──→ Query ──NodeID──→ Target
 7. 子实体不嵌套进 `Run`
 8. `Orchestrator` 只编排，不承担解析、规划、判断和报告内容生成
 9. prompt 必须从外部文件加载，不写死在代码里（`//go:embed` 满足该约束）
-10. LLM 输出的节点 / 关系 / 猜想 / 规划任务用局部 ref，系统编号由 `core.Factory` 统一回填（Parser 回填 Query/Node/Edge；Planner 回填 Hypothesis/Task；Verifier 回填 Verdict，且 Verdict 只能引用已登记 Evidence）
+10. LLM 输出的节点 / 关系 / 猜想 / 规划任务用局部 ref，系统编号由 `core.Factory` 统一回填（Parser 回填 Query/Node/Edge；Planner 回填 Hypothesis/Task；Verifier 回填 Verdict，且 Verdict 只能引用已登记 Evidence；Reporter 回填 Report，结论对齐 Verdict 且证据引用不得越界）
 11. 多节点不得在 Parser 实现层做 `len==1` 限制，`core.Query.Nodes` / `Edges` 保持切片
 12. 工具接口不限定读写；授权由 `Policy` 在 `Dispatcher.Execute` 前决定（当前默认只读 argv 白名单 Deny 写操作）；后续"辅助修复"可扩展 `RequireApproval` 与写工具
 13. 工具按后端粒度注册，通过 `ToolSpec.InputSchema`（JSON Schema）声明参数；不得在接口层按资源类型或子命令拆成多个工具
 14. 后端工具调用不得经 shell；`k8s` 使用结构化 argv + `exec` 直调 kubectl，由部署侧配置二进制路径
 15. 当前线性 `Orchestrator` 是最小单轮诊断的**临时驱动器**，不是永久骨架；允许在单轮阶段保留，但不得将其固化为对外长期 API、唯一持久化入口或全项目默认契约
-16. 角色不得在编排层不可见的情况下私自多轮调用工具；Tool 只经 Registry / Dispatcher（及后续统一执行环 / Policy）进入 `Evidence` 链；领域编号与创建时间必须经 `core.Factory` 发放，角色与工具不得私自编造身份。定位阶段：`ResolveDriver` 只返回 `call_tool` / `submit_targets` / `fail` 意图；编排执行工具、写 `Evidence`、在 `submit` 时发放 `Target.ID`（定位用 `Task`/`Evidence` ID 亦由编排发放）。规划阶段：`LLMPlanner` 单次 `Plan`，不调 Tool；`Hypothesis`/`Task` ID 与 `CreatedAt` 由规划器经 `Factory` 回填。验证阶段：`LLMVerifier` 单次 `Verify`，不调 Tool；`Verdict` ID 与 `CreatedAt` 由验证器经 `Factory` 回填，且 `evidence_ids` 必须全部属于输入 Evidence
+16. 角色不得在编排层不可见的情况下私自多轮调用工具；Tool 只经 Registry / Dispatcher（及后续统一执行环 / Policy）进入 `Evidence` 链；领域编号与创建时间必须经 `core.Factory` 发放，角色与工具不得私自编造身份。定位阶段：`ResolveDriver` 只返回 `call_tool` / `submit_targets` / `fail` 意图；编排执行工具、写 `Evidence`、在 `submit` 时发放 `Target.ID`（定位用 `Task`/`Evidence` ID 亦由编排发放）。规划阶段：`LLMPlanner` 单次 `Plan`，不调 Tool；`Hypothesis`/`Task` ID 与 `CreatedAt` 由规划器经 `Factory` 回填。验证阶段：`LLMVerifier` 单次 `Verify`，不调 Tool；`Verdict` ID 与 `CreatedAt` 由验证器经 `Factory` 回填，且 `evidence_ids` 必须全部属于输入 Evidence。报告阶段：`LLMReporter` 单次 `Report`，不调 Tool；`Report` ID 与 `CreatedAt` 由报告器经 `Factory` 回填；结论覆盖每条 Verdict 且 `result` 与之一致，`evidence_ids` 必须属于对应 Verdict 的证据集
 17. 多轮升级（系统内连查、用户澄清、Session 对话）以编排改造为主，须保留扁平 `RunID` 关联、`Task`/`Evidence` 形态与工具协议；不得为此恢复嵌套 `Run` 或另起与 Dispatcher 平行的执行通道
 
 与约束冲突时按 `arui-note` 既有"禁止回退"流程处理：未经维护者重新批准不得违反。
