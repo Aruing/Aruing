@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-22（#4a Policy + k8s wiring 已提交；#4b 待做；编排决策见 O-1）
+> 最后更新：2026-07-22（#4b 定位循环 + LLMResolver 完成；编排决策见 O-1）
 
 ## 当前阶段
 
@@ -18,13 +18,13 @@
 | - | 仓库文档规范 skill | ✅ | PR #7 `aruing-docs` skill |
 | - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
 | 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；#4a 起 wiring 可按需注册 |
-| 4 | Resolver | #4a 已完成（待合入） | 笔记 `plan/0.0.1-beta2/2026-7-22-resolver.md`：方案 A；**#4a** Policy + Dispatcher 挂点 + wiring 可选 `k8s`；**#4b** LLMResolver + 定位循环；用户 Session 不在范围 |
+| 4 | Resolver | ✅ #4a+#4b | 方案 A：编排可见定位循环 + `ResolveDriver`；`LLMResolver`（`GenerateJSON` + `Registry.Specs`）；`FakeResolver` 按 Query 节点出 Target（关 L-1）；Policy + 可选 k8s 注册 |
 | 5 | Planner | 未开始 | 依赖 #1 #2 |
 | 6 | Verifier | 未开始 | 依赖 #1 |
 | 7 | Reporter | 未开始 | 依赖 #1 |
 | 8 | 配置层 | 未开始 | `internal/config` 集中收敛 env |
 
-替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。
+替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver，planner 及之后仍为 fake。
 
 ## 已完成 PR
 
@@ -41,20 +41,21 @@
 
 ## 下一步
 
-`#4 Resolver`：设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-22-resolver.md`。
+`#5 Planner`：用 LLM 替换假规划器，从 `Registry.Specs` 发现工具并生成 Hypothesis + Task；仍遵守 #15–#17（角色不私自多轮调 Tool）。
 
-当前进度：
+#4 设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-22-resolver.md`。
 
-1. **#4a（本 PR）**：`tools.Policy` + `ReadonlyPolicy`（k8s argv 子命令白名单）挂在 `Dispatcher.Execute` 前；`wiring` 在 kubectl 可用时可选注册 `k8s`；默认假闭环仍只调 `fake.list_pods`，`make test` 无集群可绿
-2. **#4b（待做）**：编排可见定位循环 + `LLMResolver`（`GenerateJSON` + `Registry.Specs`）+ Fake 按 Query 节点出 Target（关 L-1）
+已落地要点：
 
-前提：#2 已提供 Tool 协议与 shell-less `k8s`；须遵守 architecture **#15–#17** 与 `plan/0.0.1-beta2/2026-7-22.md` §4（禁止 `Resolve` 内私自多轮调 Tool）。
+1. **#4a**：`tools.Policy` + `ReadonlyPolicy` 挂在 `Dispatcher.Execute` 前；`wiring` 在 kubectl 可用时可选注册 `k8s`
+2. **#4b**：`Orchestrator.resolveTargets` 循环；`ResolveDriver` / `LLMResolver` / 按节点的 `FakeResolver`；Target ID 与定位阶段 Task/Evidence ID 由编排发放；L-1 关闭
 
 ## 编排与多轮（2026-7-22 已确认）
 
 | 项 | 结论 |
 | --- | --- |
 | 当前目标 | 最小**单轮**真实诊断；线性 `Orchestrator` 可继续用 |
+| 定位阶段 | 编排内小循环（`ResolveDriver`），非用户 Session |
 | 会否大规模重构 | **否（非必然）**；主要改编排 + 角色调用方式，core/tools 多半保留 |
 | 延后成本量级 | 系统内多轮约数人日；完整 Session 对话约 1–3 周；若把直线冻成全局契约则更高 |
 | 现在是否开多轮大改 | **否**；多轮是编排升级，不是推翻领域模型/工具层 |
@@ -73,13 +74,14 @@
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`（挂在 Dispatcher 执行前）与注册控制；当前默认 `ReadonlyPolicy`
 - 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
 - 线性 Orchestrator 是单轮临时驱动器；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（见 architecture #15–#17）
+- 定位：`ResolveDriver` 只返回意图；Tool 经 Dispatcher；`Target`/`Task`/`Evidence` ID 由编排 `Factory` 发放
 
 ## 预留问题入口
 
 详细表格位于 `arui-note/aruing/plan/0.0.1-beta2/2026-7-18.md` §4；编排决策见 `plan/0.0.1-beta2/2026-7-22.md`。索引：
 
 - **P-1 / P-2 / P-3**：pr-agent 自身 review 提出但未修（concurrency group 跨 PR 互相取消、OPENAI_KEY 走第三方代理暴露面、pr-agent 锁死单模型）
-- **L-1 ~ L-9**：LLMParser 相关；L-6 / L-7 已在 PR #6 关闭；L-1（下游 fake 角色与新节点 ID 不匹配）等 #4 Resolver 解决；L-8（CLI 翻译 LLM error）等 #8 config；L-9（模型能力作为 Report 指标）留正式版之后
+- **L-1 ~ L-9**：LLMParser 相关；L-6 / L-7 已在 PR #6 关闭；**L-1 已在 #4b 关闭**（FakeResolver 按 Query 节点动态出 Target）；L-8（CLI 翻译 LLM error）等 #8 config；L-9（模型能力作为 Report 指标）留正式版之后
 - **C-1**：env 散在 `main.go`，等 #8 `internal/config` 收敛
 - **S-1**：曾贴出的 key 仍建议撤换
 - **O-1**：用户侧多轮对话 / Session 状态机延后；单轮期遵守 architecture #15–#17，避免直线编排固化导致升级成本飙升

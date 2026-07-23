@@ -2,77 +2,113 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	"aruing/internal/core"
 )
 
-// 已确认目标必须绑定当前运行并保留来源线索，才能安全进入后续诊断阶段
-func TestFakeResolverResolve(t *testing.T) {
+// 假定位器应按 Query 节点生成目标，NodeID 来自输入而非模板固定值
+func TestFakeResolverNext(t *testing.T) {
 	resolver := NewFakeResolver([]core.Target{{
-		ID:     "target_demo",
+		ID:     "stale_target",
 		RunID:  "stale_run",
-		NodeID: "node_demo",
+		NodeID: "stale_node",
 		Type:   "k8s.resource",
 		Attrs: map[string]string{
 			"k8s.kind":      "Service",
 			"k8s.namespace": "helloworld",
 			"k8s.name":      "demo",
 		},
-		EvidenceIDs: []string{"evidence_lookup"},
-		CreatedAt:   time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC),
+		CreatedAt: time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC),
 	}})
-	query := core.Query{
-		ID:    "query_test",
-		RunID: "run_test",
-		Nodes: []core.Node{{
-			ID:   "node_demo",
-			Type: "resource",
-			Text: "demo",
-		}},
+	state := ResolveState{
+		Query: core.Query{
+			ID:    "query_test",
+			RunID: "run_test",
+			Nodes: []core.Node{{
+				ID:   "node_from_parser",
+				Type: "resource",
+				Text: "demo",
+			}},
+		},
+		MaxRounds: 8,
 	}
 
-	got, err := resolver.Resolve(context.Background(), query)
+	action, err := resolver.Next(context.Background(), state)
 	if err != nil {
-		t.Fatalf("resolve target: %v", err)
+		t.Fatalf("next: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("targets length = %d, want 1", len(got))
+	if action.Action != ResolveActionSubmitTargets {
+		t.Fatalf("action = %q, want submit_targets", action.Action)
 	}
-	target := got[0]
-	if target.RunID != query.RunID || target.NodeID != "node_demo" {
-		t.Errorf("target relation was not preserved: %#v", target)
+	if len(action.Targets) != 1 {
+		t.Fatalf("targets = %d, want 1", len(action.Targets))
 	}
-	if target.Attrs["k8s.namespace"] != "helloworld" || target.EvidenceIDs[0] != "evidence_lookup" {
-		t.Errorf("target identity was not preserved: %#v", target)
+	target := action.Targets[0]
+	if target.NodeID != "node_from_parser" {
+		t.Errorf("NodeID = %q, want node_from_parser (L-1)", target.NodeID)
+	}
+	if target.Type != "k8s.resource" {
+		t.Errorf("Type = %q, want k8s.resource from template", target.Type)
+	}
+	if target.Attrs["k8s.namespace"] != "helloworld" {
+		t.Errorf("attrs = %+v", target.Attrs)
 	}
 
-	// 多次定位不能共享可变属性，否则一次结果可能污染后续运行
-	got[0].Attrs["k8s.namespace"] = "changed"
-	got[0].EvidenceIDs[0] = "changed"
-	again, err := resolver.Resolve(context.Background(), query)
+	// 修改返回属性不能污染后续调用的模板
+	action.Targets[0].Attrs["k8s.namespace"] = "changed"
+	again, err := resolver.Next(context.Background(), state)
 	if err != nil {
-		t.Fatalf("resolve target again: %v", err)
+		t.Fatalf("next again: %v", err)
 	}
-	if again[0].Attrs["k8s.namespace"] != "helloworld" || again[0].EvidenceIDs[0] != "evidence_lookup" {
-		t.Errorf("target template was mutated: %#v", again[0])
+	if again.Targets[0].Attrs["k8s.namespace"] != "helloworld" {
+		t.Errorf("template mutated: %+v", again.Targets[0].Attrs)
 	}
 }
 
-// 目标来源必须能在问题节点中找到，避免把无关资源带入诊断流程
-func TestFakeResolverValidate(t *testing.T) {
-	resolver := NewFakeResolver([]core.Target{{
-		ID:     "target_demo",
-		NodeID: "node_unknown",
-	}})
-	query := core.Query{
-		ID:    "query_test",
-		RunID: "run_test",
-		Nodes: []core.Node{{ID: "node_demo"}},
+// 多节点应各自生成目标，NodeID 与输入顺序一一对应
+func TestFakeResolverMultiNode(t *testing.T) {
+	resolver := NewFakeResolver([]core.Target{
+		{Type: "k8s.resource", Attrs: map[string]string{"k8s.name": "a"}},
+		{Type: "k8s.resource", Attrs: map[string]string{"k8s.name": "b"}},
+	})
+	state := ResolveState{
+		Query: core.Query{
+			RunID: "run_multi",
+			Nodes: []core.Node{
+				{ID: "node_a", Text: "a"},
+				{ID: "node_b", Text: "b"},
+			},
+		},
 	}
 
-	if _, err := resolver.Resolve(context.Background(), query); err == nil {
-		t.Fatal("resolve target: error = nil")
+	action, err := resolver.Next(context.Background(), state)
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if len(action.Targets) != 2 {
+		t.Fatalf("targets = %d, want 2", len(action.Targets))
+	}
+	if action.Targets[0].NodeID != "node_a" || action.Targets[1].NodeID != "node_b" {
+		t.Errorf("targets = %+v", action.Targets)
+	}
+}
+
+// 无节点时应 fail，而不是提交空目标列表
+func TestFakeResolverEmptyNodes(t *testing.T) {
+	resolver := NewFakeResolver(nil)
+	action, err := resolver.Next(context.Background(), ResolveState{
+		Query: core.Query{RunID: "run_empty"},
+	})
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if action.Action != ResolveActionFail {
+		t.Fatalf("action = %q, want fail", action.Action)
+	}
+	if !strings.Contains(action.Error, "no nodes") {
+		t.Errorf("error = %q", action.Error)
 	}
 }
