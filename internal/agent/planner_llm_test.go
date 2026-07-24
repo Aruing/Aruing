@@ -309,7 +309,7 @@ func TestLLMPlannerForeignTarget(t *testing.T) {
 
 // 首轮（Evidence/Verdicts 为 nil）发送给模型的 user payload 不得包含 evidence/verdicts 字段
 // 保证 PlanState 改造对模型输入零影响（与 beta2 逐字一致），后续循环才会带上历史证据
-func TestLLMPlannerFirstRoundPayloadOmitsHistory(t *testing.T) {
+func TestLLMPlannerFirstRoundPayload(t *testing.T) {
 	body := `{
 		"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],
 		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]
