@@ -85,6 +85,15 @@ func (p *LLMPlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
 		User:   userPayload,
 	}
 
+	// 后续轮判定：有历史证据即为后续轮；收集前几轮已登记猜想编号供任务引用
+	followUp := len(state.Evidence) > 0
+	priorHypothesisIDs := make([]string, 0, len(state.Verdicts))
+	for _, v := range state.Verdicts {
+		if v.HypothesisID != "" {
+			priorHypothesisIDs = append(priorHypothesisIDs, v.HypothesisID)
+		}
+	}
+
 	var lastOut plannerLLMOutput
 	var lastValidateErr error
 	for attempt := 0; attempt < maxPlanAttempts; attempt++ {
@@ -97,7 +106,7 @@ func (p *LLMPlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
 			return Plan{}, fmt.Errorf("plan with LLM: %w", gErr)
 		}
 
-		if vErr := validatePlannerOutput(out, state.Query, state.Targets, p.specs); vErr != nil {
+		if vErr := validatePlannerOutput(out, state.Query, state.Targets, p.specs, followUp, priorHypothesisIDs); vErr != nil {
 			lastOut = out
 			lastValidateErr = vErr
 			continue
@@ -161,13 +170,21 @@ type plannerTaskOut struct {
 }
 
 // 校验模型输出满足编排与取证的最小契约
-func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []core.Target, specs []tools.ToolSpec) error {
-	if len(out.Hypotheses) == 0 {
-		return errors.New("at least one hypothesis is required")
+// 首轮与后续轮的校验规则不同：
+//   - 首轮（followUp=false）：猜想与任务均至少 1 个
+//   - 后续轮（followUp=true）：任务可为空（=规划器宣布查完），猜想可选
+//
+// priorHypothesisIDs 为前几轮已登记的猜想系统编号，允许后续轮任务引用现有猜想
+func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []core.Target, specs []tools.ToolSpec, followUp bool, priorHypothesisIDs []string) error {
+	if !followUp {
+		if len(out.Hypotheses) == 0 {
+			return errors.New("at least one hypothesis is required")
+		}
+		if len(out.Tasks) == 0 {
+			return errors.New("at least one task is required")
+		}
 	}
-	if len(out.Tasks) == 0 {
-		return errors.New("at least one task is required")
-	}
+	// 后续轮：任务可为空（调查完成）；猜想可选
 
 	hypRefs := make(map[string]struct{}, len(out.Hypotheses))
 	for i, h := range out.Hypotheses {
@@ -202,7 +219,8 @@ func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []cor
 	}
 
 	// 任务 refs 可引用：query / node / edge / target 系统编号 + 本轮 hypothesis 局部 ref
-	knownData := make(map[string]struct{}, 1+len(query.Nodes)+len(query.Edges)+len(targets)+len(hypRefs))
+	// 后续轮还可引用前几轮已登记的猜想系统编号（priorHypothesisIDs）
+	knownData := make(map[string]struct{}, 1+len(query.Nodes)+len(query.Edges)+len(targets)+len(hypRefs)+len(priorHypothesisIDs))
 	if query.ID != "" {
 		knownData[query.ID] = struct{}{}
 	}
@@ -226,6 +244,11 @@ func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []cor
 	}
 	for ref := range hypRefs {
 		knownData[ref] = struct{}{}
+	}
+	for _, id := range priorHypothesisIDs {
+		if id != "" {
+			knownData[id] = struct{}{}
+		}
 	}
 
 	for i, task := range out.Tasks {

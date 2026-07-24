@@ -340,3 +340,70 @@ func TestLLMPlannerFirstRoundPayload(t *testing.T) {
 		t.Errorf("first-round payload should omit verdicts, got: %s", captured)
 	}
 }
+
+// 后续轮（有历史证据）允许返回空任务，表示调查完成
+func TestLLMPlannerFollowUpEmptyTasks(t *testing.T) {
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeChatCompletion(w, `{"hypotheses":[],"tasks":[]}`)
+	})
+	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	plan, err := planner.Plan(context.Background(), PlanState{
+		Query:    testPlanQuery(),
+		Targets:  testPlanTargets(),
+		Evidence: []core.Evidence{{ID: "e_1", RunID: "run_1", TaskID: "t_old"}},
+	})
+	if err != nil {
+		t.Fatalf("follow-up empty tasks should succeed: %v", err)
+	}
+	if len(plan.Tasks) != 0 {
+		t.Errorf("tasks = %d, want 0", len(plan.Tasks))
+	}
+}
+
+// 首轮（无历史证据）返回空任务仍应判违规并重试耗尽
+func TestLLMPlannerRound0EmptyTasks(t *testing.T) {
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeChatCompletion(w, `{"hypotheses":[],"tasks":[]}`)
+	})
+	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	_, err = planner.Plan(context.Background(), PlanState{
+		Query:   testPlanQuery(),
+		Targets: testPlanTargets(),
+	})
+	if !errors.Is(err, ErrLLMOutputInconsistent) {
+		t.Fatalf("round-0 empty tasks should fail, got: %v", err)
+	}
+}
+
+// 后续轮任务可引用前几轮已登记的猜想编号（来自 verdicts）
+func TestLLMPlannerFollowUpPriorHypothesis(t *testing.T) {
+	body := `{
+		"hypotheses":[],
+		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h_prior"],"depends_on":[]}]
+	}`
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeChatCompletion(w, body)
+	})
+	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	plan, err := planner.Plan(context.Background(), PlanState{
+		Query:    testPlanQuery(),
+		Targets:  testPlanTargets(),
+		Evidence: []core.Evidence{{ID: "e_1", RunID: "run_1", TaskID: "t_old"}},
+		Verdicts: []core.Verdict{{ID: "v_1", RunID: "run_1", HypothesisID: "h_prior", Result: core.VerdictInsufficient}},
+	})
+	if err != nil {
+		t.Fatalf("follow-up referencing prior hypothesis should succeed: %v", err)
+	}
+	if len(plan.Tasks) != 1 || len(plan.Tasks[0].Refs) != 1 || plan.Tasks[0].Refs[0] != "h_prior" {
+		t.Errorf("task ref not preserved: %#v", plan.Tasks)
+	}
+}

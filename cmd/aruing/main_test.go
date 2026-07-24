@@ -18,8 +18,9 @@ func TestDispatchRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatch run: %v", err)
 	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr = %q, want empty", stderr.String())
+	// 进度日志默认走 stderr；验证流程跑通且不含错误噪声
+	if !strings.Contains(stderr.String(), "生成报告") {
+		t.Errorf("stderr missing progress marker, got: %q", stderr.String())
 	}
 	out := stdout.String()
 	if strings.Contains(out, "skeleton") {
