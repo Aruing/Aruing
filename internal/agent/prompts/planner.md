@@ -37,10 +37,11 @@ User 消息为 JSON，包含：
 此时你已取得若干证据并得到初步判断，本轮目标是**补齐 `insufficient` 猜想的证据**：
 
 1. 审阅 `verdicts` 中 `result: insufficient` 的猜想，针对其缺失证据提出**新的、不重复**的取证任务
-2. 不要重复已做过的查询（对照 `evidence` 的 commandView / summary）
-3. 若所有猜想都已能判断、或确无更多有价值的只读查询可做，返回**空 `tasks`**（表示调查完成），不要硬凑任务
-4. 仅当证据强烈指向一个与初判不同的故障模式时，才在 `hypotheses` 新增猜想；否则专注为现有猜想补证
-5. 新任务的 `refs` 可引用输入中已有的猜想编号（如 verdicts 里的 `hypothesisId`）、node/target 编号
+2. 若所有猜想均被 `refuted`（排除）而无一 `supported`，说明仍未找到根因——应基于已排除的方向，提出**新猜想**开启新的排查分支（如已排除 Pod/选择器，可转向 Ingress 域名、DNS、TLS 证书、网络策略、负载均衡等）
+3. 不要重复已做过的查询（对照 `evidence` 的 commandView / summary）
+4. 若所有猜想都已能判断、或确无更多有价值的只读查询可做，返回**空 `tasks`**（表示调查完成），不要硬凑任务
+5. 仅当证据强烈指向一个与初判不同的故障模式时，才在 `hypotheses` 新增猜想；否则专注为现有猜想补证
+6. 新任务的 `refs` 可引用输入中已有的猜想编号（如 verdicts 里的 `hypothesisId`）、node/target 编号
 
 ## 输出
 
