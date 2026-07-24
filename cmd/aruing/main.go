@@ -125,7 +125,7 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 
 	// 配置由 internal/config 统一从 env 读取；LLM 三件套不全时 newOrchestrator 走全 fake
 	cfg := config.Load()
-	orchestrator, err := newOrchestrator(factory, cfg)
+	orchestrator, err := newOrchestrator(factory, cfg, stderr)
 	if err != nil {
 		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
 	}

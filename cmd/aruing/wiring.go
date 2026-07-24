@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 
@@ -170,7 +171,7 @@ func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) error {
 // 保证 make test、CI 在无凭据时仍可运行
 // 工具执行一律经只读 Policy，禁止写类 kubectl 进入 Evidence 链
 // LLMResolver / LLMPlanner 的工具规格取自 Registry.Specs，与 Dispatcher 白名单同源
-func newOrchestrator(factory *core.Factory, cfg config.Config) (*agent.Orchestrator, error) {
+func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, error) {
 	roles, err := buildFakeRoles(factory, cfg.Tools)
 	if err != nil {
 		return nil, err
@@ -189,6 +190,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config) (*agent.Orchestra
 			factory,
 		)
 		orch.SetInvestigateMaxRounds(productionInvestigateMaxRounds)
+		orch.SetProgress(progress)
 		return orch, nil
 	}
 
@@ -228,5 +230,6 @@ func newOrchestrator(factory *core.Factory, cfg config.Config) (*agent.Orchestra
 		factory,
 	)
 	orch.SetInvestigateMaxRounds(productionInvestigateMaxRounds)
+	orch.SetProgress(progress)
 	return orch, nil
 }

@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"time"
@@ -93,6 +94,8 @@ type Orchestrator struct {
 	// 调查阶段规划轮数预算，零值表示使用 defaultInvestigateMaxRounds
 	// 默认 1 表示只跑一轮，与 beta2 单轮行为等价；多轮-3 调高并改 prompt 后才真正迭代
 	investigateMaxRounds int
+	// 运行过程进度输出；默认丢弃，CLI 接 stderr 让用户实时看到诊断流程
+	progress io.Writer
 }
 
 // 绑定完整闭环所需依赖并创建编排器
@@ -114,6 +117,7 @@ func NewOrchestrator(
 		verifier: verifierRole,
 		reporter: reporterRole,
 		factory:  factory,
+		progress: io.Discard,
 	}
 }
 
@@ -135,6 +139,23 @@ func (o *Orchestrator) SetInvestigateMaxRounds(maxRounds int) {
 	o.investigateMaxRounds = maxRounds
 }
 
+// 设置进度输出目标（通常为 stderr），nil 或不调用则静默
+// 进度只写该 sink，不污染 stdout 报告；写失败被忽略，不影响诊断
+func (o *Orchestrator) SetProgress(w io.Writer) {
+	if o == nil {
+		return
+	}
+	o.progress = w
+}
+
+// 向进度 sink 写一行；sink 为 nil 时跳过
+func (o *Orchestrator) progressf(format string, args ...any) {
+	if o == nil || o.progress == nil {
+		return
+	}
+	fmt.Fprintf(o.progress, format+"\n", args...)
+}
+
 // 从一次运行开始依次推进全部角色，成功时返回最终报告
 // 任一阶段失败都会立即停止并保留阶段上下文，不返回部分报告
 // 线性 Execute→Report 是最小单轮驱动方式，不是对外长期契约（architecture #15）
@@ -146,6 +167,7 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 		return core.Report{}, err
 	}
 
+	o.progressf("解析问题…")
 	query, err := o.parser.Parse(ctx, run)
 	if err != nil {
 		return core.Report{}, fmt.Errorf("parse run: %w", err)
@@ -160,6 +182,7 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	if err != nil {
 		return core.Report{}, err
 	}
+	o.progressf("生成报告…")
 	report, err := o.reporter.Report(ctx, run, verdicts, evidence)
 	if err != nil {
 		return core.Report{}, fmt.Errorf("build report: %w", err)
@@ -196,6 +219,7 @@ func (o *Orchestrator) investigateLoop(
 			return nil, nil, fmt.Errorf("investigate: %w", err)
 		}
 
+		o.progressf("调查第 %d 轮…", round+1)
 		plan, err := o.planner.Plan(ctx, PlanState{
 			Query:    query,
 			Targets:  targets,
@@ -208,8 +232,10 @@ func (o *Orchestrator) investigateLoop(
 
 		// 后续轮规划器若无可补查的任务，视为调查结束，沿用上一轮判断
 		if round > 0 && len(plan.Tasks) == 0 {
+			o.progressf("  规划器无更多任务，结束调查")
 			break
 		}
+		o.progressf("  规划 %d 个取证任务", len(plan.Tasks))
 
 		// 猜想跨轮累积，Verifier 每轮拿全量重判
 		hypotheses = append(hypotheses, plan.Hypotheses...)
@@ -226,6 +252,7 @@ func (o *Orchestrator) investigateLoop(
 		if err != nil {
 			return nil, nil, fmt.Errorf("verify evidence (round %d): %w", round, err)
 		}
+		o.progressf("  验证：%s", summarizeVerdicts(verdicts))
 		// 全部 supported/refuted 即证据充分，结束调查
 		if !hasInsufficientVerdict(verdicts) {
 			break
@@ -243,6 +270,22 @@ func hasInsufficientVerdict(verdicts []core.Verdict) bool {
 		}
 	}
 	return false
+}
+
+// 统计判断结果用于进度展示
+func summarizeVerdicts(verdicts []core.Verdict) string {
+	var supported, refuted, insufficient int
+	for _, v := range verdicts {
+		switch v.Result {
+		case core.VerdictSupported:
+			supported++
+		case core.VerdictRefuted:
+			refuted++
+		case core.VerdictInsufficient:
+			insufficient++
+		}
+	}
+	return fmt.Sprintf("%d 支持 / %d 排除 / %d 证据不足", supported, refuted, insufficient)
 }
 
 // 定位阶段循环：驱动提议 → 统一执行工具并发号 → 回喂 → 提交目标
@@ -285,7 +328,12 @@ func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]cor
 				}
 			}
 		case ResolveActionSubmitTargets:
-			return o.materializeTargets(query, action, state)
+			targets, mErr := o.materializeTargets(query, action, state)
+			if mErr != nil {
+				return nil, mErr
+			}
+			o.progressf("定位到 %d 个目标", len(targets))
+			return targets, nil
 		case ResolveActionFail:
 			msg := action.Error
 			if msg == "" {
@@ -335,8 +383,13 @@ func (o *Orchestrator) applyToolCall(ctx context.Context, state *ResolveState, c
 	return nil
 }
 
-// 执行任务并为证据发放编号与创建时间，定位与规划阶段共用
+// 执行任务并为证据发放编号与创建时间，定位与调查阶段共用
 func (o *Orchestrator) executeTask(ctx context.Context, task core.Task) (*core.Evidence, error) {
+	if task.Purpose != "" {
+		o.progressf("  执行 %s：%s", task.ToolName, task.Purpose)
+	} else {
+		o.progressf("  执行 %s", task.ToolName)
+	}
 	evidenceID, idErr := o.factory.NewID("e")
 	if idErr != nil {
 		return nil, fmt.Errorf("create evidence ID: %w", idErr)
