@@ -90,6 +90,9 @@ type Orchestrator struct {
 	factory entityFactory
 	// 定位阶段工具调用预算，零值表示使用 defaultResolveMaxRounds
 	resolveMaxRounds int
+	// 调查阶段规划轮数预算，零值表示使用 defaultInvestigateMaxRounds
+	// 默认 1 表示只跑一轮，与 beta2 单轮行为等价；多轮-3 调高并改 prompt 后才真正迭代
+	investigateMaxRounds int
 }
 
 // 绑定完整闭环所需依赖并创建编排器
@@ -123,6 +126,15 @@ func (o *Orchestrator) SetResolveMaxRounds(maxRounds int) {
 	o.resolveMaxRounds = maxRounds
 }
 
+// 覆盖调查阶段规划轮数预算，maxRounds 小于等于 0 时恢复默认值
+// 仅供 wiring 或测试调整；默认 1 保持单轮行为，调高后配合多轮 prompt 才产生迭代
+func (o *Orchestrator) SetInvestigateMaxRounds(maxRounds int) {
+	if o == nil {
+		return
+	}
+	o.investigateMaxRounds = maxRounds
+}
+
 // 从一次运行开始依次推进全部角色，成功时返回最终报告
 // 任一阶段失败都会立即停止并保留阶段上下文，不返回部分报告
 // 线性 Execute→Report 是最小单轮驱动方式，不是对外长期契约（architecture #15）
@@ -142,30 +154,95 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	if err != nil {
 		return core.Report{}, fmt.Errorf("resolve targets: %w", err)
 	}
-	plan, err := o.planner.Plan(ctx, PlanState{Query: query, Targets: targets})
+	// 调查阶段为编排可见循环：Plan→Execute→Verify，证据不足时带历史证据再 Plan
+	// 默认只跑一轮与 beta2 等价；预算调高后配合 prompt 才真正迭代（architecture #15-#16）
+	evidence, verdicts, err := o.investigateLoop(ctx, query, targets)
 	if err != nil {
-		return core.Report{}, fmt.Errorf("plan tasks: %w", err)
-	}
-
-	// 当前按计划顺序执行，先保证证据链闭合，再单独设计任务依赖调度
-	evidence := make([]core.Evidence, 0, len(plan.Tasks))
-	for _, task := range plan.Tasks {
-		item, executeErr := o.executeTask(ctx, task)
-		if executeErr != nil {
-			return core.Report{}, fmt.Errorf("execute task %q: %w", task.ID, executeErr)
-		}
-		evidence = append(evidence, *item)
-	}
-
-	verdicts, err := o.verifier.Verify(ctx, plan.Hypotheses, plan.Tasks, evidence)
-	if err != nil {
-		return core.Report{}, fmt.Errorf("verify evidence: %w", err)
+		return core.Report{}, err
 	}
 	report, err := o.reporter.Report(ctx, run, verdicts, evidence)
 	if err != nil {
 		return core.Report{}, fmt.Errorf("build report: %w", err)
 	}
 	return report, nil
+}
+
+// 调查阶段默认规划轮数：1 表示只跑一轮，与 beta2 单轮行为等价
+// 多轮-3 调高 wiring 默认值并改 prompt 后才真正迭代取证
+const defaultInvestigateMaxRounds = 1
+
+// 调查阶段循环：Plan→Execute→Verify，证据不足时带历史证据再 Plan
+//
+// 镜像 resolveLoop 的编排可见模式：累积状态在编排层，角色只返回本轮计划
+// 工具仍经 executeTask/Dispatcher，角色不私自调工具（#16）
+// 三个出口：预算耗尽 / Verify 无 insufficient / 后续轮规划器返回空任务
+func (o *Orchestrator) investigateLoop(
+	ctx context.Context,
+	query core.Query,
+	targets []core.Target,
+) ([]core.Evidence, []core.Verdict, error) {
+	maxRounds := o.investigateMaxRounds
+	if maxRounds <= 0 {
+		maxRounds = defaultInvestigateMaxRounds
+	}
+
+	var hypotheses []core.Hypothesis
+	var tasks []core.Task
+	var evidence []core.Evidence
+	var verdicts []core.Verdict
+
+	for round := 0; round < maxRounds; round++ {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, fmt.Errorf("investigate: %w", err)
+		}
+
+		plan, err := o.planner.Plan(ctx, PlanState{
+			Query:    query,
+			Targets:  targets,
+			Evidence: evidence,
+			Verdicts: verdicts,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("plan tasks (round %d): %w", round, err)
+		}
+
+		// 后续轮规划器若无可补查的任务，视为调查结束，沿用上一轮判断
+		if round > 0 && len(plan.Tasks) == 0 {
+			break
+		}
+
+		// 猜想跨轮累积，Verifier 每轮拿全量重判
+		hypotheses = append(hypotheses, plan.Hypotheses...)
+		for _, task := range plan.Tasks {
+			item, executeErr := o.executeTask(ctx, task)
+			if executeErr != nil {
+				return nil, nil, fmt.Errorf("execute task %q: %w", task.ID, executeErr)
+			}
+			tasks = append(tasks, task)
+			evidence = append(evidence, *item)
+		}
+
+		verdicts, err = o.verifier.Verify(ctx, hypotheses, tasks, evidence)
+		if err != nil {
+			return nil, nil, fmt.Errorf("verify evidence (round %d): %w", round, err)
+		}
+		// 全部 supported/refuted 即证据充分，结束调查
+		if !hasInsufficientVerdict(verdicts) {
+			break
+		}
+	}
+
+	return evidence, verdicts, nil
+}
+
+// 判断是否存在证据不足的结果，存在则调查循环应继续
+func hasInsufficientVerdict(verdicts []core.Verdict) bool {
+	for _, v := range verdicts {
+		if v.Result == core.VerdictInsufficient {
+			return true
+		}
+	}
+	return false
 }
 
 // 定位阶段循环：驱动提议 → 统一执行工具并发号 → 回喂 → 提交目标

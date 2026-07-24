@@ -328,3 +328,169 @@ func containsPrefix(prefixes []string, want string) bool {
 	}
 	return false
 }
+
+func countPrefix(prefixes []string, want string) int {
+	n := 0
+	for _, p := range prefixes {
+		if p == want {
+			n++
+		}
+	}
+	return n
+}
+
+// 调查循环：首轮 insufficient 触发再 Plan，次轮 supported 即停；两轮各取证一次
+func TestOrchestratorInvestigateLoop(t *testing.T) {
+	taskPlan := Plan{
+		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
+		Tasks:      []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}},
+	}
+	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{
+		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictInsufficient}},
+		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictSupported}},
+	}}
+	orch, reporter, factory := newInvestigateOrch(t, planner, verifier)
+	orch.SetInvestigateMaxRounds(3)
+
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if planner.calls != 2 || verifier.calls != 2 {
+		t.Errorf("calls = planner %d / verifier %d, want 2 / 2", planner.calls, verifier.calls)
+	}
+	if reporter.calls != 1 {
+		t.Errorf("reporter calls = %d, want 1", reporter.calls)
+	}
+	if got := countPrefix(factory.prefixes, "e"); got != 2 {
+		t.Errorf("evidence count = %d, want 2 (one per round)", got)
+	}
+	// 第二轮 Plan 应看到首轮累积的证据
+	if len(planner.seen) < 2 || planner.seen[1] != 1 {
+		t.Errorf("round-1 planner did not see prior evidence: %v", planner.seen)
+	}
+}
+
+// 预算耗尽时调查循环停止并照常出报告（不报错）
+func TestOrchestratorInvestigateBudget(t *testing.T) {
+	taskPlan := Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
+	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
+	orch, _, _ := newInvestigateOrch(t, planner, verifier)
+	orch.SetInvestigateMaxRounds(2)
+
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if planner.calls != 2 {
+		t.Errorf("planner calls = %d, want 2 (budget cap)", planner.calls)
+	}
+}
+
+// 后续轮规划器返回空任务时，调查提前结束，不再调用 Verify
+func TestOrchestratorInvestigateEmptyTasks(t *testing.T) {
+	taskPlan := Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
+	planner := &scriptedPlanner{plans: []Plan{taskPlan, {}}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
+	orch, _, _ := newInvestigateOrch(t, planner, verifier)
+	orch.SetInvestigateMaxRounds(3)
+
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if planner.calls != 2 {
+		t.Errorf("planner calls = %d, want 2", planner.calls)
+	}
+	if verifier.calls != 1 {
+		t.Errorf("verifier calls = %d, want 1 (empty tasks skips second verify)", verifier.calls)
+	}
+}
+
+// 默认预算 1：即便 insufficient 也只跑一轮，与 beta2 单轮行为等价
+func TestOrchestratorInvestigateDefault(t *testing.T) {
+	taskPlan := Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
+	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
+	orch, _, _ := newInvestigateOrch(t, planner, verifier)
+
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if planner.calls != 1 || verifier.calls != 1 {
+		t.Errorf("calls = planner %d / verifier %d, want 1 / 1 (default single round)", planner.calls, verifier.calls)
+	}
+}
+
+// 用脚本驱动的调查阶段测试桩：按序返回计划，用尽后重复最后一个
+type scriptedPlanner struct {
+	plans []Plan
+	calls int
+	seen  []int // 每次 Plan 收到的累积证据条数
+}
+
+func (p *scriptedPlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
+	if err := ctx.Err(); err != nil {
+		return Plan{}, err
+	}
+	p.seen = append(p.seen, len(state.Evidence))
+	p.calls++
+	if len(p.plans) == 0 {
+		return Plan{}, nil
+	}
+	idx := p.calls - 1
+	if idx >= len(p.plans) {
+		idx = len(p.plans) - 1
+	}
+	return p.plans[idx], nil
+}
+
+// 按脚本返回判断，用尽后重复最后一个；记录每轮收到的累积假设
+type scriptedVerifier struct {
+	results [][]core.Verdict
+	calls   int
+	hypSeen [][]core.Hypothesis
+}
+
+func (v *scriptedVerifier) Verify(ctx context.Context, hypotheses []core.Hypothesis, tasks []core.Task, evidence []core.Evidence) ([]core.Verdict, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	v.hypSeen = append(v.hypSeen, hypotheses)
+	idx := v.calls
+	if idx >= len(v.results) {
+		idx = len(v.results) - 1
+	}
+	v.calls++
+	return v.results[idx], nil
+}
+
+// 不做校验的报告桩，仅记录调用并返回绑定运行的空报告
+type scriptedReporter struct{ calls int }
+
+func (r *scriptedReporter) Report(ctx context.Context, run core.Run, verdicts []core.Verdict, evidence []core.Evidence) (core.Report, error) {
+	r.calls++
+	return core.Report{ID: "r", RunID: run.ID}, nil
+}
+
+// 组装一个定位即提交、调查阶段用脚本桩的编排器
+func newInvestigateOrch(t *testing.T, planner *scriptedPlanner, verifier *scriptedVerifier) (*Orchestrator, *scriptedReporter, *testFactory) {
+	t.Helper()
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	parser := NewFakeParser(core.Query{
+		ID:    "q_inv",
+		RunID: "run_inv",
+		Nodes: []core.Node{{ID: "n_inv", Type: "resource", Text: "demo"}},
+	})
+	resolver := NewFakeResolver(nil)
+	reporter := &scriptedReporter{}
+	factory := &testFactory{now: time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)}
+	orch := NewOrchestrator(
+		parser, resolver, planner,
+		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
+		verifier, reporter, factory,
+	)
+	return orch, reporter, factory
+}
