@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-24（R-1 CLI Markdown 渲染完成，beta2 代码收尾）
+> 最后更新：2026-07-24（beta2 完成并通过端到端验收）
 
 ## 当前阶段
 
-`0.0.1-beta2` / 真实闭环：把假角色逐个换成真实现，目标 `aruing run` 在真实 Kubernetes 集群 + 真实 LLM 下端到端产出可追溯的 Markdown 诊断报告。
+**`0.0.1-beta2` / 真实闭环已完成**：五个假角色全部换成真实现，`aruing run` 在真实 Kubernetes 集群 + 真实 LLM 下端到端产出可追溯的 Markdown 诊断报告，里程碑完成标志 1–6 全部满足。
+
+下一阶段待规划（见下方「下一步」）。
 
 前置：`0.0.1-beta1` 最小假闭环已完成（Run → Query → Target → Hypothesis → Task → Evidence → Verdict → Report 数据流跑通，所有模块边界立住）。
 
@@ -23,11 +25,20 @@
 | 6 | Verifier | ✅ | `LLMVerifier`：单次 `Verify`；只引用已登记 Evidence；Factory 回填 Verdict ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 7 | Reporter | ✅ | `LLMReporter`：单次 `Report`；结论对齐 Verdict；证据引用不得越界；Factory 回填 Report ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 8 | 配置层 | ✅ | `internal/config`：`Load`/`LoadFrom` 收敛 `ARUING_LLM_*` 与 `ARUING_KUBECTL_PATH`；wiring 只吃 `Config`；CLI `formatRunError` 最小 L-8 |
+| R-1 | CLI Markdown 渲染 | ✅ | PR #19 `renderMarkdown` 纯函数渲染；CLI 默认 Markdown，`--format json` 保留 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
 ## 已完成 PR
 
+- #19 feat(cli): render Markdown diagnosis report by default（`3deff24`）
+- #18 feat(config): centralize env loading and minimal LLM error hints（`7462ec3`）
+- #17 feat(agent): replace FakeReporter with LLMReporter（`808d1f5`）
+- #16 feat(agent): replace FakePlanner and FakeVerifier with LLM implementations（`6f0e977`）
+- #15 feat(agent): orchestrated resolve loop and LLMResolver（`73d015b`）
+- #13 feat(tools): add readonly Policy and optional k8s wiring（`f6209e1`）
+- #12 docs: record linear Orchestrator as temporary single-turn driver（`89603ce`）
+- #11 feat: add shell-less Kubernetes tool and discoverable specs（`19b449a`）
 - #10 fix: correct tool readonly constraint（`fcf8421`）
 - #9 docs: add aruing-pr-description skill（`3775e7e`）
 - #8 docs: add repo documentation per aruing-docs skill（`19b8973`）
@@ -41,14 +52,16 @@
 
 ## 下一步
 
-**beta2 端到端验收**：在真实 Kubernetes 集群 + 真实 LLM 下跑 `make run-llm`，对照里程碑完成标志 1–6 确认全绿后关 beta2。
+beta2 已完成并通过端到端验收（里程碑完成标志 1–6 全绿）。下一阶段方向待规划，候选：
 
-beta2 之后方向（非本阶段必做）：
-- `O-1` 用户侧多轮 / Session（编排升级）
-- `L-5` LLM ExtraHeaders / UA（部署侧）
-- 持久化（`internal/store`）
+- `O-1` 用户侧多轮 / Session（编排升级，约 1–3 周）
+- 系统内部多轮（角色可连续取证再判断，约数人日）
+- 持久化（`internal/store`，当前仍内存）
+- `L-5` LLM ExtraHeaders / UA（部署侧加固）
+- 写工具 / 辅助修复（需用户确认）
+- 更多后端工具（Prometheus / Loki）
 
-设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-24-markdown.md`（R-1 已落地）。
+阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 
 已落地要点：
 
@@ -56,8 +69,9 @@ beta2 之后方向（非本阶段必做）：
 2. **#4b**：`Orchestrator.resolveTargets` 循环；`ResolveDriver` / `LLMResolver` / 按节点的 `FakeResolver`；Target ID 与定位阶段 Task/Evidence ID 由编排发放；L-1 关闭
 3. **#5**：`LLMPlanner` 单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；不在规划阶段多轮调 Tool（#15–#16）
 4. **#6**：`LLMVerifier` 单次 `Verify`；每条 Hypothesis 恰好一条 Verdict；`evidence_ids` 必须属于输入 Evidence；Factory 回填 Verdict ID；业务重试
-5. **#7**：`LLMReporter` 单次 `Report`；结论覆盖每条 Verdict 且 `result` 一致；`evidence_ids` ⊆ 对应 Verdict 证据集；Factory 回填 Report ID；业务重试；CLI 仍输出结构化 JSON（Markdown 渲染可 follow-up）
+5. **#7**：`LLMReporter` 单次 `Report`；结论覆盖每条 Verdict 且 `result` 一致；`evidence_ids` ⊆ 对应 Verdict 证据集；Factory 回填 Report ID；业务重试
 6. **#8**：`internal/config` 唯一读 `ARUING_*`；`cmd` 不直接 `os.Getenv` 业务键；L-8 最小 `formatRunError`
+7. **R-1**：`renderMarkdown` 纯函数渲染；CLI 默认 Markdown，`--format json` 保留
 
 ## 编排与多轮（2026-7-22 已确认）
 
@@ -94,6 +108,6 @@ beta2 之后方向（非本阶段必做）：
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
 | O-1 | 用户侧多轮 / Session 未开 |
-| R-1 | ✅ CLI 默认 Markdown，`--format json` 保留（#R-1） |
+| R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。

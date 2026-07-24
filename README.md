@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-`0.0.1-beta2` / 真实闭环：把假角色逐个换成真实现，目标 `aruing run` 端到端产出 Markdown 报告。
+`0.0.1-beta2` / 真实闭环已完成：五个角色全部接 LLM，`aruing run` 在真实 Kubernetes 集群 + 真实 LLM 下端到端产出可追溯的 Markdown 报告。下一阶段待规划。
 
 详细状态见 [`docs/project-state.md`](docs/project-state.md)。
 
