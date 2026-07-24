@@ -23,6 +23,11 @@ import (
 	"aruing/internal/tools/k8s"
 )
 
+// 生产环境调查阶段规划轮数上限
+// 一轮≈1 次 Planner + N 次工具 + 1 次 Verifier；3 轮可走完 Pod→logs→describe 这类证据链
+// fake 路径首轮即出 supported 退出，不受此值影响
+const productionInvestigateMaxRounds = 3
+
 // 描述组装编排器所需的角色集合
 // 各角色在有 LLM 配置时可替换为真实现；字段类型放宽为 Orchestrator 构造所需的最小能力
 type orchestratorRoles struct {
@@ -174,7 +179,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config) (*agent.Orchestra
 	dispatcher := tools.NewDispatcher(roles.registry, tools.NewReadonlyPolicy())
 
 	if !cfg.LLM.Ready() {
-		return agent.NewOrchestrator(
+		orch := agent.NewOrchestrator(
 			roles.parser,
 			roles.resolver,
 			roles.planner,
@@ -182,7 +187,9 @@ func newOrchestrator(factory *core.Factory, cfg config.Config) (*agent.Orchestra
 			roles.verifier,
 			roles.reporter,
 			factory,
-		), nil
+		)
+		orch.SetInvestigateMaxRounds(productionInvestigateMaxRounds)
+		return orch, nil
 	}
 
 	client, err := llm.NewClient(cfg.LLM.ToClientConfig())
@@ -211,7 +218,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config) (*agent.Orchestra
 		return nil, fmt.Errorf("build llm reporter: %w", err)
 	}
 
-	return agent.NewOrchestrator(
+	orch := agent.NewOrchestrator(
 		parser,
 		resolver,
 		planner,
@@ -219,5 +226,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config) (*agent.Orchestra
 		verifier,
 		reporter,
 		factory,
-	), nil
+	)
+	orch.SetInvestigateMaxRounds(productionInvestigateMaxRounds)
+	return orch, nil
 }

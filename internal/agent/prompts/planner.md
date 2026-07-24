@@ -29,6 +29,18 @@ User 消息为 JSON，包含：
 
 - `query`：问题结构（goal、nodes、edges、timeRange；节点/边已是系统编号如 `node_...`）
 - `targets`：已确认目标（id、nodeId、type、attrs、evidenceIds）
+- `evidence`（可选）：前几轮已取得的证据（id、taskId、toolName、commandView、summary、error、raw）；**存在时表示你在后续轮**
+- `verdicts`（可选）：上一轮的判断（hypothesisId、result、reason、evidenceIds）；`result: insufficient` 的猜想证据不足，需要补查
+
+## 后续轮行为（当输入含 evidence/verdicts 时）
+
+此时你已取得若干证据并得到初步判断，本轮目标是**补齐 `insufficient` 猜想的证据**：
+
+1. 审阅 `verdicts` 中 `result: insufficient` 的猜想，针对其缺失证据提出**新的、不重复**的取证任务
+2. 不要重复已做过的查询（对照 `evidence` 的 commandView / summary）
+3. 若所有猜想都已能判断、或确无更多有价值的只读查询可做，返回**空 `tasks`**（表示调查完成），不要硬凑任务
+4. 仅当证据强烈指向一个与初判不同的故障模式时，才在 `hypotheses` 新增猜想；否则专注为现有猜想补证
+5. 新任务的 `refs` 可引用输入中已有的猜想编号（如 verdicts 里的 `hypothesisId`）、node/target 编号
 
 ## 输出
 
@@ -75,7 +87,7 @@ User 消息为 JSON，包含：
 ## 硬约束
 
 1. 只输出 JSON 对象，不要解释文字、不要 markdown 围栏。
-2. `hypotheses` 与 `tasks` 均至少 1 个；各自 `ref` 在同类内严格唯一。
+2. `ref` 唯一性：首轮 `hypotheses` 与 `tasks` 均至少 1 个；后续轮（输入含 evidence）`tasks` 可为空（表示调查完成），`hypotheses` 可选。各自 `ref` 在同类内严格唯一。
 3. 不要填入 `id`、`runId`、`createdAt` 等系统字段，这些由程序统一生成。
 4. 不要编造输入中不存在的 query / node / edge / target 编号；hypothesis 只用本输出局部 ref。
 5. 不要提议写操作（apply/create/delete/patch/exec 等）；只读查询（get/describe/logs/top/list 等）。
