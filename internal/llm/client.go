@@ -5,10 +5,12 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -27,15 +29,72 @@ func NewClient(cfg Config) (Client, error) {
 	}
 
 	// DefaultConfig 已填入默认 BaseURL 和 HTTPClient，这里按用户配置覆盖
+	// HTTPClient 套 forceNonStreamTransport：go-openai 的 Stream 字段带 omitempty，
+	// false 不会出现在 JSON 里；部分兼容网关把「缺省 stream」当成 true，回 SSE
+	// （body 以 data: 开头）→ SDK 按整包 JSON 解析时报 invalid character 'd'。
+	// 官方 OpenAI 缺省为非流式；这里显式注入 "stream":false 对齐官方语义。
 	ocfg := openai.DefaultConfig(normalized.APIKey)
 	ocfg.BaseURL = normalized.BaseURL
-	ocfg.HTTPClient = &http.Client{Timeout: normalized.Timeout}
+	ocfg.HTTPClient = &http.Client{
+		Timeout:   normalized.Timeout,
+		Transport: forceNonStreamTransport{base: http.DefaultTransport},
+	}
 
 	return &client{
 		api:        openai.NewClientWithConfig(ocfg),
 		model:      normalized.Model,
 		maxRetries: normalized.MaxRetries,
 	}, nil
+}
+
+// 在 chat/completions 请求体缺省 stream 时写入 false，避免兼容网关默认开流式
+//
+// 仅改写 JSON object 请求；已显式带 stream 的请求原样转发
+// 不依赖具体 path 前缀以外的约定，兼容 /v1 与自定义 base
+type forceNonStreamTransport struct {
+	base http.RoundTripper
+}
+
+func (t forceNonStreamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if req.Method == http.MethodPost && req.Body != nil && strings.Contains(req.URL.Path, "/chat/completions") {
+		body, err := io.ReadAll(req.Body)
+		_ = req.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		body = ensureStreamFalse(body)
+		req = req.Clone(req.Context())
+		req.Body = io.NopCloser(bytes.NewReader(body))
+		req.ContentLength = int64(len(body))
+		req.GetBody = func() (io.ReadCloser, error) {
+			return io.NopCloser(bytes.NewReader(body)), nil
+		}
+	}
+	return base.RoundTrip(req)
+}
+
+// 若 JSON 对象未设置 stream，则补 "stream":false；解析失败则原样返回
+//
+// 用 map[string]json.RawMessage 承载其余字段，避免 unmarshal 到 any 时数字被转成
+// float64 造成大整数（如 seed）丢精度，同时保留原始字节不改变序列化形态
+func ensureStreamFalse(body []byte) []byte {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		return body
+	}
+	if _, exists := m["stream"]; exists {
+		return body
+	}
+	m["stream"] = json.RawMessage("false")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
 }
 
 // OpenAI 兼容协议的适配器实现

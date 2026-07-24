@@ -32,14 +32,20 @@ make check              # 完整 CI 检查（test-ci + vet + lint + fmt + tidy +
 ./bin/aruing run default 里的 demo-api 为什么访问不了
 ```
 
-接入真实 LLM 时设三个 env（不设则走 fake 闭环）：
+### 本地 LLM 调试（推荐）
+
+不必每次手动 `export`。仓库已 ignore `.env`；用模板生成后由 Make 自动加载：
 
 ```bash
-export ARUING_LLM_BASE_URL=https://your-openai-compatible-endpoint/v1
-export ARUING_LLM_API_KEY=sk-...
-export ARUING_LLM_MODEL=gpt-4o-mini
+cp .env.example .env    # 填入 BaseURL / APIKey / Model
+make print-env          # 确认已加载（不打印 key 全文）
+make run-llm            # source .env 后执行 aruing run
+make run-llm QUESTION='default 里的 demo-api 为什么访问不了'
+# 多套环境：make run-llm ENV_FILE=.env.ollama
 ```
 
+三个 LLM 变量都非空时走真角色；任一缺失或没有 `.env` 时与现行为一致（全 fake）。  
+也可在 shell 里自行 `export`，不经过 Make。
 ## 关键约束摘要
 
 - `Run` 不嵌套子实体，所有实体通过 `RunID` 扁平关联

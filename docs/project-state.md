@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-23（#7 LLMReporter 完成）
+> 最后更新：2026-07-23（#8 internal/config 完成）
 
 ## 当前阶段
 
@@ -22,7 +22,7 @@
 | 5 | Planner | ✅ | `LLMPlanner`：单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 6 | Verifier | ✅ | `LLMVerifier`：单次 `Verify`；只引用已登记 Evidence；Factory 回填 Verdict ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 7 | Reporter | ✅ | `LLMReporter`：单次 `Report`；结论对齐 Verdict；证据引用不得越界；Factory 回填 Report ID；业务重试；wiring 在 LLM 齐备时启用 |
-| 8 | 配置层 | 未开始 | `internal/config` 集中收敛 env |
+| 8 | 配置层 | ✅ | `internal/config`：`Load`/`LoadFrom` 收敛 `ARUING_LLM_*` 与 `ARUING_KUBECTL_PATH`；wiring 只吃 `Config`；CLI `formatRunError` 最小 L-8 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -41,9 +41,11 @@
 
 ## 下一步
 
-`#8 配置层`：新增 `internal/config`，集中收敛 LLM / 工具相关 env，消除 wiring 与 CLI 的重复读取；可一并处理 L-8（CLI 翻译 LLM error）。
+`R-1`（可选）：CLI 在 JSON 之外提供 Markdown 报告渲染（纯函数，不改编排）。
 
-设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-23-reporter.md`（#7 已落地）。
+或：`O-1` 用户侧多轮 / Session（编排升级，非本阶段必做）。
+
+设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-23-config.md`（#8 已落地）。
 
 已落地要点：
 
@@ -52,6 +54,7 @@
 3. **#5**：`LLMPlanner` 单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；不在规划阶段多轮调 Tool（#15–#16）
 4. **#6**：`LLMVerifier` 单次 `Verify`；每条 Hypothesis 恰好一条 Verdict；`evidence_ids` 必须属于输入 Evidence；Factory 回填 Verdict ID；业务重试
 5. **#7**：`LLMReporter` 单次 `Report`；结论覆盖每条 Verdict 且 `result` 一致；`evidence_ids` ⊆ 对应 Verdict 证据集；Factory 回填 Report ID；业务重试；CLI 仍输出结构化 JSON（Markdown 渲染可 follow-up）
+6. **#8**：`internal/config` 唯一读 `ARUING_*`；`cmd` 不直接 `os.Getenv` 业务键；L-8 最小 `formatRunError`
 
 ## 编排与多轮（2026-7-22 已确认）
 
@@ -85,8 +88,8 @@
 
 | 编号 | 一句话 |
 | --- | --- |
-| L-8 | CLI 对 LLM 错误的翻译仍可能偏薄 |
-| C-1 | env 读取尚未收敛到 `internal/config`（#8） |
+| L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
+| C-1 | ✅ 已收敛到 `internal/config`（#8） |
 | O-1 | 用户侧多轮 / Session 未开 |
 | R-1 | CLI 默认 JSON 与「Markdown 报告」产品文案的展示缺口（可 follow-up 纯函数渲染） |
 

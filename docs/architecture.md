@@ -34,7 +34,7 @@ flowchart LR
 
 | 包 | 负责 | 不负责 |
 | --- | --- | --- |
-| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`：无 LLM 全 fake；有 LLM 时 Parser/Resolver/Planner/Verifier/Reporter 换真实现） | 不承担推理、不查集群 |
+| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go` 吃 `config.Config`：无 LLM 全 fake；有 LLM 时五角色换真实现）；`formatRunError` 对 LLM 类失败附人话提示 | 不承担推理、不查集群、不直接读业务 env |
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
 | `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner`（`LLMPlanner` / `FakePlanner`）/ `Verifier`（`LLMVerifier` / `FakeVerifier`）/ `Reporter`（`LLMReporter` / `FakeReporter`）及 `Orchestrator` 编排；Parser、Resolver、Planner、Verifier、Reporter 可接 LLM（prompt `//go:embed`）；规划、验证与报告均为单次调用，工具规格来自 `Registry.Specs` | 不直接查集群、不持久化；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
@@ -44,7 +44,7 @@ flowchart LR
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
 | `internal/store` | 持久化诊断状态和证据（占位） | 当前未实现 |
 | `internal/graph` | 流程编排状态机（占位） | 当前未用；线性流程暂由 `Orchestrator` 承担，多轮升级时承接状态机 |
-| `internal/config` | 集中收敛运行参数（占位） | 当前由 `cmd/aruing/main.go` 直接读 env |
+| `internal/config` | 从 env（`ARUING_*`）加载进程级配置：`LLM`（BaseURL/APIKey/Model）、`Tools.KubectlPath`；`LLM.Ready` / `ToClientConfig` | 不解析配置文件、不热更新、不读 `.env` 文件本身 |
 | `internal/api` | HTTP / 网络入口（占位） | 当前仅 CLI |
 
 ## 核心数据结构
