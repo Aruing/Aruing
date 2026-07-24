@@ -192,6 +192,26 @@ func TestEnsureStreamFalse(t *testing.T) {
 	}
 }
 
+// 大整数字段（如 seed）经 ensureStreamFalse 注入 stream 后不得丢精度
+// 验证用 RawMessage 承载其余字段，避免 float64 往返造成的精度损失
+func TestEnsureStreamFalsePreservesBigInt(t *testing.T) {
+	t.Parallel()
+
+	const bigSeed = 9007199254740993 // 2^53 + 1，float64 无法精确表示
+	in := []byte(`{"model":"m","seed":9007199254740993,"messages":[]}`)
+	got := ensureStreamFalse(in)
+
+	var out struct {
+		Seed int64 `json:"seed"`
+	}
+	if err := json.Unmarshal(got, &out); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if out.Seed != bigSeed {
+		t.Fatalf("seed = %d, want %d (precision lost)", out.Seed, bigSeed)
+	}
+}
+
 // GenerateJSON 应处理被围栏包裹的 JSON 输出
 func TestGenerateJSONFenced(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {

@@ -78,15 +78,18 @@ func (t forceNonStreamTransport) RoundTrip(req *http.Request) (*http.Response, e
 }
 
 // 若 JSON 对象未设置 stream，则补 "stream":false；解析失败则原样返回
+//
+// 用 map[string]json.RawMessage 承载其余字段，避免 unmarshal 到 any 时数字被转成
+// float64 造成大整数（如 seed）丢精度，同时保留原始字节不改变序列化形态
 func ensureStreamFalse(body []byte) []byte {
-	var m map[string]any
+	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
 		return body
 	}
 	if _, exists := m["stream"]; exists {
 		return body
 	}
-	m["stream"] = false
+	m["stream"] = json.RawMessage("false")
 	out, err := json.Marshal(m)
 	if err != nil {
 		return body
