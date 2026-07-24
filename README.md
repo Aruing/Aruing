@@ -29,7 +29,8 @@ make build              # 编译 cmd/aruing
 make test               # 跑全部测试
 make check              # 完整 CI 检查（test-ci + vet + lint + fmt + tidy + vuln）
 
-./bin/aruing run default 里的 demo-api 为什么访问不了
+./bin/aruing run default 里的 demo-api 为什么访问不了          # 默认输出 Markdown 报告
+./bin/aruing run --format json default 里的 demo-api 为什么访问不了  # 结构化 JSON
 ```
 
 ### 本地 LLM 调试（推荐）

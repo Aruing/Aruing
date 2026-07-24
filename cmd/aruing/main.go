@@ -82,16 +82,21 @@ func runVersion(args []string, stdout io.Writer) error {
 	return nil
 }
 
-// 解析运行子命令的用户问题，执行当前完整假闭环并输出结构化报告
+// 解析运行子命令的用户问题，执行诊断编排并按指定格式输出报告
 // 所有非标志参数拼接为问题文本，因此用户不需要用引号包裹带空格的问题
+// 默认输出 Markdown 报告；--format json 输出结构化 JSON 供机器消费
 // 标准错误用于参数错误和局部帮助，标准输出只承载正常命令结果
 func runRun(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	format := fs.String("format", "markdown", "output format: markdown|json")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: aruing run <question>")
+		fmt.Fprintln(stderr, "Usage: aruing run [flags] <question>")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "Run a diagnosis for the given question.")
+		fmt.Fprintln(stderr, "")
+		fmt.Fprintln(stderr, "Flags:")
+		fs.PrintDefaults()
 	}
 
 	if err := fs.Parse(args); err != nil {
@@ -129,10 +134,25 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		return formatRunError(fmt.Errorf("execute diagnosis: %w", err))
 	}
 
-	encoder := json.NewEncoder(stdout)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(report); err != nil {
-		return fmt.Errorf("write report: %w", err)
+	return writeReport(stdout, *format, report)
+}
+
+// 按指定格式把报告写入 stdout
+func writeReport(stdout io.Writer, format string, report core.Report) error {
+	switch format {
+	case "markdown":
+		if _, err := io.WriteString(stdout, renderMarkdown(report)); err != nil {
+			return fmt.Errorf("write report: %w", err)
+		}
+		return nil
+	case "json":
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			return fmt.Errorf("write report: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown format %q: use markdown or json", format)
 	}
-	return nil
 }

@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-23（#8 internal/config 完成）
+> 最后更新：2026-07-24（R-1 CLI Markdown 渲染完成，beta2 代码收尾）
 
 ## 当前阶段
 
@@ -41,11 +41,14 @@
 
 ## 下一步
 
-`R-1`（可选）：CLI 在 JSON 之外提供 Markdown 报告渲染（纯函数，不改编排）。
+**beta2 端到端验收**：在真实 Kubernetes 集群 + 真实 LLM 下跑 `make run-llm`，对照里程碑完成标志 1–6 确认全绿后关 beta2。
 
-或：`O-1` 用户侧多轮 / Session（编排升级，非本阶段必做）。
+beta2 之后方向（非本阶段必做）：
+- `O-1` 用户侧多轮 / Session（编排升级）
+- `L-5` LLM ExtraHeaders / UA（部署侧）
+- 持久化（`internal/store`）
 
-设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-23-config.md`（#8 已落地）。
+设计见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-24-markdown.md`（R-1 已落地）。
 
 已落地要点：
 
@@ -91,6 +94,6 @@
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
 | O-1 | 用户侧多轮 / Session 未开 |
-| R-1 | CLI 默认 JSON 与「Markdown 报告」产品文案的展示缺口（可 follow-up 纯函数渲染） |
+| R-1 | ✅ CLI 默认 Markdown，`--format json` 保留（#R-1） |
 
 更多条目与关闭条件见笔记仓 plan。
