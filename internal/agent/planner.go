@@ -38,11 +38,13 @@ func NewFakePlanner(plan Plan) *FakePlanner {
 
 // 校验任务引用并返回绑定当前运行编号的独立计划
 // 上下文取消或引用未知数据时返回错误，不产生部分规划结果
-func (p *FakePlanner) Plan(ctx context.Context, query core.Query, targets []core.Target) (Plan, error) {
+// 当前 FakePlanner 不消费 Evidence/Verdicts（盲猜模板），字段到位只为对齐新契约
+func (p *FakePlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return Plan{}, fmt.Errorf("plan tasks: %w", err)
 	}
 
+	query, targets := state.Query, state.Targets
 	plan := clonePlan(p.plan)
 	for index := range plan.Hypotheses {
 		plan.Hypotheses[index].RunID = query.RunID

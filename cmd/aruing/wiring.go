@@ -31,7 +31,7 @@ type orchestratorRoles struct {
 	}
 	resolver agent.ResolveDriver
 	planner  interface {
-		Plan(context.Context, core.Query, []core.Target) (agent.Plan, error)
+		Plan(context.Context, agent.PlanState) (agent.Plan, error)
 	}
 	verifier interface {
 		Verify(context.Context, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)

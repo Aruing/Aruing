@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -71,7 +72,7 @@ func TestLLMPlannerPlan(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 
-	plan, err := planner.Plan(context.Background(), testPlanQuery(), testPlanTargets())
+	plan, err := planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -143,7 +144,7 @@ func TestLLMPlannerDependsOn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	plan, err := planner.Plan(context.Background(), testPlanQuery(), testPlanTargets())
+	plan, err := planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestLLMPlannerUnknownTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	_, err = planner.Plan(context.Background(), testPlanQuery(), testPlanTargets())
+	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
 	if !errors.Is(err, ErrLLMOutputInconsistent) {
 		t.Fatalf("error = %v, want ErrLLMOutputInconsistent", err)
 	}
@@ -192,7 +193,7 @@ func TestLLMPlannerUnknownRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	_, err = planner.Plan(context.Background(), testPlanQuery(), testPlanTargets())
+	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
 	if !errors.Is(err, ErrLLMOutputInconsistent) {
 		t.Fatalf("error = %v", err)
 	}
@@ -214,7 +215,7 @@ func TestLLMPlannerDuplicateHypRef(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	_, err = planner.Plan(context.Background(), testPlanQuery(), testPlanTargets())
+	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
 	if !errors.Is(err, ErrLLMOutputInconsistent) {
 		t.Fatalf("error = %v", err)
 	}
@@ -240,7 +241,7 @@ func TestLLMPlannerRetryThenOK(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	plan, err := planner.Plan(context.Background(), testPlanQuery(), testPlanTargets())
+	plan, err := planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
@@ -267,7 +268,7 @@ func TestLLMPlannerSpecsInPrompt(t *testing.T) {
 	}
 	// 修改调用方 specs 不应影响已构造实例的校验集合
 	specs[0].Name = "mutated"
-	_, err = planner.Plan(context.Background(), testPlanQuery(), testPlanTargets())
+	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
 	if err != nil {
 		t.Fatalf("plan after mutate: %v", err)
 	}
@@ -300,8 +301,42 @@ func TestLLMPlannerForeignTarget(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 	targets := []core.Target{{ID: "target_x", RunID: "other_run", NodeID: "node_1"}}
-	_, err = planner.Plan(context.Background(), testPlanQuery(), targets)
+	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: targets})
 	if !errors.Is(err, ErrLLMOutputInconsistent) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+// 首轮（Evidence/Verdicts 为 nil）发送给模型的 user payload 不得包含 evidence/verdicts 字段
+// 保证 PlanState 改造对模型输入零影响（与 beta2 逐字一致），后续循环才会带上历史证据
+func TestLLMPlannerFirstRoundPayload(t *testing.T) {
+	body := `{
+		"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],
+		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]
+	}`
+
+	var captured string
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		captured = string(raw)
+		writeChatCompletion(w, body)
+	})
+	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	if _, err := planner.Plan(context.Background(), PlanState{
+		Query:   testPlanQuery(),
+		Targets: testPlanTargets(),
+	}); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+
+	if strings.Contains(captured, "\"evidence\"") {
+		t.Errorf("first-round payload should omit evidence, got: %s", captured)
+	}
+	if strings.Contains(captured, "\"verdicts\"") {
+		t.Errorf("first-round payload should omit verdicts, got: %s", captured)
 	}
 }

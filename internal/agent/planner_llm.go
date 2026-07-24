@@ -60,7 +60,8 @@ func NewLLMPlanner(client llm.Client, factory *core.Factory, specs []tools.ToolS
 //
 // 模型若返回结构合法但语义违规的输出（未知工具、坏 ref 等），在业务级重试内重新请求；
 // 重试 maxPlanAttempts 次仍不合规则返回 ErrLLMOutputInconsistent
-func (p *LLMPlanner) Plan(ctx context.Context, query core.Query, targets []core.Target) (Plan, error) {
+// 首轮 state.Evidence/Verdicts 为 nil，payload 不含这两段，模型输入与 beta2 逐字一致
+func (p *LLMPlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
 	if ctx == nil {
 		return Plan{}, errors.New("planner requires a context")
 	}
@@ -70,11 +71,11 @@ func (p *LLMPlanner) Plan(ctx context.Context, query core.Query, targets []core.
 	if p == nil {
 		return Plan{}, errors.New("planner is required")
 	}
-	if strings.TrimSpace(query.RunID) == "" {
+	if strings.TrimSpace(state.Query.RunID) == "" {
 		return Plan{}, errors.New("planner requires a run ID")
 	}
 
-	userPayload, err := buildPlannerUserPayload(query, targets)
+	userPayload, err := buildPlannerUserPayload(state)
 	if err != nil {
 		return Plan{}, fmt.Errorf("build plan prompt: %w", err)
 	}
@@ -96,13 +97,13 @@ func (p *LLMPlanner) Plan(ctx context.Context, query core.Query, targets []core.
 			return Plan{}, fmt.Errorf("plan with LLM: %w", gErr)
 		}
 
-		if vErr := validatePlannerOutput(out, query, targets, p.specs); vErr != nil {
+		if vErr := validatePlannerOutput(out, state.Query, state.Targets, p.specs); vErr != nil {
 			lastOut = out
 			lastValidateErr = vErr
 			continue
 		}
 
-		return p.fillPlan(query.RunID, out)
+		return p.fillPlan(state.Query.RunID, out)
 	}
 
 	return Plan{}, fmt.Errorf("%w: last error: %v, last output: %+v",
@@ -121,13 +122,16 @@ func buildPlannerSystemPrompt(template string, specs []tools.ToolSpec) (string, 
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 序列化规划输入：完整 Query 与 Targets
-func buildPlannerUserPayload(query core.Query, targets []core.Target) (string, error) {
+// 序列化规划输入：Query、Targets，以及非空时的历史 Evidence 与 Verdicts
+// evidence/verdicts 用 omitempty，首轮为 nil 时不出现在 JSON，保证模型输入与 beta2 一致
+func buildPlannerUserPayload(state PlanState) (string, error) {
 	type payload struct {
-		Query   core.Query    `json:"query"`
-		Targets []core.Target `json:"targets"`
+		Query    core.Query      `json:"query"`
+		Targets  []core.Target   `json:"targets"`
+		Evidence []core.Evidence `json:"evidence,omitempty"`
+		Verdicts []core.Verdict  `json:"verdicts,omitempty"`
 	}
-	raw, err := json.MarshalIndent(payload{Query: query, Targets: targets}, "", "  ")
+	raw, err := json.MarshalIndent(payload(state), "", "  ")
 	if err != nil {
 		return "", err
 	}

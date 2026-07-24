@@ -194,7 +194,7 @@ func TestEnsureStreamFalse(t *testing.T) {
 
 // 大整数字段（如 seed）经 ensureStreamFalse 注入 stream 后不得丢精度
 // 验证用 RawMessage 承载其余字段，避免 float64 往返造成的精度损失
-func TestEnsureStreamFalsePreservesBigInt(t *testing.T) {
+func TestEnsureStreamFalseNumbers(t *testing.T) {
 	t.Parallel()
 
 	const bigSeed = 9007199254740993 // 2^53 + 1，float64 无法精确表示

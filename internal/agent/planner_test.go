@@ -36,7 +36,7 @@ func TestFakePlannerPlan(t *testing.T) {
 	}
 	targets := []core.Target{{ID: "target_demo", RunID: "run_test", NodeID: "node_demo"}}
 
-	got, err := planner.Plan(context.Background(), query, targets)
+	got, err := planner.Plan(context.Background(), PlanState{Query: query, Targets: targets})
 	if err != nil {
 		t.Fatalf("plan tasks: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestFakePlannerPlan(t *testing.T) {
 	// 多次规划不能共享可变列表，否则一次结果可能污染后续运行
 	got.Hypotheses[0].ExpectedSignals[0] = "changed"
 	got.Tasks[0].Refs[0] = "changed"
-	again, err := planner.Plan(context.Background(), query, targets)
+	again, err := planner.Plan(context.Background(), PlanState{Query: query, Targets: targets})
 	if err != nil {
 		t.Fatalf("plan tasks again: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestFakePlannerValidate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := NewFakePlanner(test.plan).Plan(context.Background(), query, test.targets); err == nil {
+			if _, err := NewFakePlanner(test.plan).Plan(context.Background(), PlanState{Query: query, Targets: test.targets}); err == nil {
 				t.Fatal("plan tasks: error = nil")
 			}
 		})
