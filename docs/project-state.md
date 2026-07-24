@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-24（beta3 启动 / 多轮-1 Planner 接口扩展）
+> 最后更新：2026-07-24（beta3 多轮-2 调查循环主体）
 
 ## 当前阶段
 
@@ -27,6 +27,7 @@
 | 8 | 配置层 | ✅ | `internal/config`：`Load`/`LoadFrom` 收敛 `ARUING_LLM_*` 与 `ARUING_KUBECTL_PATH`；wiring 只吃 `Config`；CLI `formatRunError` 最小 L-8 |
 | R-1 | CLI Markdown 渲染 | ✅ | PR #19 `renderMarkdown` 纯函数渲染；CLI 默认 Markdown，`--format json` 保留 |
 | 多轮-1 | Planner 接口扩展 | ✅ | 引入 `PlanState`（Query/Targets/Evidence/Verdicts），`Plan(ctx, PlanState)`；首轮零行为变化，锁定调查循环的输入契约 |
+| 多轮-2 | 调查循环主体 | ✅ | `investigateLoop`：Plan→Execute→Verify 循环，证据不足带历史再 Plan；预算/setter 对齐 resolveLoop；默认 1 轮等价 beta2，循环能力由单测覆盖 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -53,11 +54,10 @@
 
 ## 下一步
 
-**下一项：多轮-2 调查循环主体**（Orchestrator 把 Plan→Execute→Verify 改为带预算的循环，证据不足时带历史证据再 Plan）。设计见笔记 `arui-note/aruing/plan/0.0.1-beta3/`。
+**下一项：多轮-3 Planner prompt 升级**（让 LLMPlanner 看到历史证据/verdicts 时生成补查任务，并把生产预算调高，真正开启迭代取证）。设计见笔记 `arui-note/aruing/plan/0.0.1-beta3/`。
 
 候选（未排期，做到时再转下一项）：
-- 多轮-2 调查循环主体（编排驱动，#15-#16 不破）
-- 多轮-3 Planner prompt 升级（基于证据生成补查任务）
+- 多轮-3 Planner prompt 升级 + 调高生产预算
 - 多轮-4 工具失败容错 + 报告调查链可见
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
