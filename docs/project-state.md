@@ -1,14 +1,14 @@
 # 项目当前状态
 
-> 最后更新：2026-07-24（beta2 完成并通过端到端验收）
+> 最后更新：2026-07-24（beta3 启动 / 多轮-1 Planner 接口扩展）
 
 ## 当前阶段
 
-**`0.0.1-beta2` / 真实闭环已完成**：五个假角色全部换成真实现，`aruing run` 在真实 Kubernetes 集群 + 真实 LLM 下端到端产出可追溯的 Markdown 诊断报告，里程碑完成标志 1–6 全部满足。
+**`0.0.1-beta3` / 调查循环**：让 Planner/Verifier 能基于已有证据迭代取证，像 SRE 顺着证据链找根因，而不是开局盲猜一次就交报告。
 
-下一阶段待规划（见下方「下一步」）。
+目标与完成标志见笔记 `arui-note/aruing/plan/milestone/0.0.1-beta3.md`。
 
-前置：`0.0.1-beta1` 最小假闭环已完成（Run → Query → Target → Hypothesis → Task → Evidence → Verdict → Report 数据流跑通，所有模块边界立住）。
+前置：`0.0.1-beta2` 真实闭环已完成（五角色全接 LLM，`aruing run` 端到端产出可追溯 Markdown 报告）。`0.0.1-beta1` 最小假闭环已完成（数据流跑通，模块边界立住）。
 
 ## 工作单元
 
@@ -26,6 +26,7 @@
 | 7 | Reporter | ✅ | `LLMReporter`：单次 `Report`；结论对齐 Verdict；证据引用不得越界；Factory 回填 Report ID；业务重试；wiring 在 LLM 齐备时启用 |
 | 8 | 配置层 | ✅ | `internal/config`：`Load`/`LoadFrom` 收敛 `ARUING_LLM_*` 与 `ARUING_KUBECTL_PATH`；wiring 只吃 `Config`；CLI `formatRunError` 最小 L-8 |
 | R-1 | CLI Markdown 渲染 | ✅ | PR #19 `renderMarkdown` 纯函数渲染；CLI 默认 Markdown，`--format json` 保留 |
+| 多轮-1 | Planner 接口扩展 | ✅ | 引入 `PlanState`（Query/Targets/Evidence/Verdicts），`Plan(ctx, PlanState)`；首轮零行为变化，锁定调查循环的输入契约 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -52,14 +53,12 @@
 
 ## 下一步
 
-beta2 已完成并通过端到端验收（里程碑完成标志 1–6 全绿）。下一阶段方向待规划，候选：
+**下一项：多轮-2 调查循环主体**（Orchestrator 把 Plan→Execute→Verify 改为带预算的循环，证据不足时带历史证据再 Plan）。设计见笔记 `arui-note/aruing/plan/0.0.1-beta3/`。
 
-- `O-1` 用户侧多轮 / Session（编排升级，约 1–3 周）
-- 系统内部多轮（角色可连续取证再判断，约数人日）
-- 持久化（`internal/store`，当前仍内存）
-- `L-5` LLM ExtraHeaders / UA（部署侧加固）
-- 写工具 / 辅助修复（需用户确认）
-- 更多后端工具（Prometheus / Loki）
+候选（未排期，做到时再转下一项）：
+- 多轮-2 调查循环主体（编排驱动，#15-#16 不破）
+- 多轮-3 Planner prompt 升级（基于证据生成补查任务）
+- 多轮-4 工具失败容错 + 报告调查链可见
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 

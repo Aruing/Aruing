@@ -23,10 +23,26 @@ type parser interface {
 	Parse(context.Context, core.Run) (core.Query, error)
 }
 
+// 规划阶段的累积状态，类比 ResolveState
+//
+// 进程内传输结构，不作为持久化实体（与 ResolveState 同）
+// 首轮调用时 Evidence/Verdicts 为 nil，行为等价于 beta2 的盲猜单次规划
+// 后续调查循环需要 Round/MaxRounds 时在此结构加字段，不改 Plan 签名
+type PlanState struct {
+	// 当前运行的问题结构，含已回填系统编号的节点
+	Query core.Query
+	// 定位阶段已确认的目标
+	Targets []core.Target
+	// 历次取证累积的证据；首轮为 nil
+	Evidence []core.Evidence
+	// 上一次验证结果；首轮为 nil
+	Verdicts []core.Verdict
+}
+
 // 描述编排器生成猜想和任务所需的最小能力
 type planner interface {
-	// 根据问题结构和目标返回本轮计划
-	Plan(context.Context, core.Query, []core.Target) (Plan, error)
+	// 根据问题结构、目标和已有证据返回本轮计划
+	Plan(context.Context, PlanState) (Plan, error)
 }
 
 // 描述编排器执行单个工具任务所需的最小能力
@@ -126,7 +142,7 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	if err != nil {
 		return core.Report{}, fmt.Errorf("resolve targets: %w", err)
 	}
-	plan, err := o.planner.Plan(ctx, query, targets)
+	plan, err := o.planner.Plan(ctx, PlanState{Query: query, Targets: targets})
 	if err != nil {
 		return core.Report{}, fmt.Errorf("plan tasks: %w", err)
 	}
