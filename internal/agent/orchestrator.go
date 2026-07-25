@@ -253,8 +253,9 @@ func (o *Orchestrator) investigateLoop(
 			return nil, nil, fmt.Errorf("verify evidence (round %d): %w", round, err)
 		}
 		o.progressf("  验证：%s", summarizeVerdicts(verdicts))
-		// 全部 supported/refuted 即证据充分，结束调查
-		if !hasInsufficientVerdict(verdicts) {
+		// 至少一个猜想被支持即找到根因，结束调查
+		// 全部被排除不算完成——应继续生成新猜想（预算兜底）
+		if hasSupportedVerdict(verdicts) {
 			break
 		}
 	}
@@ -262,10 +263,11 @@ func (o *Orchestrator) investigateLoop(
 	return evidence, verdicts, nil
 }
 
-// 判断是否存在证据不足的结果，存在则调查循环应继续
-func hasInsufficientVerdict(verdicts []core.Verdict) bool {
+// 判断是否存在被证据支持的猜想，存在即已找到根因、循环应结束
+// 全部被排除（refuted）不算完成——应继续生成新猜想，由预算兜底
+func hasSupportedVerdict(verdicts []core.Verdict) bool {
 	for _, v := range verdicts {
-		if v.Result == core.VerdictInsufficient {
+		if v.Result == core.VerdictSupported {
 			return true
 		}
 	}

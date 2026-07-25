@@ -421,6 +421,50 @@ func TestOrchestratorInvestigateDefault(t *testing.T) {
 	}
 }
 
+// 全部猜想被排除而无一是 supported 时，不应结束，应继续生成新猜想直到找到原因或预算耗尽
+func TestOrchestratorInvestigateAllRefuted(t *testing.T) {
+	taskPlan := Plan{
+		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
+		Tasks:      []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}},
+	}
+	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{
+		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},   // round 0: 全排除
+		{{HypothesisID: "h2", RunID: "run_inv", Result: core.VerdictSupported}}, // round 1: 转向后确认
+	}}
+	orch, _, _ := newInvestigateOrch(t, planner, verifier)
+	orch.SetInvestigateMaxRounds(3)
+
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// 全排除后应继续到第二轮并找到 supported
+	if planner.calls != 2 || verifier.calls != 2 {
+		t.Errorf("calls = planner %d / verifier %d, want 2 / 2 (pivot after all refuted)", planner.calls, verifier.calls)
+	}
+}
+
+// 全部猜想被排除且预算耗尽时，停止并照常出报告
+func TestOrchestratorInvestigateAllRefutedBudget(t *testing.T) {
+	taskPlan := Plan{
+		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
+		Tasks:      []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}},
+	}
+	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{
+		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},
+	}}
+	orch, _, _ := newInvestigateOrch(t, planner, verifier)
+	orch.SetInvestigateMaxRounds(2)
+
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if planner.calls != 2 {
+		t.Errorf("planner calls = %d, want 2 (budget cap after all refuted)", planner.calls)
+	}
+}
+
 // 用脚本驱动的调查阶段测试桩：按序返回计划，用尽后重复最后一个
 type scriptedPlanner struct {
 	plans []Plan
