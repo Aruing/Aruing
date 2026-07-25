@@ -7,11 +7,12 @@ import (
 	"aruing/internal/core"
 )
 
-// 把结构化报告渲染成 Markdown 文本
+// 把结构化报告与调查证据渲染成 Markdown 文本
 //
-// 纯展示函数：不调模型、不查集群，只依赖 core.Report 字段
+// 纯展示函数：不调模型、不查集群，只依赖 core.Report 与已登记证据
 // 结论按 supported / refuted / insufficient 分组，证据编号原样列出保持可追溯
-func renderMarkdown(report core.Report) string {
+// 末尾「证据明细」按调查时序列出每条证据的命令与摘要，便于回溯「查了什么、结果如何」
+func renderMarkdown(report core.Report, evidence []core.Evidence) string {
 	var b strings.Builder
 
 	b.WriteString("# " + nonEmpty(report.Title, "诊断报告") + "\n\n")
@@ -33,11 +34,34 @@ func renderMarkdown(report core.Report) string {
 		b.WriteString("\n")
 	}
 
+	if len(evidence) > 0 {
+		renderEvidenceDetail(&b, evidence)
+	}
+
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "运行 `%s` · 报告 `%s` · 生成于 %s\n",
 		report.RunID, report.ID, report.CreatedAt.Format("2006-01-02 15:04:05"))
 
 	return b.String()
+}
+
+// 渲染证据明细表：证据编号 / 命令视图（合成失败证据用 — 占位）/ 摘要
+func renderEvidenceDetail(b *strings.Builder, evidence []core.Evidence) {
+	b.WriteString("## 证据明细\n\n")
+	b.WriteString("| 证据 | 命令 | 摘要 |\n")
+	b.WriteString("| --- | --- | --- |\n")
+	for _, e := range evidence {
+		cmd := "—"
+		if strings.TrimSpace(e.CommandView) != "" {
+			cmd = "`" + e.CommandView + "`"
+		}
+		summary := nonEmpty(e.Summary, "—")
+		if e.Error != "" {
+			summary = "❌ " + summary
+		}
+		fmt.Fprintf(b, "| `%s` | %s | %s |\n", e.ID, cmd, summary)
+	}
+	b.WriteString("\n")
 }
 
 // 按 supported / refuted / insufficient 分段输出结论，无对应结论的段省略
