@@ -384,6 +384,9 @@ func (o *Orchestrator) applyToolCall(ctx context.Context, state *ResolveState, c
 }
 
 // 执行任务并为证据发放编号与创建时间，定位与调查阶段共用
+//
+// 进度分两段：执行前打印工具与目的（实时反馈，长任务不静默）；
+// 执行后补一行工具返回的命令视图（如 kubectl argv），便于排查模型生成的命令是否合理
 func (o *Orchestrator) executeTask(ctx context.Context, task core.Task) (*core.Evidence, error) {
 	if task.Purpose != "" {
 		o.progressf("  执行 %s：%s", task.ToolName, task.Purpose)
@@ -406,6 +409,9 @@ func (o *Orchestrator) executeTask(ctx context.Context, task core.Task) (*core.E
 	}
 	item.ID = evidenceID
 	item.CreatedAt = o.factory.Now()
+	if item.CommandView != "" {
+		o.progressf("    ↳ %s", item.CommandView)
+	}
 	return item, nil
 }
 
