@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-24（beta3 多轮-3 修复：全排除时继续生成新猜想而非停）
+> 最后更新：2026-07-25（beta3 多轮-4a 工具失败容错）
 
 ## 当前阶段
 
@@ -29,6 +29,7 @@
 | 多轮-1 | Planner 接口扩展 | ✅ | 引入 `PlanState`（Query/Targets/Evidence/Verdicts），`Plan(ctx, PlanState)`；首轮零行为变化，锁定调查循环的输入契约 |
 | 多轮-2 | 调查循环主体 | ✅ | `investigateLoop`：Plan→Execute→Verify 循环，证据不足带历史再 Plan；预算/setter 对齐 resolveLoop；默认 1 轮等价 beta2，循环能力由单测覆盖 |
 | 多轮-3 | Planner prompt + 预算 | ✅ | prompt 自适应（后续轮补查 insufficient、空任务=查完）；`validatePlannerOutput` 分轮次；wiring 生产预算调到 3；真正开启迭代取证 |
+| 多轮-4a | 工具失败容错 | ✅ | `executeTask` 工具失败透传 `errToolFailed` + 合成 error evidence；编排层（定位+调查共用）容忍继续，仅 ctx 取消传播；未来改暂停问用户只改编排层 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -55,7 +56,11 @@
 
 ## 下一步
 
-**下一项：真集群复验**（`make run-llm`，确认全排除时循环转向新猜想、找到根因）。仍待解决：exec 等诊断动词被 ReadonlyPolicy 拦截（需 `DiagnosticPolicy` + 配置开关）。之后进入 多轮-4：工具失败容错 + 报告调查链可见。设计见笔记 `arui-note/aruing/plan/0.0.1-beta3/`。
+**下一项：多轮-4b 报告调查链可见**（`Execute` 透出 evidence，报告加「证据明细」段，呈现完整调查链）。之后 beta3 可收尾。设计见笔记 `arui-note/aruing/plan/0.0.1-beta3/`。
+
+候选（未排期，做到时再转下一项）：
+- exec 等诊断动词被 ReadonlyPolicy 拦截（需 `DiagnosticPolicy` + 配置开关）
+- 诊断准确度/覆盖面（需通盘设计，含集群侦察、Verifier 上下文等；非 example-driven 打补丁）
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 

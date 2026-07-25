@@ -156,6 +156,10 @@ func (o *Orchestrator) progressf(format string, args ...any) {
 	fmt.Fprintf(o.progress, format+"\n", args...)
 }
 
+// 工具执行失败的哨兵错误，与合成的 error evidence 一同返回
+// 调用方据此区分「可容忍的工具失败」与「致命错误」；编排层决定容忍/暂停/重试
+var errToolFailed = errors.New("tool execution failed")
+
 // 从一次运行开始依次推进全部角色，成功时返回最终报告
 // 任一阶段失败都会立即停止并保留阶段上下文，不返回部分报告
 // 线性 Execute→Report 是最小单轮驱动方式，不是对外长期契约（architecture #15）
@@ -241,9 +245,10 @@ func (o *Orchestrator) investigateLoop(
 		hypotheses = append(hypotheses, plan.Hypotheses...)
 		for _, task := range plan.Tasks {
 			item, executeErr := o.executeTask(ctx, task)
-			if executeErr != nil {
+			if executeErr != nil && (!errors.Is(executeErr, errToolFailed) || item == nil) {
 				return nil, nil, fmt.Errorf("execute task %q: %w", task.ID, executeErr)
 			}
+			// errToolFailed 时 item 为合成的 error evidence，容忍继续（未来此处可改暂停问用户）
 			tasks = append(tasks, task)
 			evidence = append(evidence, *item)
 		}
@@ -375,9 +380,10 @@ func (o *Orchestrator) applyToolCall(ctx context.Context, state *ResolveState, c
 	}
 
 	item, err := o.executeTask(ctx, task)
-	if err != nil {
+	if err != nil && (!errors.Is(err, errToolFailed) || item == nil) {
 		return fmt.Errorf("execute resolve tool %q: %w", call.ToolName, err)
 	}
+	// errToolFailed 时 item 为合成的 error evidence，容忍继续
 
 	state.Tasks = append(state.Tasks, task)
 	state.Evidence = append(state.Evidence, *item)
@@ -404,7 +410,20 @@ func (o *Orchestrator) executeTask(ctx context.Context, task core.Task) (*core.E
 	}
 	item, executeErr := o.executor.Execute(ctx, task)
 	if executeErr != nil {
-		return nil, executeErr
+		// 整次 run 被取消才传播；其余工具失败透传给调用方决策
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("execute task %q: %w", task.ID, ctx.Err())
+		}
+		o.progressf("    ↳ 失败：%v", executeErr)
+		return &core.Evidence{
+			ID:        evidenceID,
+			RunID:     task.RunID,
+			TaskID:    task.ID,
+			ToolName:  task.ToolName,
+			Summary:   "工具执行失败",
+			Error:     executeErr.Error(),
+			CreatedAt: o.factory.Now(),
+		}, errToolFailed
 	}
 	if item == nil {
 		return nil, errors.New("evidence is required")
