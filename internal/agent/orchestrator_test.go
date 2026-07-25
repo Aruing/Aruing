@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -493,6 +494,7 @@ type scriptedVerifier struct {
 	results [][]core.Verdict
 	calls   int
 	hypSeen [][]core.Hypothesis
+	evSeen  [][]core.Evidence // 每轮收到的累积证据，用于断言证据链
 }
 
 func (v *scriptedVerifier) Verify(ctx context.Context, hypotheses []core.Hypothesis, tasks []core.Task, evidence []core.Evidence) ([]core.Verdict, error) {
@@ -500,6 +502,7 @@ func (v *scriptedVerifier) Verify(ctx context.Context, hypotheses []core.Hypothe
 		return nil, err
 	}
 	v.hypSeen = append(v.hypSeen, hypotheses)
+	v.evSeen = append(v.evSeen, evidence)
 	idx := v.calls
 	if idx >= len(v.results) {
 		idx = len(v.results) - 1
@@ -537,4 +540,64 @@ func newInvestigateOrch(t *testing.T, planner *scriptedPlanner, verifier *script
 		verifier, reporter, factory,
 	)
 	return orch, reporter, factory
+}
+
+// 始终执行失败的探针工具，用于验证编排层对工具失败的容忍
+type failingTool struct{}
+
+func (failingTool) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
+		Name:        "fake.failing",
+		Description: "always fails",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}
+}
+
+func (failingTool) Execute(context.Context, json.RawMessage) (*core.Evidence, error) {
+	return nil, errors.New("simulated tool failure")
+}
+
+// 工具失败应被容忍：合成 error evidence 入链，调查继续并正常出报告
+func TestOrchestratorInvestigateToolFailure(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register fake: %v", err)
+	}
+	if err := registry.Register(failingTool{}); err != nil {
+		t.Fatalf("register failing: %v", err)
+	}
+	// 规划两个任务：一个失败、一个正常，验证失败不拖垮另一个
+	planner := &scriptedPlanner{plans: []Plan{{
+		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
+		Tasks: []core.Task{
+			{ID: "t_fail", RunID: "run_inv", ToolName: "fake.failing"},
+			{ID: "t_ok", RunID: "run_inv", ToolName: "fake.list_pods"},
+		},
+	}}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{
+		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictSupported}},
+	}}
+	parser := NewFakeParser(core.Query{ID: "q_inv", RunID: "run_inv", Nodes: []core.Node{{ID: "n_inv"}}})
+	orch := NewOrchestrator(
+		parser, NewFakeResolver(nil), planner,
+		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
+		verifier, &scriptedReporter{}, &testFactory{now: time.Now().UTC()},
+	)
+
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		t.Fatalf("tool failure should be tolerated, got: %v", err)
+	}
+	// 两条证据都入链：一条正常、一条带 Error
+	if len(verifier.evSeen) == 0 || len(verifier.evSeen[0]) != 2 {
+		t.Fatalf("evidence seen = %v, want 2 items", verifier.evSeen)
+	}
+	var hasErrorEv bool
+	for _, e := range verifier.evSeen[0] {
+		if e.Error != "" {
+			hasErrorEv = true
+		}
+	}
+	if !hasErrorEv {
+		t.Errorf("want an error evidence in chain, got: %#v", verifier.evSeen[0])
+	}
 }
