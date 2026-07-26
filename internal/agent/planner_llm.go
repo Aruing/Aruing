@@ -131,14 +131,15 @@ func buildPlannerSystemPrompt(template string, specs []tools.ToolSpec) (string, 
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 序列化规划输入：Query、Targets，以及非空时的历史 Evidence 与 Verdicts
-// evidence/verdicts 用 omitempty，首轮为 nil 时不出现在 JSON，保证模型输入与 beta2 一致
+// 序列化规划输入：Query、Targets，以及非空时的历史 Evidence/Verdicts/cluster_resources
+// 用 omitempty，对应为 nil 时不出现，保证首轮无侦察/无历史时模型输入最小
 func buildPlannerUserPayload(state PlanState) (string, error) {
 	type payload struct {
-		Query    core.Query      `json:"query"`
-		Targets  []core.Target   `json:"targets"`
-		Evidence []core.Evidence `json:"evidence,omitempty"`
-		Verdicts []core.Verdict  `json:"verdicts,omitempty"`
+		Query            core.Query        `json:"query"`
+		Targets          []core.Target     `json:"targets"`
+		Evidence         []core.Evidence   `json:"evidence,omitempty"`
+		Verdicts         []core.Verdict    `json:"verdicts,omitempty"`
+		ClusterResources []ClusterResource `json:"cluster_resources,omitempty"`
 	}
 	raw, err := json.MarshalIndent(payload(state), "", "  ")
 	if err != nil {

@@ -46,6 +46,8 @@ type orchestratorRoles struct {
 		Report(context.Context, core.Run, []core.Verdict, []core.Evidence) (core.Report, error)
 	}
 	registry *tools.Registry
+	// 是否注册了真实 k8s 工具；用于开启集群侦察（仅在有集群访问时跑 api-resources）
+	reconEnabled bool
 }
 
 // 构建全 fake 角色集合 + 工具注册表，所有角色共享一份 ID 表
@@ -126,28 +128,31 @@ func buildFakeRoles(factory *core.Factory, toolsCfg config.Tools) (orchestratorR
 		return orchestratorRoles{}, fmt.Errorf("register fake tool: %w", err)
 	}
 	// 可选注册真实 k8s：默认闭环仍只调用 fake.list_pods；定位循环会真正用到 k8s
-	if err := maybeRegisterK8s(registry, toolsCfg.KubectlPath); err != nil {
+	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg.KubectlPath)
+	if err != nil {
 		return orchestratorRoles{}, err
 	}
 
 	return orchestratorRoles{
-		parser:   parser,
-		resolver: resolver,
-		planner:  planner,
-		verifier: verifier,
-		reporter: reporter,
-		registry: registry,
+		parser:       parser,
+		resolver:     resolver,
+		planner:      planner,
+		verifier:     verifier,
+		reporter:     reporter,
+		registry:     registry,
+		reconEnabled: k8sRegistered,
 	}, nil
 }
 
 // 当 kubectl 可用时注册后端级 k8s 工具；不可用则跳过，保证无集群环境仍可跑假闭环
+// 返回是否成功注册，用于决定是否开启集群侦察
 // 路径：显式 KubectlPath > PATH 中的 kubectl；不强制 CI 安装 kubectl
-func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) error {
+func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) (bool, error) {
 	path := kubectlPath
 	if path == "" {
 		looked, err := exec.LookPath("kubectl")
 		if err != nil {
-			return nil
+			return false, nil
 		}
 		path = looked
 	}
@@ -158,12 +163,12 @@ func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) error {
 	})
 	if err != nil {
 		// 配置不合法时不拖垮假闭环：跳过注册，调用方仍可用 fake
-		return nil
+		return false, nil
 	}
 	if err := registry.Register(tool); err != nil {
-		return fmt.Errorf("register k8s tool: %w", err)
+		return false, fmt.Errorf("register k8s tool: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 // 根据配置是否齐全决定各角色：
@@ -190,6 +195,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 			factory,
 		)
 		orch.SetInvestigateMaxRounds(productionInvestigateMaxRounds)
+		orch.SetReconEnabled(roles.reconEnabled)
 		orch.SetProgress(progress)
 		return orch, nil
 	}
@@ -230,6 +236,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 		factory,
 	)
 	orch.SetInvestigateMaxRounds(productionInvestigateMaxRounds)
+	orch.SetReconEnabled(roles.reconEnabled)
 	orch.SetProgress(progress)
 	return orch, nil
 }

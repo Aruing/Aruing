@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-25（beta4 诊断全景-2 定位证据复用）
+> 最后更新：2026-07-26（beta4 诊断全景-3 集群侦察）
 
 ## 当前阶段
 
@@ -35,6 +35,7 @@
 | 多轮-4b | 报告调查链可见 | ✅ | `Execute` 返回 `(Report, []Evidence, error)`；`renderMarkdown` 加「证据明细」表（证据编号/命令视图/摘要+失败标记）；仅 markdown，json 不变 |
 | 全景-1 | Verifier 拿 Query | ✅ | `Verify` 加 `Query` 入参；FakeVerifier 忽略、LLMVerifier payload 带 query（goal+节点文本）；prompt 补「比对证据与用户提问现象/对象」 |
 | 全景-2 | 定位证据复用 | ✅ | `resolveLoop` 透出定位阶段证据；`investigateLoop` 加 `seedEvidence` 入参，作为首轮 `PlanState.Evidence` 复用，不白查已取信息 |
+| 全景-3 | 集群侦察 | ✅ | `reconCluster` 走 `executeTask`（Factory 发 Task ID），跑一次只读 `kubectl api-resources` 发现集群资源类型（含 CRD）；精简 `ClusterResources` 喂 Planner payload（`cluster_resources`）；侦察 Evidence 进报告链（透明、失败也落 error evidence）但**不进 Verifier 输入**；`parseAPIResources` 锚定 NAMESPACED 列解析；`reconEnabled` 由 wiring 在 k8s 注册时开启，无集群环境静默跳过 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -61,12 +62,12 @@
 
 ## 下一步
 
-**下一项：集群侦察**（事实层，诊断开始时获取集群资源类型含 CRD 并注入 Planner context）。设计见笔记 `arui-note/aruing/plan/0.1.0-beta4/`。
+**下一项：真集群验证 checkpoint**（侦察做完整一轮真问题，看 beta3 盲区是否收窄，验收门）。
 
 推进方向（不预排 PR 表，只排方向，见 milestone 文档）：
-1. Verifier 拿 Query + 定位证据复用（本轮）
-2. 集群侦察（事实层）
-3. 真集群验证 checkpoint
+1. Verifier 拿 Query + 定位证据复用 ✅
+2. 集群侦察（事实层）✅
+3. 真集群验证 checkpoint（**本轮**）
 4. 反思环节（推理层，最高不确定性）
 5. exec 策略（小配套）
 
@@ -81,6 +82,7 @@
 5. **#7**：`LLMReporter` 单次 `Report`；结论覆盖每条 Verdict 且 `result` 一致；`evidence_ids` ⊆ 对应 Verdict 证据集；Factory 回填 Report ID；业务重试
 6. **#8**：`internal/config` 唯一读 `ARUING_*`；`cmd` 不直接 `os.Getenv` 业务键；L-8 最小 `formatRunError`
 7. **R-1**：`renderMarkdown` 纯函数渲染；CLI 默认 Markdown，`--format json` 保留
+8. **全景-3**：`reconCluster` 经 `executeTask` 跑只读 `kubectl api-resources`（Factory 发 Task ID），发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察 Evidence 进报告链透明可追溯、失败也落 error evidence，但**不进 Verifier 输入**（是 context 不是 verdict 依据）；`reconEnabled` 由 wiring 在 k8s 注册时开启
 
 ## 编排与多轮（2026-7-22 已确认）
 
