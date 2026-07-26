@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-26（beta4 诊断全景-3 集群侦察）
+> 最后更新：2026-07-26（beta4 诊断全景-4 反思环节轻量版）
 
 ## 当前阶段
 
@@ -36,6 +36,7 @@
 | 全景-1 | Verifier 拿 Query | ✅ | `Verify` 加 `Query` 入参；FakeVerifier 忽略、LLMVerifier payload 带 query（goal+节点文本）；prompt 补「比对证据与用户提问现象/对象」 |
 | 全景-2 | 定位证据复用 | ✅ | `resolveLoop` 透出定位阶段证据；`investigateLoop` 加 `seedEvidence` 入参，作为首轮 `PlanState.Evidence` 复用，不白查已取信息 |
 | 全景-3 | 集群侦察 | ✅ | `reconCluster` 走 `executeTask`（Factory 发 Task ID），跑一次只读 `kubectl api-resources` 发现集群资源类型（含 CRD）；精简 `ClusterResources` 喂 Planner payload（`cluster_resources`）；侦察 Evidence 进报告链（透明、失败也落 error evidence）但**不进 Verifier 输入**；`parseAPIResources` 锚定 NAMESPACED 列解析；`reconEnabled` 由 wiring 在 k8s 注册时开启，无集群环境静默跳过 |
+| 全景-4 | 反思环节（轻量版） | ✅ | 仅 `planner.md` prompt 强化：首轮猜想覆盖不同根因家族；后续轮新增「防确认偏误」规则（考虑替代解释 + 安排区分性取证）。三场景真集群回归：清晰单因场景不膨胀（多查替代路由层即收尾），真实歧义场景更严谨（不再从相关性证据自信下结论）。未做结构化反思阶段（边际价值在 checkpoint 看不出） |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -62,14 +63,14 @@
 
 ## 下一步
 
-**下一项：真集群验证 checkpoint**（侦察做完整一轮真问题，看 beta3 盲区是否收窄，验收门）。
+**下一项：exec 策略**（DiagnosticPolicy + 配置开关，诊断动词可用；milestone 最后一项）。
 
 推进方向（不预排 PR 表，只排方向，见 milestone 文档）：
 1. Verifier 拿 Query + 定位证据复用 ✅
 2. 集群侦察（事实层）✅
-3. 真集群验证 checkpoint（**本轮**）
-4. 反思环节（推理层，最高不确定性）
-5. exec 策略（小配套）
+3. 真集群验证 checkpoint ✅（三场景通过：swanlab / keycloak×2）
+4. 反思环节（推理层）✅（轻量版 prompt 强化）
+5. exec 策略（小配套，**本轮**）
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 
