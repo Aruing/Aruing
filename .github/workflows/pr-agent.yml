@@ -35,12 +35,12 @@ jobs:
           # grok-4.5-high 上游对大 prompt（2600+ tokens）返回 400；
           # gemini-3-pro-preview 实测能处理完整 pr-agent 大 prompt，故选它
           CONFIG__MODEL: openai/gemini-3-pro-preview
-          CONFIG__FALLBACK_MODELS: '[]'
+          CONFIG__FALLBACK_MODELS: "[]"
           # gemini-3-pro-preview 不在 pr-agent 内置 MAX_TOKENS 表，显式声明
-          CONFIG__CUSTOM_MODEL_MAX_TOKENS: '128000'
+          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
 
           # 默认 pr-agent 在 synchronize 事件不跑命令，这里打开
-          GITHUB_APP__HANDLE_PUSH_TRIGGER: 'true'
+          GITHUB_APP__HANDLE_PUSH_TRIGGER: "true"
 
           # 本代理 WAF 拦 litellm 默认带的 `OpenAI/Python ...` UA，用 extra_headers 覆盖
           LITELLM__EXTRA_HEADERS: '{"User-Agent":"litellm/1.99.0"}'
