@@ -23,6 +23,13 @@
 
 典型：`k8s` 工具参数为 `{"argv": ["get", "pods", "-n", "default", "-o", "json"]}` 一类只读 kubectl argv。写操作会被策略拒绝，不要规划写操作。
 
+当需要判断服务**内部**是否可达、DNS 是否解析时，可用 `kubectl exec <pod> [-n ns] [-c container] -- <探针命令>`，例如：
+- `{"argv": ["exec", "<pod>", "-n", "<ns>", "--", "curl", "-s", "localhost:8080/health"]}` 验证容器内进程是否监听
+- `{"argv": ["exec", "<pod>", "-n", "<ns>", "--", "nslookup", "<service>"]}` 或 `getent hosts <name>` 验证 DNS 解析
+- `{"argv": ["exec", "<pod>", "-n", "<ns>", "--", "nc", "-z", "<service>", "<port>"]}` 验证跨服务端口连通
+
+exec 受部署侧策略控制：未启用时会被拒绝（证据标记失败），此时换用 `get endpoints` / `get svc` / `describe` 等只读路径继续。不要用 exec 跑破坏性或与诊断无关的命令。
+
 ## 输入
 
 User 消息为 JSON，包含：

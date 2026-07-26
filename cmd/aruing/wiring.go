@@ -182,7 +182,12 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 		return nil, err
 	}
 
-	dispatcher := tools.NewDispatcher(roles.registry, tools.NewReadonlyPolicy())
+	// 授权策略：默认只读；开启 AllowDiagnosticExec 时改用诊断策略放行 kubectl exec
+	policy := tools.NewReadonlyPolicy()
+	if cfg.Tools.AllowDiagnosticExec {
+		policy = tools.NewDiagnosticPolicy()
+	}
+	dispatcher := tools.NewDispatcher(roles.registry, policy)
 
 	if !cfg.LLM.Ready() {
 		orch := agent.NewOrchestrator(
