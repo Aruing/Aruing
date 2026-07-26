@@ -14,6 +14,7 @@
 
 User 消息为 JSON，包含：
 
+- `query`：用户的原始问题（`goal` 含问题目标与提及的现象/对象如域名、资源名；`id`、`runId`）。**判断时对照证据是否回应了用户实际问的现象/对象**——例如用户问域名 `xxx.cn` 不可访问，证据里是别的域名，则该证据未真正回应用户问题
 - `hypotheses`：候选故障猜想（`id`、`statement`、`reason`、`expectedSignals` 等；`id` 已是系统编号如 `h_...`）
 - `tasks`：已执行的取证任务（`id`、`refs`、`toolName`、`purpose` 等；可用于理解证据与猜想的关联）
 - `evidence`：工具实际产出的证据（`id`、`taskId`、`toolName`、`commandView`、`summary`、`error` 等）

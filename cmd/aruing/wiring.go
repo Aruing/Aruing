@@ -40,7 +40,7 @@ type orchestratorRoles struct {
 		Plan(context.Context, agent.PlanState) (agent.Plan, error)
 	}
 	verifier interface {
-		Verify(context.Context, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
+		Verify(context.Context, core.Query, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
 	}
 	reporter interface {
 		Report(context.Context, core.Run, []core.Verdict, []core.Evidence) (core.Report, error)

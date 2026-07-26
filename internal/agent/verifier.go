@@ -27,8 +27,10 @@ func NewFakeVerifier(verdicts []core.Verdict) *FakeVerifier {
 
 // 根据任务引用找到每个猜想的实际证据，并返回绑定动态证据编号的独立结果
 // 上下文取消、任务没有产出证据或数据跨运行时返回错误，不产生部分结果
+// FakeVerifier 不消费 Query（固定模板判断），参数到位只为对齐新契约
 func (v *FakeVerifier) Verify(
 	ctx context.Context,
+	_ core.Query,
 	hypotheses []core.Hypothesis,
 	tasks []core.Task,
 	evidence []core.Evidence,
