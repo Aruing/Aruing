@@ -53,9 +53,10 @@ type taskExecutor interface {
 }
 
 // 描述编排器根据证据形成判断所需的最小能力
+// Query 作为用户原始问题的上下文喂给判断角色，使其能比对证据与用户实际提问
 type verifier interface {
-	// 根据猜想、任务和实际证据返回判断列表
-	Verify(context.Context, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
+	// 根据用户问题、猜想、任务和实际证据返回判断列表
+	Verify(context.Context, core.Query, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
 }
 
 // 描述编排器生成最终用户输出所需的最小能力
@@ -253,7 +254,7 @@ func (o *Orchestrator) investigateLoop(
 			evidence = append(evidence, *item)
 		}
 
-		verdicts, err = o.verifier.Verify(ctx, hypotheses, tasks, evidence)
+		verdicts, err = o.verifier.Verify(ctx, query, hypotheses, tasks, evidence)
 		if err != nil {
 			return nil, nil, fmt.Errorf("verify evidence (round %d): %w", round, err)
 		}

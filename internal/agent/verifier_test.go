@@ -20,7 +20,7 @@ func TestFakeVerifierVerify(t *testing.T) {
 	tasks := []core.Task{{ID: "task_pods", RunID: "run_test", Refs: []string{"target_demo", "h_demo"}}}
 	evidence := []core.Evidence{{ID: "e_runtime", RunID: "run_test", TaskID: "task_pods"}}
 
-	got, err := verifier.Verify(context.Background(), hypotheses, tasks, evidence)
+	got, err := verifier.Verify(context.Background(), core.Query{}, hypotheses, tasks, evidence)
 	if err != nil {
 		t.Fatalf("verify evidence: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestFakeVerifierVerify(t *testing.T) {
 
 	// 多次验证不能共享证据编号列表，否则一次结果可能污染后续运行
 	got[0].EvidenceIDs[0] = "changed"
-	again, err := verifier.Verify(context.Background(), hypotheses, tasks, evidence)
+	again, err := verifier.Verify(context.Background(), core.Query{}, hypotheses, tasks, evidence)
 	if err != nil {
 		t.Fatalf("verify evidence again: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestFakeVerifierValidate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := NewFakeVerifier(test.verdicts).Verify(context.Background(), test.hypotheses, test.tasks, test.evidence)
+			_, err := NewFakeVerifier(test.verdicts).Verify(context.Background(), core.Query{}, test.hypotheses, test.tasks, test.evidence)
 			if err == nil {
 				t.Fatal("verify evidence: error = nil")
 			}

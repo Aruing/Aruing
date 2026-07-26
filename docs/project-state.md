@@ -1,14 +1,14 @@
 # 项目当前状态
 
-> 最后更新：2026-07-25（beta3 全部完成）
+> 最后更新：2026-07-25（beta4 诊断全景-1 Verifier 拿 Query）
 
 ## 当前阶段
 
-**`0.0.1-beta3` / 调查循环已完成**：编排驱动的调查循环（迭代取证 + pivot + trace + 工具失败容错 + 报告调查链）已实现并经真集群验证。`aruing run` 现在能像 SRE 顺着证据链迭代取证，而非开局盲猜一次交报告；进度实时走 stderr，报告呈现完整证据明细。
+**版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-下一阶段待规划（见下方「下一步」）。
+**当前里程碑 `0.1.0-beta4` / 诊断信息全景**：让单轮诊断从「盲猜 + 窄框」变为「侦察集群 → 有上下文判断 → 反思多解释」。三根柱子：集群侦察（事实层）、Verifier 拿 Query + 定位证据复用（上下文层）、反思环节（推理层）；exec 策略作为配套。目标与完成标志见笔记 `arui-note/aruing/plan/milestone/0.1.0-beta4.md`。
 
-目标与完成标志见笔记 `arui-note/aruing/plan/milestone/0.0.1-beta3.md`。
+前置：`0.0.1-beta3` 调查循环已完成（迭代取证 + pivot + 容错 + 报告调查链）。`0.0.1-beta2` 真实闭环已完成。`0.0.1-beta1` 最小假闭环已完成。
 
 前置：`0.0.1-beta2` 真实闭环已完成（五角色全接 LLM，`aruing run` 端到端产出可追溯 Markdown 报告）。`0.0.1-beta1` 最小假闭环已完成（数据流跑通，模块边界立住）。
 
@@ -33,6 +33,7 @@
 | 多轮-3 | Planner prompt + 预算 | ✅ | prompt 自适应（后续轮补查 insufficient、空任务=查完）；`validatePlannerOutput` 分轮次；wiring 生产预算调到 3；真正开启迭代取证 |
 | 多轮-4a | 工具失败容错 | ✅ | `executeTask` 工具失败透传 `errToolFailed` + 合成 error evidence；编排层（定位+调查共用）容忍继续，仅 ctx 取消传播；未来改暂停问用户只改编排层 |
 | 多轮-4b | 报告调查链可见 | ✅ | `Execute` 返回 `(Report, []Evidence, error)`；`renderMarkdown` 加「证据明细」表（证据编号/命令视图/摘要+失败标记）；仅 markdown，json 不变 |
+| 全景-1 | Verifier 拿 Query | ✅ | `Verify` 加 `Query` 入参；FakeVerifier 忽略、LLMVerifier payload 带 query（goal+节点文本）；prompt 补「比对证据与用户提问现象/对象」 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -59,11 +60,14 @@
 
 ## 下一步
 
-**下一项：下一阶段规划**。beta3 已完成。核心候选方向（需通盘设计，非 example-driven 打补丁）：
-- 诊断准确度/覆盖面（含集群侦察、Verifier 拿 Query、定位证据复用、resilience 等）
-- exec 等诊断动词被 ReadonlyPolicy 拦截（需 `DiagnosticPolicy` + 配置开关）
+**下一项：诊断全景-2 定位证据复用**（resolveLoop 透出定位阶段证据给调查首轮，零浪费已有信息）。之后进入集群侦察（事实层）。设计见笔记 `arui-note/aruing/plan/0.1.0-beta4/`。
 
-阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
+推进方向（不预排 PR 表，只排方向，见 milestone 文档）：
+1. Verifier 拿 Query + 定位证据复用（本轮）
+2. 集群侦察（事实层）
+3. 真集群验证 checkpoint
+4. 反思环节（推理层，最高不确定性）
+5. exec 策略（小配套）
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 

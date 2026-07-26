@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -40,6 +41,10 @@ func testVerifyEvidence() []core.Evidence {
 	}}
 }
 
+func testVerifyQuery() core.Query {
+	return core.Query{ID: "query_1", RunID: "run_1", Goal: "定位 demo-api 无法访问的原因"}
+}
+
 // 标准路径：为每条猜想回填系统编号的判断，并保留证据引用
 func TestLLMVerifierVerify(t *testing.T) {
 	body := `{
@@ -58,7 +63,7 @@ func TestLLMVerifierVerify(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 
-	got, err := verifier.Verify(context.Background(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
+	got, err := verifier.Verify(context.Background(), testVerifyQuery(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -116,7 +121,7 @@ func TestLLMVerifierUnknownEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	_, err = verifier.Verify(context.Background(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
+	_, err = verifier.Verify(context.Background(), testVerifyQuery(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -138,7 +143,7 @@ func TestLLMVerifierMissingHypothesis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	_, err = verifier.Verify(context.Background(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
+	_, err = verifier.Verify(context.Background(), testVerifyQuery(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -164,7 +169,7 @@ func TestLLMVerifierInvalidResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	_, err = verifier.Verify(context.Background(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
+	_, err = verifier.Verify(context.Background(), testVerifyQuery(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -190,7 +195,7 @@ func TestLLMVerifierEmptyEvidenceIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	_, err = verifier.Verify(context.Background(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
+	_, err = verifier.Verify(context.Background(), testVerifyQuery(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -227,7 +232,7 @@ func TestLLMVerifierRetryThenSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	got, err := verifier.Verify(context.Background(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
+	got, err := verifier.Verify(context.Background(), testVerifyQuery(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence())
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -258,7 +263,7 @@ func TestLLMVerifierMultiHypothesis(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
-	got, err := verifier.Verify(context.Background(), hyps, testVerifyTasks(), testVerifyEvidence())
+	got, err := verifier.Verify(context.Background(), testVerifyQuery(), hyps, testVerifyTasks(), testVerifyEvidence())
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -267,5 +272,26 @@ func TestLLMVerifierMultiHypothesis(t *testing.T) {
 	}
 	if got[0].HypothesisID != "h_1" || got[1].HypothesisID != "h_2" {
 		t.Errorf("order/ids = %+v", got)
+	}
+}
+
+// Verify 的 user payload 必须含 query 字段（goal），让 LLM 看到用户原始问题
+func TestLLMVerifierPayloadHasQuery(t *testing.T) {
+	var captured string
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		captured = string(raw)
+		writeChatCompletion(w, `{"verdicts":[{"hypothesis_id":"h_1","result":"supported","reason":"ok","evidence_ids":["e_1"]}]}`)
+	})
+	v, err := NewLLMVerifier(client, newTestFactory(t))
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	if _, err := v.Verify(context.Background(), testVerifyQuery(), testVerifyHypotheses(), testVerifyTasks(), testVerifyEvidence()); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	// goal 含中文内容，确保验证 path 传到了 json 的 user 负载中
+	if !strings.Contains(captured, "query") || !strings.Contains(captured, "定位 demo-api") {
+		t.Errorf("payload missing query/goal: %s", captured)
 	}
 }

@@ -497,7 +497,7 @@ type scriptedVerifier struct {
 	evSeen  [][]core.Evidence // 每轮收到的累积证据，用于断言证据链
 }
 
-func (v *scriptedVerifier) Verify(ctx context.Context, hypotheses []core.Hypothesis, tasks []core.Task, evidence []core.Evidence) ([]core.Verdict, error) {
+func (v *scriptedVerifier) Verify(ctx context.Context, _ core.Query, hypotheses []core.Hypothesis, tasks []core.Task, evidence []core.Evidence) ([]core.Verdict, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

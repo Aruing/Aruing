@@ -51,6 +51,7 @@ func NewLLMVerifier(client llm.Client, factory *core.Factory) (*LLMVerifier, err
 // 重试 maxVerifyAttempts 次仍不合规则返回 ErrLLMOutputInconsistent
 func (v *LLMVerifier) Verify(
 	ctx context.Context,
+	query core.Query,
 	hypotheses []core.Hypothesis,
 	tasks []core.Task,
 	evidence []core.Evidence,
@@ -67,10 +68,16 @@ func (v *LLMVerifier) Verify(
 	if len(hypotheses) == 0 {
 		return nil, errors.New("verifier requires at least one hypothesis")
 	}
+	if strings.TrimSpace(query.RunID) == "" {
+		return nil, errors.New("verifier requires a query with run ID")
+	}
 
 	runID := strings.TrimSpace(hypotheses[0].RunID)
 	if runID == "" {
 		return nil, errors.New("verifier requires a run ID on hypotheses")
+	}
+	if strings.TrimSpace(query.RunID) != runID {
+		return nil, fmt.Errorf("query run ID %q does not match hypotheses run ID %q", query.RunID, runID)
 	}
 	for i, h := range hypotheses {
 		if strings.TrimSpace(h.ID) == "" {
@@ -81,7 +88,7 @@ func (v *LLMVerifier) Verify(
 		}
 	}
 
-	userPayload, err := buildVerifierUserPayload(hypotheses, tasks, evidence)
+	userPayload, err := buildVerifierUserPayload(query, hypotheses, tasks, evidence)
 	if err != nil {
 		return nil, fmt.Errorf("build verify prompt: %w", err)
 	}
@@ -116,13 +123,20 @@ func (v *LLMVerifier) Verify(
 		ErrLLMOutputInconsistent, lastValidateErr, lastOut)
 }
 
-// 序列化验证输入：猜想、任务与已登记证据
+// 序列化验证输入：用户原始问题（Query）、猜想、任务与已登记证据
+// Query 让判断角色能比对证据与用户实际提问的现象/对象（如域名、症状）
 // 只暴露判断所需字段，避免把无关运行元数据塞进 prompt
 func buildVerifierUserPayload(
+	query core.Query,
 	hypotheses []core.Hypothesis,
 	tasks []core.Task,
 	evidence []core.Evidence,
 ) (string, error) {
+	type queryView struct {
+		ID    string `json:"id,omitempty"`
+		RunID string `json:"runId,omitempty"`
+		Goal  string `json:"goal,omitempty"`
+	}
 	type hypView struct {
 		ID              string   `json:"id"`
 		Statement       string   `json:"statement"`
@@ -145,12 +159,25 @@ func buildVerifierUserPayload(
 		Raw         json.RawMessage `json:"raw,omitempty"`
 	}
 	type payload struct {
+		Query      queryView      `json:"query"`
 		Hypotheses []hypView      `json:"hypotheses"`
 		Tasks      []taskView     `json:"tasks"`
 		Evidence   []evidenceView `json:"evidence"`
 	}
 
+	// 节点文本拼进 goal，让 LLM 看到用户问题的完整结构（域名、症状、资源名等）
+	parts := []string{query.Goal}
+	for _, n := range query.Nodes {
+		if strings.TrimSpace(n.Text) != "" {
+			parts = append(parts, n.Text)
+		}
+	}
 	p := payload{
+		Query: queryView{
+			ID:    query.ID,
+			RunID: query.RunID,
+			Goal:  strings.TrimSpace(strings.Join(parts, " / ")),
+		},
 		Hypotheses: make([]hypView, 0, len(hypotheses)),
 		Tasks:      make([]taskView, 0, len(tasks)),
 		Evidence:   make([]evidenceView, 0, len(evidence)),
