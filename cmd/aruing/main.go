@@ -129,19 +129,19 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
 	}
-	report, err := orchestrator.Execute(context.Background(), run)
+	report, evidence, err := orchestrator.Execute(context.Background(), run)
 	if err != nil {
 		return formatRunError(fmt.Errorf("execute diagnosis: %w", err))
 	}
 
-	return writeReport(stdout, *format, report)
+	return writeReport(stdout, *format, report, evidence)
 }
 
 // 按指定格式把报告写入 stdout
-func writeReport(stdout io.Writer, format string, report core.Report) error {
+func writeReport(stdout io.Writer, format string, report core.Report, evidence []core.Evidence) error {
 	switch format {
 	case "markdown":
-		if _, err := io.WriteString(stdout, renderMarkdown(report)); err != nil {
+		if _, err := io.WriteString(stdout, renderMarkdown(report, evidence)); err != nil {
 			return fmt.Errorf("write report: %w", err)
 		}
 		return nil

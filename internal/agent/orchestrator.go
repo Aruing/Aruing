@@ -161,37 +161,37 @@ func (o *Orchestrator) progressf(format string, args ...any) {
 var errToolFailed = errors.New("tool execution failed")
 
 // 从一次运行开始依次推进全部角色，成功时返回最终报告
-// 任一阶段失败都会立即停止并保留阶段上下文，不返回部分报告
-// 线性 Execute→Report 是最小单轮驱动方式，不是对外长期契约（architecture #15）
-func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, error) {
+// 从一次运行开始依次推进全部角色，成功时返回最终报告与调查阶段的全部证据
+// 证据透出供 CLI 渲染调查链；线性 Execute→Report 是最小单轮驱动方式，不是对外长期契约（architecture #15）
+func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, []core.Evidence, error) {
 	if err := ctx.Err(); err != nil {
-		return core.Report{}, fmt.Errorf("execute run: %w", err)
+		return core.Report{}, nil, fmt.Errorf("execute run: %w", err)
 	}
 	if err := o.validate(); err != nil {
-		return core.Report{}, err
+		return core.Report{}, nil, err
 	}
 
 	o.progressf("解析问题…")
 	query, err := o.parser.Parse(ctx, run)
 	if err != nil {
-		return core.Report{}, fmt.Errorf("parse run: %w", err)
+		return core.Report{}, nil, fmt.Errorf("parse run: %w", err)
 	}
 	targets, err := o.resolveLoop(ctx, query)
 	if err != nil {
-		return core.Report{}, fmt.Errorf("resolve targets: %w", err)
+		return core.Report{}, nil, fmt.Errorf("resolve targets: %w", err)
 	}
 	// 调查阶段为编排可见循环：Plan→Execute→Verify，证据不足时带历史证据再 Plan
 	// 默认只跑一轮与 beta2 等价；预算调高后配合 prompt 才真正迭代（architecture #15-#16）
 	evidence, verdicts, err := o.investigateLoop(ctx, query, targets)
 	if err != nil {
-		return core.Report{}, err
+		return core.Report{}, nil, err
 	}
 	o.progressf("生成报告…")
 	report, err := o.reporter.Report(ctx, run, verdicts, evidence)
 	if err != nil {
-		return core.Report{}, fmt.Errorf("build report: %w", err)
+		return core.Report{}, nil, fmt.Errorf("build report: %w", err)
 	}
-	return report, nil
+	return report, evidence, nil
 }
 
 // 调查阶段默认规划轮数：1 表示只跑一轮，与 beta2 单轮行为等价

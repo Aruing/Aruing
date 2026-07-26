@@ -111,7 +111,7 @@ func TestOrchestratorExecute(t *testing.T) {
 		reporter,
 		factory,
 	)
-	report, err := orchestrator.Execute(context.Background(), core.Run{
+	report, _, err := orchestrator.Execute(context.Background(), core.Run{
 		ID:       "run_demo",
 		Question: "demo-api 为什么访问不了",
 	})
@@ -185,7 +185,7 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, reporter, factory,
 	)
-	report, err := orch.Execute(context.Background(), core.Run{
+	report, _, err := orch.Execute(context.Background(), core.Run{
 		ID: "run_loop", Question: "demo?",
 	})
 	if err != nil {
@@ -231,7 +231,7 @@ func TestOrchestratorResolveBudget(t *testing.T) {
 	)
 	orch.SetResolveMaxRounds(2)
 
-	_, err := orch.Execute(context.Background(), core.Run{ID: "run_budget", Question: "x"})
+	_, _, err := orch.Execute(context.Background(), core.Run{ID: "run_budget", Question: "x"})
 	if err == nil {
 		t.Fatal("error = nil, want budget exceeded")
 	}
@@ -259,7 +259,7 @@ func TestOrchestratorResolveUnknownNode(t *testing.T) {
 		NewFakeVerifier(nil), NewFakeReporter(core.Report{ID: "r"}),
 		&testFactory{now: time.Now().UTC()},
 	)
-	_, err := orch.Execute(context.Background(), core.Run{ID: "run_x", Question: "x"})
+	_, _, err := orch.Execute(context.Background(), core.Run{ID: "run_x", Question: "x"})
 	if err == nil {
 		t.Fatal("error = nil, want unknown node")
 	}
@@ -354,7 +354,7 @@ func TestOrchestratorInvestigateLoop(t *testing.T) {
 	orch, reporter, factory := newInvestigateOrch(t, planner, verifier)
 	orch.SetInvestigateMaxRounds(3)
 
-	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if planner.calls != 2 || verifier.calls != 2 {
@@ -380,7 +380,7 @@ func TestOrchestratorInvestigateBudget(t *testing.T) {
 	orch, _, _ := newInvestigateOrch(t, planner, verifier)
 	orch.SetInvestigateMaxRounds(2)
 
-	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if planner.calls != 2 {
@@ -396,7 +396,7 @@ func TestOrchestratorInvestigateEmptyTasks(t *testing.T) {
 	orch, _, _ := newInvestigateOrch(t, planner, verifier)
 	orch.SetInvestigateMaxRounds(3)
 
-	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if planner.calls != 2 {
@@ -414,7 +414,7 @@ func TestOrchestratorInvestigateDefault(t *testing.T) {
 	verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
 	orch, _, _ := newInvestigateOrch(t, planner, verifier)
 
-	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if planner.calls != 1 || verifier.calls != 1 {
@@ -436,7 +436,7 @@ func TestOrchestratorInvestigateAllRefuted(t *testing.T) {
 	orch, _, _ := newInvestigateOrch(t, planner, verifier)
 	orch.SetInvestigateMaxRounds(3)
 
-	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	// 全排除后应继续到第二轮并找到 supported
@@ -458,7 +458,7 @@ func TestOrchestratorInvestigateAllRefutedBudget(t *testing.T) {
 	orch, _, _ := newInvestigateOrch(t, planner, verifier)
 	orch.SetInvestigateMaxRounds(2)
 
-	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if planner.calls != 2 {
@@ -584,7 +584,7 @@ func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 		verifier, &scriptedReporter{}, &testFactory{now: time.Now().UTC()},
 	)
 
-	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("tool failure should be tolerated, got: %v", err)
 	}
 	// 两条证据都入链：一条正常、一条带 Error

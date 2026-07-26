@@ -26,7 +26,7 @@ func TestRenderMarkdownFull(t *testing.T) {
 		CreatedAt:   time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC),
 	}
 
-	md := renderMarkdown(report)
+	md := renderMarkdown(report, nil)
 
 	for _, want := range []string{
 		"# demo-api 诊断报告",
@@ -60,7 +60,7 @@ func TestRenderMarkdownNoConclusions(t *testing.T) {
 		Title:     "空报告",
 		Summary:   "无内容",
 		CreatedAt: time.Now(),
-	})
+	}, nil)
 
 	if !strings.Contains(md, "暂无结论") {
 		t.Errorf("want placeholder, got:\n%s", md)
@@ -83,7 +83,7 @@ func TestRenderMarkdownPartialGroups(t *testing.T) {
 			{Result: core.VerdictSupported, Reason: "ok", EvidenceIDs: nil},
 		},
 		CreatedAt: time.Now(),
-	})
+	}, nil)
 
 	if !strings.Contains(md, "### 已支持") {
 		t.Errorf("supported group missing:\n%s", md)
@@ -103,7 +103,7 @@ func TestRenderMarkdownNoSuggestions(t *testing.T) {
 		Title:     "T",
 		Summary:   "S",
 		CreatedAt: time.Now(),
-	})
+	}, nil)
 
 	if strings.Contains(md, "## 建议") {
 		t.Errorf("suggestions section should be omitted when empty:\n%s", md)
@@ -118,12 +118,44 @@ func TestRenderMarkdownEmptyFields(t *testing.T) {
 		ID:        "rep_5",
 		RunID:     "run_5",
 		CreatedAt: time.Now(),
-	})
+	}, nil)
 
 	if !strings.Contains(md, "# 诊断报告") {
 		t.Errorf("empty title should fall back:\n%s", md)
 	}
 	if !strings.Contains(md, "（无摘要）") {
 		t.Errorf("empty summary should fall back:\n%s", md)
+	}
+}
+
+// 证据明细应按调查时序列出命令与摘要；合成失败证据用 — 占位命令
+func TestRenderMarkdownEvidenceDetail(t *testing.T) {
+	t.Parallel()
+
+	report := core.Report{
+		ID:        "rep_e",
+		RunID:     "run_e",
+		Title:     "T",
+		Summary:   "S",
+		CreatedAt: time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC),
+	}
+	evidence := []core.Evidence{
+		{ID: "e_a", ToolName: "k8s", CommandView: "kubectl get ingress -n swanlab -o json", Summary: "kubectl 执行完成，exitCode=0"},
+		{ID: "e_b", ToolName: "k8s", Summary: "工具执行失败", Error: "denied by policy"},
+	}
+
+	md := renderMarkdown(report, evidence)
+
+	for _, want := range []string{
+		"## 证据明细",
+		"| --- | --- | --- |",
+		"`e_a`",
+		"`kubectl get ingress -n swanlab -o json`",
+		"`e_b`",
+		"❌ 工具执行失败",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("missing %q in output:\n%s", want, md)
+		}
 	}
 }
