@@ -9,11 +9,12 @@ func TestLoadFrom(t *testing.T) {
 	t.Parallel()
 
 	env := map[string]string{
-		"ARUING_LLM_BASE_URL": "  https://example.com/v1  ",
-		"ARUING_LLM_API_KEY":  " sk-test ",
-		"ARUING_LLM_MODEL":    " gpt-test ",
-		"ARUING_KUBECTL_PATH": " /usr/bin/kubectl ",
-		"IGNORED":             "x",
+		"ARUING_LLM_BASE_URL":          "  https://example.com/v1  ",
+		"ARUING_LLM_API_KEY":           " sk-test ",
+		"ARUING_LLM_MODEL":             " gpt-test ",
+		"ARUING_KUBECTL_PATH":          " /usr/bin/kubectl ",
+		"ARUING_ALLOW_DIAGNOSTIC_EXEC": " true ",
+		"IGNORED":                      "x",
 	}
 	cfg := LoadFrom(func(k string) string { return env[k] })
 
@@ -28,6 +29,9 @@ func TestLoadFrom(t *testing.T) {
 	}
 	if cfg.Tools.KubectlPath != "/usr/bin/kubectl" {
 		t.Errorf("KubectlPath = %q", cfg.Tools.KubectlPath)
+	}
+	if !cfg.Tools.AllowDiagnosticExec {
+		t.Error("AllowDiagnosticExec = false, want true")
 	}
 	if !cfg.LLM.Ready() {
 		t.Error("Ready = false, want true")
@@ -67,12 +71,43 @@ func TestToClientConfig(t *testing.T) {
 	}
 }
 
-// nil getenv 不得 panic，得到空配置
+// nil getenv 不得 panic，得到空配置；exec 开关默认关
 func TestLoadFromNil(t *testing.T) {
 	t.Parallel()
 
 	cfg := LoadFrom(nil)
 	if cfg.LLM.Ready() || cfg.Tools.KubectlPath != "" {
 		t.Fatalf("want empty config, got %#v", cfg)
+	}
+	if cfg.Tools.AllowDiagnosticExec {
+		t.Error("AllowDiagnosticExec should default to false")
+	}
+}
+
+// 非布尔或空值的 exec 开关应解析为 false，避免误开高自由度动作
+func TestAllowDiagnosticExecParsing(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []string{"", " ", "notabool", "0", "false", "False"} {
+		cfg := LoadFrom(func(k string) string {
+			if k == "ARUING_ALLOW_DIAGNOSTIC_EXEC" {
+				return raw
+			}
+			return ""
+		})
+		if cfg.Tools.AllowDiagnosticExec {
+			t.Errorf("raw=%q parsed true, want false", raw)
+		}
+	}
+	for _, raw := range []string{"1", "true", "TRUE", "True"} {
+		cfg := LoadFrom(func(k string) string {
+			if k == "ARUING_ALLOW_DIAGNOSTIC_EXEC" {
+				return raw
+			}
+			return ""
+		})
+		if !cfg.Tools.AllowDiagnosticExec {
+			t.Errorf("raw=%q parsed false, want true", raw)
+		}
 	}
 }

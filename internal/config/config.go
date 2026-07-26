@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"strings"
 
 	"aruing/internal/llm"
@@ -36,6 +37,10 @@ type LLM struct {
 type Tools struct {
 	// kubectl 可执行文件绝对路径；对应 ARUING_KUBECTL_PATH
 	KubectlPath string
+	// 是否放行 kubectl exec 用于 Pod 内诊断探针（连通性/DNS）
+	// 默认 false（exec 被 ReadonlyPolicy 拒绝）；对应 ARUING_ALLOW_DIAGNOSTIC_EXEC
+	// 开启后 wiring 改用 DiagnosticPolicy，由 Planner prompt 引导只做诊断探针
+	AllowDiagnosticExec bool
 }
 
 // 从当前进程环境加载配置
@@ -57,9 +62,16 @@ func LoadFrom(getenv func(string) string) Config {
 			Model:   strings.TrimSpace(getenv("ARUING_LLM_MODEL")),
 		},
 		Tools: Tools{
-			KubectlPath: strings.TrimSpace(getenv("ARUING_KUBECTL_PATH")),
+			KubectlPath:         strings.TrimSpace(getenv("ARUING_KUBECTL_PATH")),
+			AllowDiagnosticExec: parseBoolEnv(getenv("ARUING_ALLOW_DIAGNOSTIC_EXEC")),
 		},
 	}
+}
+
+// 解析布尔环境变量；空或非布尔值返回 false，避免误开 exec 这类高自由度动作
+func parseBoolEnv(v string) bool {
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	return err == nil && b
 }
 
 // 判断 LLM 三件套是否齐全，齐全时 wiring 启用真角色

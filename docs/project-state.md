@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-26（beta4 诊断全景-4 反思环节轻量版）
+> 最后更新：2026-07-26（beta4 诊断全景-5 exec 策略；beta4 六条完成标志全绿）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**当前里程碑 `0.1.0-beta4` / 诊断信息全景**：让单轮诊断从「盲猜 + 窄框」变为「侦察集群 → 有上下文判断 → 反思多解释」。三根柱子：集群侦察（事实层）、Verifier 拿 Query + 定位证据复用（上下文层）、反思环节（推理层）；exec 策略作为配套。目标与完成标志见笔记 `arui-note/aruing/plan/milestone/0.1.0-beta4.md`。
+**当前里程碑 `0.1.0-beta4` / 诊断信息全景**（**六条完成标志全绿，待关闭**）：让单轮诊断从「盲猜 + 窄框」变为「侦察集群 → 有上下文判断 → 反思多解释」。三根柱子：集群侦察（事实层）、Verifier 拿 Query + 定位证据复用（上下文层）、反思环节（推理层）；exec 策略作为配套。目标与完成标志见笔记 `arui-note/aruing/plan/milestone/0.1.0-beta4.md`。
 
 前置：`0.0.1-beta3` 调查循环已完成（迭代取证 + pivot + 容错 + 报告调查链）。`0.0.1-beta2` 真实闭环已完成。`0.0.1-beta1` 最小假闭环已完成。
 
@@ -37,6 +37,7 @@
 | 全景-2 | 定位证据复用 | ✅ | `resolveLoop` 透出定位阶段证据；`investigateLoop` 加 `seedEvidence` 入参，作为首轮 `PlanState.Evidence` 复用，不白查已取信息 |
 | 全景-3 | 集群侦察 | ✅ | `reconCluster` 走 `executeTask`（Factory 发 Task ID），跑一次只读 `kubectl api-resources` 发现集群资源类型（含 CRD）；精简 `ClusterResources` 喂 Planner payload（`cluster_resources`）；侦察 Evidence 进报告链（透明、失败也落 error evidence）但**不进 Verifier 输入**；`parseAPIResources` 锚定 NAMESPACED 列解析；`reconEnabled` 由 wiring 在 k8s 注册时开启，无集群环境静默跳过 |
 | 全景-4 | 反思环节（轻量版） | ✅ | 仅 `planner.md` prompt 强化：首轮猜想覆盖不同根因家族；后续轮新增「防确认偏误」规则（考虑替代解释 + 安排区分性取证）。三场景真集群回归：清晰单因场景不膨胀（多查替代路由层即收尾），真实歧义场景更严谨（不再从相关性证据自信下结论）。未做结构化反思阶段（边际价值在 checkpoint 看不出） |
+| 全景-5 | exec 策略 | ✅ | 新增 `DiagnosticPolicy`（exec 放行、不校验二进制，避免适配镜像内容的陷阱 #2）；`config.Tools.AllowDiagnosticExec` 由 `ARUING_ALLOW_DIAGNOSTIC_EXEC` 控制，默认关；wiring 按开关选 `DiagnosticPolicy`/`ReadonlyPolicy`；planner.md 补 Pod 内探针（curl/nslookup/nc）指引。逐次审批（RequireApproval 接线）留辅助修复阶段 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -63,14 +64,20 @@
 
 ## 下一步
 
-**下一项：exec 策略**（DiagnosticPolicy + 配置开关，诊断动词可用；milestone 最后一项）。
+**beta4 六条完成标志全绿（集群侦察 / Verifier 拿 Query / 定位证据复用 / 反思环节 / exec 配套 / 真集群验证），待关闭并规划下一里程碑。**
 
-推进方向（不预排 PR 表，只排方向，见 milestone 文档）：
+候选方向（不预排，定下里程碑时再析出）：
+1. 用户侧多轮 / Session（O-1，版本 0.1.0 北极星「可追问」的核心缺口；编排升级，保留扁平模型与 Dispatcher）
+2. 配置文件化（版本 0.1.0 想要能力；从 env 扩展到配置文件）
+3. 辅助修复（RequireApproval 接线 + 写工具，承接全景-5 的 exec 安全模型）
+4. 持久化（`internal/store` 占位；评估体系留后续）
+
+推进方向（beta4 内，已完成）：
 1. Verifier 拿 Query + 定位证据复用 ✅
 2. 集群侦察（事实层）✅
-3. 真集群验证 checkpoint ✅（三场景通过：swanlab / keycloak×2）
-4. 反思环节（推理层）✅（轻量版 prompt 强化）
-5. exec 策略（小配套，**本轮**）
+3. 真集群验证 checkpoint ✅
+4. 反思环节（推理层）✅
+5. exec 策略（配套）✅
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 
@@ -84,6 +91,8 @@
 6. **#8**：`internal/config` 唯一读 `ARUING_*`；`cmd` 不直接 `os.Getenv` 业务键；L-8 最小 `formatRunError`
 7. **R-1**：`renderMarkdown` 纯函数渲染；CLI 默认 Markdown，`--format json` 保留
 8. **全景-3**：`reconCluster` 经 `executeTask` 跑只读 `kubectl api-resources`（Factory 发 Task ID），发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察 Evidence 进报告链透明可追溯、失败也落 error evidence，但**不进 Verifier 输入**（是 context 不是 verdict 依据）；`reconEnabled` 由 wiring 在 k8s 注册时开启
+9. **全景-4**：仅 `planner.md` prompt 强化反思（首轮猜想覆盖不同根因家族；后续轮防确认偏误，考虑替代解释 + 区分性取证）；无结构化阶段、无新输出字段
+10. **全景-5**：`DiagnosticPolicy`（exec 放行、不枚举二进制）+ `ARUING_ALLOW_DIAGNOSTIC_EXEC` 开关；wiring 按开关选策略；planner.md 补 Pod 内探针指引；逐次审批留辅助修复阶段
 
 ## 编排与多轮（2026-7-22 已确认）
 

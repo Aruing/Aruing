@@ -38,7 +38,7 @@ flowchart LR
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
 | `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner`（`LLMPlanner` / `FakePlanner`）/ `Verifier`（`LLMVerifier` / `FakeVerifier`）/ `Reporter`（`LLMReporter` / `FakeReporter`）及 `Orchestrator` 编排；Parser、Resolver、Planner、Verifier、Reporter 可接 LLM（prompt `//go:embed`）；规划、验证与报告均为单次调用，工具规格来自 `Registry.Specs` | 不直接查集群、不持久化；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
-| `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`Policy`（`ReadonlyPolicy` / `AllowAll`）、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema；执行前经 Policy 授权 | 不判断业务、不做推理、不枚举资源类型 |
+| `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`Policy`（`ReadonlyPolicy` / `DiagnosticPolicy` / `AllowAll`）、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema；执行前经 Policy 授权 | 不判断业务、不做推理、不枚举资源类型 |
 | `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
