@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-25（beta4 诊断全景-1 Verifier 拿 Query）
+> 最后更新：2026-07-25（beta4 诊断全景-2 定位证据复用）
 
 ## 当前阶段
 
@@ -34,6 +34,7 @@
 | 多轮-4a | 工具失败容错 | ✅ | `executeTask` 工具失败透传 `errToolFailed` + 合成 error evidence；编排层（定位+调查共用）容忍继续，仅 ctx 取消传播；未来改暂停问用户只改编排层 |
 | 多轮-4b | 报告调查链可见 | ✅ | `Execute` 返回 `(Report, []Evidence, error)`；`renderMarkdown` 加「证据明细」表（证据编号/命令视图/摘要+失败标记）；仅 markdown，json 不变 |
 | 全景-1 | Verifier 拿 Query | ✅ | `Verify` 加 `Query` 入参；FakeVerifier 忽略、LLMVerifier payload 带 query（goal+节点文本）；prompt 补「比对证据与用户提问现象/对象」 |
+| 全景-2 | 定位证据复用 | ✅ | `resolveLoop` 透出定位阶段证据；`investigateLoop` 加 `seedEvidence` 入参，作为首轮 `PlanState.Evidence` 复用，不白查已取信息 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -60,7 +61,7 @@
 
 ## 下一步
 
-**下一项：诊断全景-2 定位证据复用**（resolveLoop 透出定位阶段证据给调查首轮，零浪费已有信息）。之后进入集群侦察（事实层）。设计见笔记 `arui-note/aruing/plan/0.1.0-beta4/`。
+**下一项：集群侦察**（事实层，诊断开始时获取集群资源类型含 CRD 并注入 Planner context）。设计见笔记 `arui-note/aruing/plan/0.1.0-beta4/`。
 
 推进方向（不预排 PR 表，只排方向，见 milestone 文档）：
 1. Verifier 拿 Query + 定位证据复用（本轮）

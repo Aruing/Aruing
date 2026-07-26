@@ -601,3 +601,51 @@ func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 		t.Errorf("want an error evidence in chain, got: %#v", verifier.evSeen[0])
 	}
 }
+
+// 定位阶段已取的证据应作为首轮上下文喂给调查阶段的 Planner
+// scriptedResolveDriver 第一轮调一次 fake.list_pods 产生证据，第二轮提交目标
+// 调查首轮 Planner 调用时 state.Evidence 应含该证据（而非空）
+func TestOrchestratorReuseResolveEvidence(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	nodeID := "n_reuse"
+	driver := &scriptedResolveDriver{steps: []ResolveAction{
+		{
+			Action: ResolveActionCallTool,
+			Reason: "list pods to confirm workload",
+			ToolCalls: []ProposedToolCall{{
+				ToolName:  "fake.list_pods",
+				Arguments: json.RawMessage(`{"namespace":"default"}`),
+				Purpose:   "确认目标",
+				Refs:      []string{nodeID},
+			}},
+		},
+	}}
+	planner := &scriptedPlanner{plans: []Plan{{
+		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_reuse", Statement: "x"}},
+		Tasks:      []core.Task{{ID: "t1", RunID: "run_reuse", Refs: []string{"h1"}, ToolName: "fake.list_pods"}},
+	}}}
+	verifier := &scriptedVerifier{results: [][]core.Verdict{
+		{{HypothesisID: "h1", RunID: "run_reuse", Result: core.VerdictSupported}},
+	}}
+	factory := &testFactory{
+		ids: []string{"t_resolve", "e_resolve", "target_1"},
+		now: time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC),
+	}
+	orch := NewOrchestrator(
+		NewFakeParser(core.Query{ID: "q_reuse", RunID: "run_reuse", Nodes: []core.Node{{ID: nodeID, Type: "resource", Text: "demo"}}}),
+		driver, planner,
+		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
+		verifier, &scriptedReporter{}, factory,
+	)
+
+	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_reuse", Question: "demo?"}); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// scriptedResolveDriver 第一轮 call_tool 产生 1 条 evidence；调查首轮 Planner 应看到它
+	if len(planner.seen) == 0 || planner.seen[0] != 1 {
+		t.Errorf("首轮回喂 evidence = %v, want 1 (定位证据复用)", planner.seen)
+	}
+}

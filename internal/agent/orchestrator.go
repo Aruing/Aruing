@@ -177,13 +177,14 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	if err != nil {
 		return core.Report{}, nil, fmt.Errorf("parse run: %w", err)
 	}
-	targets, err := o.resolveLoop(ctx, query)
+	targets, resolveEvidence, err := o.resolveLoop(ctx, query)
 	if err != nil {
 		return core.Report{}, nil, fmt.Errorf("resolve targets: %w", err)
 	}
 	// 调查阶段为编排可见循环：Plan→Execute→Verify，证据不足时带历史证据再 Plan
 	// 默认只跑一轮与 beta2 等价；预算调高后配合 prompt 才真正迭代（architecture #15-#16）
-	evidence, verdicts, err := o.investigateLoop(ctx, query, targets)
+	// 定位阶段已取的作为首轮 seed 复用，不白查已取信息
+	evidence, verdicts, err := o.investigateLoop(ctx, query, targets, resolveEvidence)
 	if err != nil {
 		return core.Report{}, nil, err
 	}
@@ -203,11 +204,13 @@ const defaultInvestigateMaxRounds = 1
 //
 // 镜像 resolveLoop 的编排可见模式：累积状态在编排层，角色只返回本轮计划
 // 工具仍经 executeTask/Dispatcher，角色不私自调工具（#16）
-// 三个出口：预算耗尽 / Verify 无 insufficient / 后续轮规划器返回空任务
+// 三个出口：找到 supported / 预算耗尽 / 后续轮规划器返回空任务
+// seedEvidence 为定位阶段已登证据，作为首轮上下文复用（调查首轮 Planner 能看到）
 func (o *Orchestrator) investigateLoop(
 	ctx context.Context,
 	query core.Query,
 	targets []core.Target,
+	seedEvidence []core.Evidence,
 ) ([]core.Evidence, []core.Verdict, error) {
 	maxRounds := o.investigateMaxRounds
 	if maxRounds <= 0 {
@@ -216,7 +219,8 @@ func (o *Orchestrator) investigateLoop(
 
 	var hypotheses []core.Hypothesis
 	var tasks []core.Task
-	var evidence []core.Evidence
+	// 首轮以定位阶段已取证据起步，不白查；累积语义不变
+	evidence := slices.Clone(seedEvidence)
 	var verdicts []core.Verdict
 
 	for round := 0; round < maxRounds; round++ {
@@ -298,7 +302,8 @@ func summarizeVerdicts(verdicts []core.Verdict) string {
 
 // 定位阶段循环：驱动提议 → 统一执行工具并发号 → 回喂 → 提交目标
 // 角色不得在此循环外私自调工具；预算耗尽或 fail 动作时返回错误
-func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]core.Target, error) {
+// 返回定位阶段已登记的证据，供调查阶段复用（不白查已取信息）
+func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]core.Target, []core.Evidence, error) {
 	maxRounds := o.resolveMaxRounds
 	if maxRounds <= 0 {
 		maxRounds = defaultResolveMaxRounds
@@ -314,34 +319,34 @@ func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]cor
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		action, err := o.resolver.Next(ctx, state)
 		if err != nil {
-			return nil, fmt.Errorf("driver next: %w", err)
+			return nil, nil, fmt.Errorf("driver next: %w", err)
 		}
 
 		switch action.Action {
 		case ResolveActionCallTool:
 			if len(action.ToolCalls) == 0 {
-				return nil, errors.New("call_tool requires at least one tool call")
+				return nil, nil, errors.New("call_tool requires at least one tool call")
 			}
 			for _, call := range action.ToolCalls {
 				if state.Round >= state.MaxRounds {
-					return nil, fmt.Errorf("resolve budget exceeded after %d tool calls", state.MaxRounds)
+					return nil, nil, fmt.Errorf("resolve budget exceeded after %d tool calls", state.MaxRounds)
 				}
 				if err := o.applyToolCall(ctx, &state, call); err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 			}
 		case ResolveActionSubmitTargets:
 			targets, mErr := o.materializeTargets(query, action, state)
 			if mErr != nil {
-				return nil, mErr
+				return nil, nil, mErr
 			}
 			o.progressf("定位到 %d 个目标", len(targets))
-			return targets, nil
+			return targets, slices.Clone(state.Evidence), nil
 		case ResolveActionFail:
 			msg := action.Error
 			if msg == "" {
@@ -350,9 +355,9 @@ func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]cor
 			if msg == "" {
 				msg = "resolve failed"
 			}
-			return nil, errors.New(msg)
+			return nil, nil, errors.New(msg)
 		default:
-			return nil, fmt.Errorf("unknown resolve action %q", action.Action)
+			return nil, nil, fmt.Errorf("unknown resolve action %q", action.Action)
 		}
 	}
 }
