@@ -28,7 +28,7 @@ flowchart LR
 
 一次诊断：用户提问 → Parser 提取线索 → Resolver 在集群中确认目标 → Planner 生成猜想和取证任务 → Dispatcher 调工具拿证据 → Verifier 基于证据判断 → Reporter 整理报告。每条结论可回溯到具体 `Evidence` 和工具调用。
 
-**当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。阶段之间仍是直线管道；**定位阶段内部**是编排可见的小循环（`ResolveDriver.Next` → 可选 `Dispatcher.Execute` → 回喂 → `submit_targets` / `fail`），默认最多 8 轮（`SetResolveMaxRounds`）。这是最小单轮诊断的驱动方式，不是产品终态。用户侧多轮对话、Session、跨阶段挂起，将来通过编排升级（可步进 / 可挂起的状态机，`internal/graph` 占位）实现；领域实体仍按 `RunID` 扁平关联，`Run.SessionID` 预留会话。演进约定见下方硬约束 #15–#17。
+**当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。阶段之间仍是直线管道；**定位阶段内部**是编排可见的小循环（`ResolveDriver.Next` → 可选 `Dispatcher.Execute` → 回喂 → `submit_targets` / `fail`），默认最多 8 轮（`SetResolveMaxRounds`）。定位后、调查前编排跑一次**集群侦察**（`reconCluster`，经 `executeTask` 调只读 `kubectl api-resources`）：发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察产出的 Evidence 进报告链（透明可追溯、失败也落 error evidence），但**不进 Verifier 输入**（是 context 而非 verdict 依据）；仅当 wiring 注册了 k8s 工具时启用（`SetReconEnabled`）。这是最小单轮诊断的驱动方式，不是产品终态。用户侧多轮对话、Session、跨阶段挂起，将来通过编排升级（可步进 / 可挂起的状态机，`internal/graph` 占位）实现；领域实体仍按 `RunID` 扁平关联，`Run.SessionID` 预留会话。演进约定见下方硬约束 #15–#17。
 
 ## 模块职责
 

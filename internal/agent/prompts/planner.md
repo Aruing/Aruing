@@ -29,6 +29,7 @@ User 消息为 JSON，包含：
 
 - `query`：问题结构（goal、nodes、edges、timeRange；节点/边已是系统编号如 `node_...`）
 - `targets`：已确认目标（id、nodeId、type、attrs、evidenceIds）
+- `cluster_resources`（可选）：本集群实际可用资源类型清单（name、kind、namespaced、apiGroup；含 CRD 如 IngressRoute）。优先用它判断**可查什么**——若用户问题指向的资源类型在此清单里（尤其是非标准的 CRD），应安排取证任务去查，不要假设只有标准 K8s 资源
 - `evidence`（可选）：前几轮已取得的证据（id、taskId、toolName、commandView、summary、error、raw）；**存在时表示你在后续轮**
 - `verdicts`（可选）：上一轮的判断（hypothesisId、result、reason、evidenceIds）；`result: insufficient` 的猜想证据不足，需要补查
 
