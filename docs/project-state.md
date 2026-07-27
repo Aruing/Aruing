@@ -41,26 +41,7 @@
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
-## 已完成 PR
-
-- #19 feat(cli): render Markdown diagnosis report by default（`3deff24`）
-- #18 feat(config): centralize env loading and minimal LLM error hints（`7462ec3`）
-- #17 feat(agent): replace FakeReporter with LLMReporter（`808d1f5`）
-- #16 feat(agent): replace FakePlanner and FakeVerifier with LLM implementations（`6f0e977`）
-- #15 feat(agent): orchestrated resolve loop and LLMResolver（`73d015b`）
-- #13 feat(tools): add readonly Policy and optional k8s wiring（`f6209e1`）
-- #12 docs: record linear Orchestrator as temporary single-turn driver（`89603ce`）
-- #11 feat: add shell-less Kubernetes tool and discoverable specs（`19b449a`）
-- #10 fix: correct tool readonly constraint（`fcf8421`）
-- #9 docs: add aruing-pr-description skill（`3775e7e`）
-- #8 docs: add repo documentation per aruing-docs skill（`19b8973`）
-- #7 docs: add aruing-docs skill for repo documentation conventions（`a9b74a8`）
-- #6 fix(parser): validate ref uniqueness and retry on inconsistent LLM output（`8fad9ea`）
-- #5 feat: replace FakeParser with LLMParser（`dc09495`）
-- #4 ci: add pr-agent auto review（`39abbd4`）
-- #3 feat: llm client（`924a16e`）
-- #2 Feat/check action（`ddc2181`）
-- #1 Feat/init mvp（`0db3650`）
+> PR 与 commit 历史以 `git log` 为权威来源，不在本文件维护清单（避免重复与滞后）；某能力由哪个 PR 交付见上方工作单元表的备注。
 
 ## 下一步
 
@@ -116,7 +97,7 @@
 - `Verdict` 必须引用 `Evidence`
 - prompt 从文件加载（`//go:embed`），不写死代码
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`（挂在 Dispatcher 执行前）与注册控制；当前默认 `ReadonlyPolicy`
-- 不枚举 K8s 资源类型或子命令；`k8s` Tool 用 argv 表达完整 kubectl 能力
+- 不按资源类型或子命令**拆工具**（`k8s` 单一工具吃任意 argv，完整 kubectl 能力）；授权层另有 kubectl 子命令读/写白名单（见 `Policy`），做粗粒度读/写区分，与「不拆工具」不冲突
 - 线性 Orchestrator 是单轮临时驱动器；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（见 architecture #15–#17）
 - 编号与执行：Tool 只经 Dispatcher；定位阶段 `ResolveDriver` 只返回意图，`Target`/定位 `Task`/`Evidence` ID 由编排发放；规划阶段 `Hypothesis`/`Task` ID 由 `LLMPlanner` 经 `Factory` 回填；验证阶段 `Verdict` ID 由 `LLMVerifier` 经 `Factory` 回填，且只能引用已登记 Evidence；报告阶段 `Report` ID 由 `LLMReporter` 经 `Factory` 回填，结论对齐 Verdict 且证据引用不得越界
 
