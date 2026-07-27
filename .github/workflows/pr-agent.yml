@@ -23,24 +23,13 @@ jobs:
       - name: Run PR Agent
         uses: the-pr-agent/pr-agent@v0.39.0
         env:
-          # 凭据
-          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-          # OpenAI 兼容供应商：双下划线映射 [openai] section（pr-agent 的 Dynaconf envvar_prefix=False）
-          OPENAI__API_BASE: https://newapi.pytrio.asia/v1
-
-          # 配置覆盖：env var 优先级最高，仅在 .pr_agent.toml 尚未合到 main 前兜底
-          # 经验证：本代理的 OpenAI 系上游异常、DeepSeek/Kimi/Qwen/GLM/MiniMax/Mimo 配额耗尽；
-          # grok-4.5-high 上游对大 prompt（2600+ tokens）返回 400；
-          # gemini-3-pro-preview 实测能处理完整 pr-agent 大 prompt，故选它
-          CONFIG__MODEL: openai/gemini-3-pro-preview
-          CONFIG__FALLBACK_MODELS: "[]"
-          # gemini-3-pro-preview 不在 pr-agent 内置 MAX_TOKENS 表，显式声明
-          CONFIG__CUSTOM_MODEL_MAX_TOKENS: "128000"
+          # DeepSeek 官方 API：LiteLLM 原生 deepseek provider，自带 base URL 与上下文窗口，无需 openai-compat 兜底
+          # 代码审核是推理密集任务，用 pro 档；flash 档作降级备份（pro 限流/不可用时兜底）
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          CONFIG__MODEL: deepseek/deepseek-v4-pro
+          CONFIG__FALLBACK_MODELS: '["deepseek/deepseek-v4-flash"]'
 
           # 默认 pr-agent 在 synchronize 事件不跑命令，这里打开
           GITHUB_APP__HANDLE_PUSH_TRIGGER: "true"
-
-          # 本代理 WAF 拦 litellm 默认带的 `OpenAI/Python ...` UA，用 extra_headers 覆盖
-          LITELLM__EXTRA_HEADERS: '{"User-Agent":"litellm/1.99.0"}'
