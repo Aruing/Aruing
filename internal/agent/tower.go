@@ -30,10 +30,14 @@ const (
 // 会话总控：实现 session.Responder；本步仅 reply / escalate
 // 不持有跨 Turn 可变状态；每次 Respond 独立决策
 type TowerResponder struct {
-	client   llm.Client
-	factory  *core.Factory
+	// 大模型客户端，用于结构化决策（GenerateJSON）
+	client llm.Client
+	// 领域编号工厂，升格建 Run 时由 Escalate 使用
+	factory *core.Factory
+	// 正式诊断执行器，escalate 时调用
 	executor session.RunExecutor
-	prompt   string
+	// 嵌入的系统提示词全文，构造后只读
+	prompt string
 }
 
 // 创建基于大模型的 Tower；任一依赖缺失直接返回错误
@@ -94,11 +98,15 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 
 // 模型一次决策的结构化输出
 type towerDecision struct {
-	Action   string `json:"action"`
-	Content  string `json:"content"`
+	// 动作：reply 或 escalate（校验后小写）
+	Action string `json:"action"`
+	// reply 时的助手正文，escalate 时可空
+	Content string `json:"content"`
+	// escalate 时写入 Run 的诊断问题；空则回退为用户原文
 	Question string `json:"question"`
 }
 
+// 请求模型决策并做业务级重试，返回已校验、已规范化的动作
 func (t *TowerResponder) decide(ctx context.Context, in session.RespondInput) (towerDecision, error) {
 	userPayload, err := buildTowerUserPayload(in)
 	if err != nil {
@@ -130,6 +138,7 @@ func (t *TowerResponder) decide(ctx context.Context, in session.RespondInput) (t
 		ErrLLMOutputInconsistent, lastValidateErr, lastOut)
 }
 
+// 校验决策动作与必填字段，不修改入参
 func validateTowerDecision(out towerDecision) error {
 	action := strings.TrimSpace(strings.ToLower(out.Action))
 	switch action {
@@ -145,6 +154,7 @@ func validateTowerDecision(out towerDecision) error {
 	}
 }
 
+// 去掉首尾空白并把 action 规范为小写，便于后续 switch
 func normalizeTowerDecision(out towerDecision) towerDecision {
 	out.Action = strings.TrimSpace(strings.ToLower(out.Action))
 	out.Content = strings.TrimSpace(out.Content)
@@ -154,8 +164,11 @@ func normalizeTowerDecision(out towerDecision) towerDecision {
 
 // 序列化本轮输入供模型消费；历史只保留最近 maxTowerHistoryMessages 条
 func buildTowerUserPayload(in session.RespondInput) (string, error) {
+	// 写入 prompt 的精简历史项，只保留角色与正文
 	type histMsg struct {
-		Role    string `json:"role"`
+		// 消息角色，与 session.Message.Role 一致
+		Role string `json:"role"`
+		// 消息正文
 		Content string `json:"content"`
 	}
 	history := in.History

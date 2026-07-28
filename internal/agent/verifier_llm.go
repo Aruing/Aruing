@@ -28,9 +28,12 @@ const maxVerifyAttempts = 3
 // 持有不可变依赖（客户端、工厂、prompt），可被多次运行复用
 // 不持有跨运行可变状态；每次 Verify 独立发 GenerateJSON
 type LLMVerifier struct {
-	client  llm.Client
+	// 大模型客户端，每次 Verify 发一次 GenerateJSON
+	client llm.Client
+	// 领域编号与创建时间工厂，回填 Verdict 时使用
 	factory *core.Factory
-	prompt  string
+	// 嵌入的系统提示词全文，构造后只读
+	prompt string
 }
 
 // 创建基于大模型的验证器，prompt 从包内嵌入文件加载
@@ -132,37 +135,64 @@ func buildVerifierUserPayload(
 	tasks []core.Task,
 	evidence []core.Evidence,
 ) (string, error) {
+	// 问题视图：goal 已拼入节点文本，便于对照现象
 	type queryView struct {
-		ID    string `json:"id,omitempty"`
+		// 问题结构编号
+		ID string `json:"id,omitempty"`
+		// 所属运行编号
 		RunID string `json:"runId,omitempty"`
-		Goal  string `json:"goal,omitempty"`
+		// 目标与节点文本拼合后的描述
+		Goal string `json:"goal,omitempty"`
 	}
+	// 单条猜想的精简视图
 	type hypView struct {
-		ID              string   `json:"id"`
-		Statement       string   `json:"statement"`
-		Reason          string   `json:"reason,omitempty"`
+		// 猜想系统编号，判断必须按此回填
+		ID string `json:"id"`
+		// 猜想陈述
+		Statement string `json:"statement"`
+		// 提出理由
+		Reason string `json:"reason,omitempty"`
+		// 预期信号列表
 		ExpectedSignals []string `json:"expectedSignals,omitempty"`
 	}
+	// 任务上下文，帮助理解证据从何而来
 	type taskView struct {
-		ID       string   `json:"id"`
-		Refs     []string `json:"refs,omitempty"`
-		ToolName string   `json:"toolName"`
-		Purpose  string   `json:"purpose,omitempty"`
+		// 任务系统编号
+		ID string `json:"id"`
+		// 关联实体引用
+		Refs []string `json:"refs,omitempty"`
+		// 工具名
+		ToolName string `json:"toolName"`
+		// 取证目的
+		Purpose string `json:"purpose,omitempty"`
 	}
+	// 已登记证据视图，判断只能引用其中的 id
 	type evidenceView struct {
-		ID          string          `json:"id"`
-		TaskID      string          `json:"taskId"`
-		ToolName    string          `json:"toolName"`
-		CommandView string          `json:"commandView,omitempty"`
-		Summary     string          `json:"summary"`
-		Error       string          `json:"error,omitempty"`
-		Raw         json.RawMessage `json:"raw,omitempty"`
+		// 证据系统编号
+		ID string `json:"id"`
+		// 产出任务编号
+		TaskID string `json:"taskId"`
+		// 工具名
+		ToolName string `json:"toolName"`
+		// 可展示命令视图
+		CommandView string `json:"commandView,omitempty"`
+		// 摘要
+		Summary string `json:"summary"`
+		// 失败错误，成功时可空
+		Error string `json:"error,omitempty"`
+		// 原始输出片段
+		Raw json.RawMessage `json:"raw,omitempty"`
 	}
+	// 验证角色完整 user payload
 	type payload struct {
-		Query      queryView      `json:"query"`
-		Hypotheses []hypView      `json:"hypotheses"`
-		Tasks      []taskView     `json:"tasks"`
-		Evidence   []evidenceView `json:"evidence"`
+		// 用户问题上下文
+		Query queryView `json:"query"`
+		// 待判断猜想列表
+		Hypotheses []hypView `json:"hypotheses"`
+		// 本轮相关任务
+		Tasks []taskView `json:"tasks"`
+		// 已登记证据，证据引用不得越界
+		Evidence []evidenceView `json:"evidence"`
 	}
 
 	// 节点文本拼进 goal，让 LLM 看到用户问题的完整结构（域名、症状、资源名等）
@@ -219,14 +249,20 @@ func buildVerifierUserPayload(
 
 // 模型输出的中间结构，只含判断内容，不含系统编号或时间
 type verifierLLMOutput struct {
+	// 对每条输入猜想的判断列表
 	Verdicts []verifierVerdictOut `json:"verdicts"`
 }
 
+// 模型侧一条判断，Verdict.ID 由 fill 时经 Factory 发放
 type verifierVerdictOut struct {
-	HypothesisID string   `json:"hypothesis_id"`
-	Result       string   `json:"result"`
-	Reason       string   `json:"reason"`
-	EvidenceIDs  []string `json:"evidence_ids"`
+	// 对应输入猜想的系统编号
+	HypothesisID string `json:"hypothesis_id"`
+	// 结果：supported / refuted / insufficient
+	Result string `json:"result"`
+	// 判断理由，须可追溯到证据
+	Reason string `json:"reason"`
+	// 支撑本判断的证据编号，须全部属于输入 Evidence
+	EvidenceIDs []string `json:"evidence_ids"`
 }
 
 // 校验模型输出满足编排与报告的最小契约

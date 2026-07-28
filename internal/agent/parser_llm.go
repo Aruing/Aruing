@@ -39,9 +39,12 @@ var ErrLLMOutputInconsistent = errors.New("llm output inconsistent after retries
 // 持有不可变依赖（模型客户端、元数据工厂、prompt 文本），可被多次运行复用
 // 不持有跨运行的共享可变状态，重试与并发调用安全
 type LLMParser struct {
-	client  llm.Client
+	// 大模型客户端，负责发 prompt 收 JSON
+	client llm.Client
+	// 领域编号与创建时间工厂，回填 Query/Node/Edge 时使用
 	factory *core.Factory
-	prompt  string
+	// 嵌入的系统提示词全文，构造后只读
+	prompt string
 }
 
 // 创建基于大模型的解析器，prompt 从包内嵌入文件加载，不暴露给调用方
@@ -209,22 +212,36 @@ func validateParserOutput(out parserOutput) error {
 // 模型返回的中间结构，只包含线索内容，不含任何系统编号或时间字段
 // node.Ref/edge.From/edge.To 是局部引用，由 Parse 统一替换为系统编号
 type parserOutput struct {
-	Goal  string       `json:"goal"`
+	// 诊断目标的一句话概括，必填
+	Goal string `json:"goal"`
+	// 从问题中抽出的线索节点列表，至少一项
 	Nodes []parserNode `json:"nodes"`
+	// 节点之间的有向关系，可空
 	Edges []parserEdge `json:"edges"`
-	Since string       `json:"since"`
+	// 可选时间下界原文（如 "1h"），非空时写入 Query.TimeRange.Since
+	Since string `json:"since"`
 }
 
+// 模型侧节点线索，Ref 仅在本输出内唯一，回填时换成系统 Node.ID
 type parserNode struct {
-	Ref   string            `json:"ref"`
-	Type  string            `json:"type"`
-	Text  string            `json:"text"`
+	// 局部引用名，供本输出内边 From/To 引用，必须非空且唯一
+	Ref string `json:"ref"`
+	// 节点类型开放字符串，如 resource、symptom
+	Type string `json:"type"`
+	// 节点展示文本，通常是用户提到的资源名或症状
+	Text string `json:"text"`
+	// 附加属性，键可用 k8s.* / hint.* 等前缀，可空
 	Attrs map[string]string `json:"attrs,omitempty"`
 }
 
+// 模型侧有向边，From/To 指向本输出内的 node.ref
 type parserEdge struct {
-	From  string            `json:"from"`
-	To    string            `json:"to"`
-	Type  string            `json:"type"`
+	// 起点节点的局部 ref
+	From string `json:"from"`
+	// 终点节点的局部 ref
+	To string `json:"to"`
+	// 关系类型开放字符串，如 calls、depends_on
+	Type string `json:"type"`
+	// 关系附加属性，可空
 	Attrs map[string]string `json:"attrs,omitempty"`
 }

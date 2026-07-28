@@ -56,10 +56,15 @@ type Client interface {
 //   - Timeout：整体请求超时，零值表示使用默认值
 //   - MaxRetries：可重试错误（网络错误、429、5xx）的最大重试次数，零值表示使用默认值
 type Config struct {
-	BaseURL    string
-	APIKey     string
-	Model      string
-	Timeout    time.Duration
+	// 供应商兼容端点，应含版本前缀（如 https://api.openai.com/v1）
+	BaseURL string
+	// 访问凭证，本地模型（如 Ollama）可留空
+	APIKey string
+	// 模型名，由调用方决定，本包不内置模型列表
+	Model string
+	// 整体请求超时，零值表示使用 defaultTimeout
+	Timeout time.Duration
+	// 可重试错误的最大重试次数，零值表示使用 defaultMaxRetries
 	MaxRetries int
 }
 

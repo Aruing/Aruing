@@ -73,8 +73,11 @@ type Config struct {
 
 // 后端级 Kubernetes 工具，通过 shell-less argv 调用 kubectl
 type Tool struct {
-	config   Config
-	schema   *jsonschema.Schema
+	// 运行期配置（kubectl 路径、超时与输出上限等）
+	config Config
+	// 已编译的入参 JSON Schema，Execute 时校验 args
+	schema *jsonschema.Schema
+	// Spec.InputSchema 的原始 JSON 副本，供 Spec() 返回
 	specJSON json.RawMessage
 }
 
@@ -366,10 +369,14 @@ func secretKeyFragment(key string) bool {
 
 // 有上限的字节缓冲，超出后继续吞掉写入以免阻塞子进程管道
 type limitedBuffer struct {
-	max       int
-	n         int
+	// 允许保留的最大字节数
+	max int
+	// 已写入缓冲的字节数
+	n int
+	// 是否已因超限进入丢弃模式
 	truncated bool
-	buf       bytes.Buffer
+	// 实际保存的字节内容
+	buf bytes.Buffer
 }
 
 // 写入数据，超过 max 后标记截断并丢弃多余字节

@@ -32,19 +32,25 @@ const productionInvestigateMaxRounds = 3
 // 描述组装编排器所需的角色集合
 // 各角色在有 LLM 配置时可替换为真实现；字段类型放宽为 Orchestrator 构造所需的最小能力
 type orchestratorRoles struct {
+	// 问题解析角色，产出 Query 线索
 	parser interface {
 		Parse(context.Context, core.Run) (core.Query, error)
 	}
+	// 定位驱动，提议 call_tool / submit_targets / fail
 	resolver agent.ResolveDriver
-	planner  interface {
+	// 规划角色，产出猜想与取证任务
+	planner interface {
 		Plan(context.Context, agent.PlanState) (agent.Plan, error)
 	}
+	// 验证角色，基于证据产出 Verdict
 	verifier interface {
 		Verify(context.Context, core.Query, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
 	}
+	// 报告角色，整理 Report
 	reporter interface {
 		Report(context.Context, core.Run, []core.Verdict, []core.Evidence) (core.Report, error)
 	}
+	// 工具注册表，Dispatcher 与 LLM 角色 specs 同源
 	registry *tools.Registry
 	// 是否注册了真实 k8s 工具；用于开启集群侦察（仅在有集群访问时跑 api-resources）
 	reconEnabled bool
