@@ -4,5 +4,7 @@
 // 助手回复可通过 Message.RunID 引用某次 Run，不嵌套证据链
 //
 // 本包只定义 Store 接口；内存实现在 internal/store，便于以后换成持久化而不改 Turn
-// Responder 决定「本轮怎么答」；当前 Echo / Diagnose 为脚手架，后续由 Tower 替换
+// Responder 决定「本轮怎么答」；产品路径为 agent.TowerResponder（reply / escalate）
+// Echo 长期可测；DiagnoseResponder 为强制每轮诊断的脚手架，非默认产品脸
+// 升格建 Run 见 Escalate，供 Tower 与 Diagnose 共用
 package session
