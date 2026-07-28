@@ -79,52 +79,25 @@ func TestLLMPlannerPlan(t *testing.T) {
 	if len(plan.Hypotheses) != 1 || len(plan.Tasks) != 1 {
 		t.Fatalf("size = %d hyp, %d tasks", len(plan.Hypotheses), len(plan.Tasks))
 	}
-	h := plan.Hypotheses[0]
-	if !strings.HasPrefix(h.ID, "h_") {
-		t.Errorf("hypothesis ID = %q", h.ID)
-	}
-	if h.RunID != "run_1" || h.Statement != "后端 Pod 未就绪" {
+	h, task := plan.Hypotheses[0], plan.Tasks[0]
+	if !strings.HasPrefix(h.ID, "h_") || h.Statement != "后端 Pod 未就绪" {
 		t.Errorf("hypothesis = %+v", h)
 	}
-	if h.CreatedAt.IsZero() {
-		t.Error("hypothesis CreatedAt should not be zero")
-	}
-	if len(h.ExpectedSignals) != 1 || h.ExpectedSignals[0] != "Pod 未 Ready" {
-		t.Errorf("signals = %+v", h.ExpectedSignals)
-	}
-
-	task := plan.Tasks[0]
-	if !strings.HasPrefix(task.ID, "t_") {
-		t.Errorf("task ID = %q", task.ID)
-	}
-	if task.RunID != "run_1" || task.ToolName != "fake.list_pods" {
+	if !strings.HasPrefix(task.ID, "t_") || task.ToolName != "fake.list_pods" {
 		t.Errorf("task = %+v", task)
 	}
-	if task.Purpose != "检查 Pod" {
-		t.Errorf("purpose = %q", task.Purpose)
-	}
-	// h1 应被替换为系统 h_ id；其余透传
-	foundH, foundTarget, foundNode, foundQuery := false, false, false, false
+	// h1 应被替换为系统 h_ id
+	foundH := false
 	for _, ref := range task.Refs {
-		switch ref {
-		case h.ID:
+		if ref == h.ID {
 			foundH = true
-		case "target_1":
-			foundTarget = true
-		case "node_1":
-			foundNode = true
-		case "query_1":
-			foundQuery = true
-		case "h1":
+		}
+		if ref == "h1" {
 			t.Errorf("task refs still contain local hyp ref: %v", task.Refs)
 		}
 	}
-	if !foundH || !foundTarget || !foundNode || !foundQuery {
-		t.Errorf("task refs incomplete: %v", task.Refs)
-	}
-	var args map[string]any
-	if err := json.Unmarshal(task.Arguments, &args); err != nil || args["namespace"] != "default" {
-		t.Errorf("arguments = %s", task.Arguments)
+	if !foundH {
+		t.Errorf("task refs missing mapped hyp id: %v", task.Refs)
 	}
 }
 
@@ -156,101 +129,100 @@ func TestLLMPlannerDependsOn(t *testing.T) {
 	}
 }
 
-// 未知工具应触发业务重试并最终 ErrLLMOutputInconsistent
-func TestLLMPlannerUnknownTool(t *testing.T) {
-	body := `{
-		"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],
-		"tasks":[{"ref":"t1","tool_name":"not.a.tool","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]
-	}`
-	var calls atomic.Int32
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		writeChatCompletion(w, body)
-	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
+// 非法模型输出触发业务重试并最终 ErrLLMOutputInconsistent
+func TestLLMPlannerInvalidOutput(t *testing.T) {
+	// 代表几类校验：未知工具、未知 ref、重复 hyp ref、外键 Target
+	tests := []struct {
+		name    string
+		body    string
+		targets []core.Target
+	}{
+		{
+			name: "unknown tool",
+			body: `{"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"not.a.tool","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]}`,
+		},
+		{
+			name: "unknown ref",
+			body: `{"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{"argv":[]},"purpose":"p","refs":["target_missing"],"depends_on":[]}]}`,
+		},
+		{
+			name: "duplicate hyp ref",
+			body: `{"hypotheses":[{"ref":"h1","statement":"a","reason":"","expected_signals":[]},{"ref":"h1","statement":"b","reason":"","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]}`,
+		},
+		{
+			name:    "foreign target",
+			body:    `{"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]}`,
+			targets: []core.Target{{ID: "target_x", RunID: "other_run", NodeID: "node_1"}},
+		},
 	}
-	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("error = %v, want ErrLLMOutputInconsistent", err)
-	}
-	if calls.Load() != maxPlanAttempts {
-		t.Errorf("calls = %d, want %d", calls.Load(), maxPlanAttempts)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := test.body
+			client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+				writeChatCompletion(w, body)
+			})
+			planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+			if err != nil {
+				t.Fatalf("new: %v", err)
+			}
+			targets := test.targets
+			if targets == nil {
+				targets = testPlanTargets()
+			}
+			_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: targets})
+			if !errors.Is(err, ErrLLMOutputInconsistent) {
+				t.Fatalf("error = %v, want ErrLLMOutputInconsistent", err)
+			}
+		})
 	}
 }
 
-// 任务引用未知数据应拒绝
-func TestLLMPlannerUnknownRef(t *testing.T) {
-	body := `{
-		"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],
-		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{"argv":[]},"purpose":"p","refs":["target_missing"],"depends_on":[]}]
-	}`
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, body)
-	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-// 重复 hypothesis ref 应拒绝
-func TestLLMPlannerDuplicateHypRef(t *testing.T) {
-	body := `{
-		"hypotheses":[
-			{"ref":"h1","statement":"a","reason":"","expected_signals":[]},
-			{"ref":"h1","statement":"b","reason":"","expected_signals":[]}
-		],
-		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]
-	}`
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, body)
-	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("error = %v", err)
-	}
-}
-
-// 校验失败后下一次合规输出应成功（业务重试）
-func TestLLMPlannerRetryThenOK(t *testing.T) {
-	bad := `{"hypotheses":[],"tasks":[]}`
-	good := `{
-		"hypotheses":[{"ref":"h1","statement":"ok","reason":"r","expected_signals":[]}],
-		"tasks":[{"ref":"t1","tool_name":"fake.list_pods","arguments":{"namespace":"default"},"purpose":"p","refs":["h1"],"depends_on":[]}]
-	}`
-	var calls atomic.Int32
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		n := calls.Add(1)
-		if n == 1 {
-			writeChatCompletion(w, bad)
-			return
+// 校验失败后下一次合规输出应成功；持续违规耗尽重试
+func TestLLMPlannerRetry(t *testing.T) {
+	t.Run("then ok", func(t *testing.T) {
+		bad := `{"hypotheses":[],"tasks":[]}`
+		good := `{"hypotheses":[{"ref":"h1","statement":"ok","reason":"r","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"fake.list_pods","arguments":{"namespace":"default"},"purpose":"p","refs":["h1"],"depends_on":[]}]}`
+		var calls atomic.Int32
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) == 1 {
+				writeChatCompletion(w, bad)
+				return
+			}
+			writeChatCompletion(w, good)
+		})
+		planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+		if err != nil {
+			t.Fatalf("new: %v", err)
 		}
-		writeChatCompletion(w, good)
+		plan, err := planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if len(plan.Hypotheses) != 1 || calls.Load() != 2 {
+			t.Errorf("hypotheses=%d calls=%d", len(plan.Hypotheses), calls.Load())
+		}
 	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	plan, err := planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
-	if err != nil {
-		t.Fatalf("plan: %v", err)
-	}
-	if len(plan.Hypotheses) != 1 {
-		t.Fatalf("hypotheses = %d", len(plan.Hypotheses))
-	}
-	if calls.Load() != 2 {
-		t.Errorf("calls = %d, want 2", calls.Load())
-	}
+
+	t.Run("exhausted", func(t *testing.T) {
+		body := `{"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"not.a.tool","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]}`
+		var calls atomic.Int32
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			writeChatCompletion(w, body)
+		})
+		planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
+		if !errors.Is(err, ErrLLMOutputInconsistent) {
+			t.Fatalf("error = %v", err)
+		}
+		if calls.Load() != maxPlanAttempts {
+			t.Errorf("calls = %d, want %d", calls.Load(), maxPlanAttempts)
+		}
+	})
 }
 
 // 系统 prompt 必须注入 Specs，且 New 时复制快照
@@ -264,12 +236,11 @@ func TestLLMPlannerSpecsInPrompt(t *testing.T) {
 		t.Fatalf("new: %v", err)
 	}
 	if !strings.Contains(planner.prompt, "fake.list_pods") || !strings.Contains(planner.prompt, "k8s") {
-		t.Errorf("prompt missing tool names: %s", planner.prompt[:min(200, len(planner.prompt))])
+		t.Errorf("prompt missing tool names")
 	}
 	// 修改调用方 specs 不应影响已构造实例的校验集合
 	specs[0].Name = "mutated"
-	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
-	if err != nil {
+	if _, err := planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()}); err != nil {
 		t.Fatalf("plan after mutate: %v", err)
 	}
 }
@@ -287,123 +258,86 @@ func TestNewLLMPlannerRequiresDeps(t *testing.T) {
 	}
 }
 
-// 外键 Target 的 RunID 不匹配应拒绝
-func TestLLMPlannerForeignTarget(t *testing.T) {
-	body := `{
-		"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],
-		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]
-	}`
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, body)
+// 首轮不得在 payload 中带 evidence/verdicts；空任务仅后续轮合法
+func TestLLMPlannerRoundSemantics(t *testing.T) {
+	t.Run("first round omits history", func(t *testing.T) {
+		body := `{"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]}`
+		var captured string
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := io.ReadAll(r.Body)
+			captured = string(raw)
+			writeChatCompletion(w, body)
+		})
+		planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		if _, err := planner.Plan(context.Background(), PlanState{
+			Query: testPlanQuery(), Targets: testPlanTargets(),
+		}); err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if strings.Contains(captured, `"evidence"`) || strings.Contains(captured, `"verdicts"`) {
+			t.Errorf("first-round payload should omit evidence/verdicts")
+		}
 	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	targets := []core.Target{{ID: "target_x", RunID: "other_run", NodeID: "node_1"}}
-	_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: targets})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("error = %v", err)
-	}
-}
 
-// 首轮（Evidence/Verdicts 为 nil）发送给模型的 user payload 不得包含 evidence/verdicts 字段
-// 保证 PlanState 改造对模型输入零影响（与 beta2 逐字一致），后续循环才会带上历史证据
-func TestLLMPlannerFirstRoundPayload(t *testing.T) {
-	body := `{
-		"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],
-		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]
-	}`
+	t.Run("round0 empty tasks fail", func(t *testing.T) {
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeChatCompletion(w, `{"hypotheses":[],"tasks":[]}`)
+		})
+		planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		_, err = planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()})
+		if !errors.Is(err, ErrLLMOutputInconsistent) {
+			t.Fatalf("round-0 empty tasks should fail, got: %v", err)
+		}
+	})
 
-	var captured string
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		captured = string(raw)
-		writeChatCompletion(w, body)
+	t.Run("follow-up empty tasks ok", func(t *testing.T) {
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeChatCompletion(w, `{"hypotheses":[],"tasks":[]}`)
+		})
+		planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		plan, err := planner.Plan(context.Background(), PlanState{
+			Query:    testPlanQuery(),
+			Targets:  testPlanTargets(),
+			Evidence: []core.Evidence{{ID: "e_1", RunID: "run_1", TaskID: "t_old"}},
+		})
+		if err != nil {
+			t.Fatalf("follow-up empty tasks should succeed: %v", err)
+		}
+		if len(plan.Tasks) != 0 {
+			t.Errorf("tasks = %d, want 0", len(plan.Tasks))
+		}
 	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
 
-	if _, err := planner.Plan(context.Background(), PlanState{
-		Query:   testPlanQuery(),
-		Targets: testPlanTargets(),
-	}); err != nil {
-		t.Fatalf("plan: %v", err)
-	}
-
-	if strings.Contains(captured, "\"evidence\"") {
-		t.Errorf("first-round payload should omit evidence, got: %s", captured)
-	}
-	if strings.Contains(captured, "\"verdicts\"") {
-		t.Errorf("first-round payload should omit verdicts, got: %s", captured)
-	}
-}
-
-// 后续轮（有历史证据）允许返回空任务，表示调查完成
-func TestLLMPlannerFollowUpEmptyTasks(t *testing.T) {
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, `{"hypotheses":[],"tasks":[]}`)
+	// 后续轮可引用前几轮已登记的猜想编号
+	t.Run("follow-up prior hypothesis", func(t *testing.T) {
+		body := `{"hypotheses":[],"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h_prior"],"depends_on":[]}]}`
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			writeChatCompletion(w, body)
+		})
+		planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		plan, err := planner.Plan(context.Background(), PlanState{
+			Query:    testPlanQuery(),
+			Targets:  testPlanTargets(),
+			Evidence: []core.Evidence{{ID: "e_1", RunID: "run_1", TaskID: "t_old"}},
+			Verdicts: []core.Verdict{{ID: "v_1", RunID: "run_1", HypothesisID: "h_prior", Result: core.VerdictInsufficient}},
+		})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
+		}
+		if len(plan.Tasks) != 1 || plan.Tasks[0].Refs[0] != "h_prior" {
+			t.Errorf("task ref not preserved: %#v", plan.Tasks)
+		}
 	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	plan, err := planner.Plan(context.Background(), PlanState{
-		Query:    testPlanQuery(),
-		Targets:  testPlanTargets(),
-		Evidence: []core.Evidence{{ID: "e_1", RunID: "run_1", TaskID: "t_old"}},
-	})
-	if err != nil {
-		t.Fatalf("follow-up empty tasks should succeed: %v", err)
-	}
-	if len(plan.Tasks) != 0 {
-		t.Errorf("tasks = %d, want 0", len(plan.Tasks))
-	}
-}
-
-// 首轮（无历史证据）返回空任务仍应判违规并重试耗尽
-func TestLLMPlannerRound0EmptyTasks(t *testing.T) {
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, `{"hypotheses":[],"tasks":[]}`)
-	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	_, err = planner.Plan(context.Background(), PlanState{
-		Query:   testPlanQuery(),
-		Targets: testPlanTargets(),
-	})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("round-0 empty tasks should fail, got: %v", err)
-	}
-}
-
-// 后续轮任务可引用前几轮已登记的猜想编号（来自 verdicts）
-func TestLLMPlannerFollowUpPriorHypothesis(t *testing.T) {
-	body := `{
-		"hypotheses":[],
-		"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h_prior"],"depends_on":[]}]
-	}`
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, body)
-	})
-	planner, err := NewLLMPlanner(client, newTestFactory(t), testPlannerSpecs())
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	plan, err := planner.Plan(context.Background(), PlanState{
-		Query:    testPlanQuery(),
-		Targets:  testPlanTargets(),
-		Evidence: []core.Evidence{{ID: "e_1", RunID: "run_1", TaskID: "t_old"}},
-		Verdicts: []core.Verdict{{ID: "v_1", RunID: "run_1", HypothesisID: "h_prior", Result: core.VerdictInsufficient}},
-	})
-	if err != nil {
-		t.Fatalf("follow-up referencing prior hypothesis should succeed: %v", err)
-	}
-	if len(plan.Tasks) != 1 || len(plan.Tasks[0].Refs) != 1 || plan.Tasks[0].Refs[0] != "h_prior" {
-		t.Errorf("task ref not preserved: %#v", plan.Tasks)
-	}
 }

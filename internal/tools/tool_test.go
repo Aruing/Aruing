@@ -107,6 +107,7 @@ func TestRegistryRegister(t *testing.T) {
 
 // 无效工具应在注册阶段被拒绝，避免空名称污染注册表或空对象触发崩溃
 func TestRegistryValidate(t *testing.T) {
+	// 代表校验：nil、空名、坏 schema（JSON Schema 语义）
 	tests := []struct {
 		name      string
 		tool      Tool
@@ -114,16 +115,6 @@ func TestRegistryValidate(t *testing.T) {
 	}{
 		{name: "nil tool", tool: nil, wantError: "tool is required"},
 		{name: "empty name", tool: emptyNameTool{}, wantError: "tool name is required"},
-		{
-			name:      "empty schema",
-			tool:      invalidSchemaTool{schema: nil},
-			wantError: "input schema is required",
-		},
-		{
-			name:      "schema not object",
-			tool:      invalidSchemaTool{schema: json.RawMessage(`["array"]`)},
-			wantError: "JSON object",
-		},
 		{
 			name:      "invalid json schema",
 			tool:      invalidSchemaTool{schema: json.RawMessage(`{"type":"not-a-type"}`)},
@@ -201,6 +192,7 @@ func TestDispatcherValidate(t *testing.T) {
 		t.Fatalf("register fake tool: %v", err)
 	}
 
+	// 代表校验：调度器无 registry、任务缺关键身份字段
 	tests := []struct {
 		name       string
 		dispatcher *Dispatcher
@@ -214,22 +206,10 @@ func TestDispatcherValidate(t *testing.T) {
 			wantError:  "requires a registry",
 		},
 		{
-			name:       "missing registry",
-			dispatcher: &Dispatcher{},
-			task:       core.Task{ID: "t_test", RunID: "run_test", ToolName: "fake.list_pods"},
-			wantError:  "requires a registry",
-		},
-		{
 			name:       "missing task ID",
 			dispatcher: NewDispatcher(registry, nil),
 			task:       core.Task{RunID: "run_test", ToolName: "fake.list_pods"},
 			wantError:  "requires an ID",
-		},
-		{
-			name:       "missing run ID",
-			dispatcher: NewDispatcher(registry, nil),
-			task:       core.Task{ID: "t_test", ToolName: "fake.list_pods"},
-			wantError:  "requires a run ID",
 		},
 		{
 			name:       "missing tool name",

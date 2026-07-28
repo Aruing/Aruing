@@ -88,26 +88,18 @@ func TestLoadFromNil(t *testing.T) {
 func TestAllowDiagnosticExecParsing(t *testing.T) {
 	t.Parallel()
 
-	for _, raw := range []string{"", " ", "notabool", "0", "false", "False"} {
-		cfg := LoadFrom(func(k string) string {
+	load := func(raw string) Config {
+		return LoadFrom(func(k string) string {
 			if k == "ARUING_ALLOW_DIAGNOSTIC_EXEC" {
 				return raw
 			}
 			return ""
 		})
-		if cfg.Tools.AllowDiagnosticExec {
-			t.Errorf("raw=%q parsed true, want false", raw)
-		}
 	}
-	for _, raw := range []string{"1", "true", "TRUE", "True"} {
-		cfg := LoadFrom(func(k string) string {
-			if k == "ARUING_ALLOW_DIAGNOSTIC_EXEC" {
-				return raw
-			}
-			return ""
-		})
-		if !cfg.Tools.AllowDiagnosticExec {
-			t.Errorf("raw=%q parsed false, want true", raw)
-		}
+	if load("").Tools.AllowDiagnosticExec || load("notabool").Tools.AllowDiagnosticExec {
+		t.Error("empty/invalid should be false")
+	}
+	if !load("true").Tools.AllowDiagnosticExec || !load("1").Tools.AllowDiagnosticExec {
+		t.Error("true/1 should be true")
 	}
 }

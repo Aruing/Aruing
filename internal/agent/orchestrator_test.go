@@ -373,98 +373,88 @@ func TestOrchestratorInvestigateLoop(t *testing.T) {
 	}
 }
 
-// 预算耗尽时调查循环停止并照常出报告（不报错）
-func TestOrchestratorInvestigateBudget(t *testing.T) {
+// 调查停止条件：预算、默认单轮、空任务提前结束
+func TestOrchestratorInvestigateStop(t *testing.T) {
 	taskPlan := Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
-	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
-	verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
-	orch, _, _ := newInvestigateOrch(t, planner, verifier)
-	orch.SetInvestigateMaxRounds(2)
 
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if planner.calls != 2 {
-		t.Errorf("planner calls = %d, want 2 (budget cap)", planner.calls)
-	}
+	t.Run("budget", func(t *testing.T) {
+		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
+		orch, _, _ := newInvestigateOrch(t, planner, verifier)
+		orch.SetInvestigateMaxRounds(2)
+		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if planner.calls != 2 {
+			t.Errorf("planner calls = %d, want 2", planner.calls)
+		}
+	})
+
+	// 默认预算 1：即便 insufficient 也只跑一轮
+	t.Run("default single round", func(t *testing.T) {
+		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
+		orch, _, _ := newInvestigateOrch(t, planner, verifier)
+		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if planner.calls != 1 || verifier.calls != 1 {
+			t.Errorf("calls = planner %d / verifier %d, want 1 / 1", planner.calls, verifier.calls)
+		}
+	})
+
+	// 后续轮空任务：提前结束，不再 Verify
+	t.Run("empty tasks", func(t *testing.T) {
+		planner := &scriptedPlanner{plans: []Plan{taskPlan, {}}}
+		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
+		orch, _, _ := newInvestigateOrch(t, planner, verifier)
+		orch.SetInvestigateMaxRounds(3)
+		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if planner.calls != 2 || verifier.calls != 1 {
+			t.Errorf("calls = planner %d / verifier %d, want 2 / 1", planner.calls, verifier.calls)
+		}
+	})
 }
 
-// 后续轮规划器返回空任务时，调查提前结束，不再调用 Verify
-func TestOrchestratorInvestigateEmptyTasks(t *testing.T) {
-	taskPlan := Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
-	planner := &scriptedPlanner{plans: []Plan{taskPlan, {}}}
-	verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
-	orch, _, _ := newInvestigateOrch(t, planner, verifier)
-	orch.SetInvestigateMaxRounds(3)
-
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if planner.calls != 2 {
-		t.Errorf("planner calls = %d, want 2", planner.calls)
-	}
-	if verifier.calls != 1 {
-		t.Errorf("verifier calls = %d, want 1 (empty tasks skips second verify)", verifier.calls)
-	}
-}
-
-// 默认预算 1：即便 insufficient 也只跑一轮，与 beta2 单轮行为等价
-func TestOrchestratorInvestigateDefault(t *testing.T) {
-	taskPlan := Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
-	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
-	verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
-	orch, _, _ := newInvestigateOrch(t, planner, verifier)
-
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if planner.calls != 1 || verifier.calls != 1 {
-		t.Errorf("calls = planner %d / verifier %d, want 1 / 1 (default single round)", planner.calls, verifier.calls)
-	}
-}
-
-// 全部猜想被排除而无一是 supported 时，不应结束，应继续生成新猜想直到找到原因或预算耗尽
-func TestOrchestratorInvestigateAllRefuted(t *testing.T) {
+// 全部猜想被排除时应继续转向；预算耗尽则出报告
+func TestOrchestratorInvestigateRefuted(t *testing.T) {
 	taskPlan := Plan{
 		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
 		Tasks:      []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}},
 	}
-	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
-	verifier := &scriptedVerifier{results: [][]core.Verdict{
-		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},   // round 0: 全排除
-		{{HypothesisID: "h2", RunID: "run_inv", Result: core.VerdictSupported}}, // round 1: 转向后确认
-	}}
-	orch, _, _ := newInvestigateOrch(t, planner, verifier)
-	orch.SetInvestigateMaxRounds(3)
 
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	// 全排除后应继续到第二轮并找到 supported
-	if planner.calls != 2 || verifier.calls != 2 {
-		t.Errorf("calls = planner %d / verifier %d, want 2 / 2 (pivot after all refuted)", planner.calls, verifier.calls)
-	}
-}
+	t.Run("pivot to supported", func(t *testing.T) {
+		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		verifier := &scriptedVerifier{results: [][]core.Verdict{
+			{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},
+			{{HypothesisID: "h2", RunID: "run_inv", Result: core.VerdictSupported}},
+		}}
+		orch, _, _ := newInvestigateOrch(t, planner, verifier)
+		orch.SetInvestigateMaxRounds(3)
+		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if planner.calls != 2 || verifier.calls != 2 {
+			t.Errorf("calls = planner %d / verifier %d, want 2 / 2", planner.calls, verifier.calls)
+		}
+	})
 
-// 全部猜想被排除且预算耗尽时，停止并照常出报告
-func TestOrchestratorInvestigateAllRefutedBudget(t *testing.T) {
-	taskPlan := Plan{
-		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
-		Tasks:      []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}},
-	}
-	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
-	verifier := &scriptedVerifier{results: [][]core.Verdict{
-		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},
-	}}
-	orch, _, _ := newInvestigateOrch(t, planner, verifier)
-	orch.SetInvestigateMaxRounds(2)
-
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	if planner.calls != 2 {
-		t.Errorf("planner calls = %d, want 2 (budget cap after all refuted)", planner.calls)
-	}
+	t.Run("budget after refuted", func(t *testing.T) {
+		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		verifier := &scriptedVerifier{results: [][]core.Verdict{
+			{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},
+		}}
+		orch, _, _ := newInvestigateOrch(t, planner, verifier)
+		orch.SetInvestigateMaxRounds(2)
+		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+			t.Fatalf("execute: %v", err)
+		}
+		if planner.calls != 2 {
+			t.Errorf("planner calls = %d, want 2", planner.calls)
+		}
+	})
 }
 
 // 用脚本驱动的调查阶段测试桩：按序返回计划，用尽后重复最后一个
@@ -829,8 +819,7 @@ func TestReconClusterDisabled(t *testing.T) {
 }
 
 // 侦察 Evidence 进返回链（透明），但不在 Verifier 输入（侦察是 context 不是 verdict 依据）
-// 同时验证侦察经 Factory 发号、Survey出现在 CLI 可见的证据明细中
-func TestOrchestratorReconEvidenceInChainNotVerifier(t *testing.T) {
+func TestOrchestratorReconEvidenceScope(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register fake.list_pods: %v", err)
