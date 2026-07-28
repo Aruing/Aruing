@@ -108,7 +108,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
-| O-1 | 用户侧多轮 / Session：**架构 confirmed（beta5）**，实现未开工 |
+| O-1 | 用户侧多轮 / Session：架构 confirmed；**beta5-1 骨架已落地**（Turn / Echo / Diagnose），Tower 与 CLI 入口未接 |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。
