@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-28（关闭 `0.1.0-beta4`；当前 `0.1.0-beta5` 架构 confirmed、实现未开工）
+> 最后更新：2026-07-28（`0.1.0-beta5` 开工：beta5-1 Session / Message / Turn 骨架）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**当前里程碑 `0.1.0-beta5` / 可追问 Session + Tower 智能基线**（**架构已确认 2026-07-28，实现未开工**）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → 现有 Orchestrator.Execute**。诊断是升格专长，不是默认主轴。见笔记 `plan/milestone/0.1.0-beta5.md` 与 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
+**当前里程碑 `0.1.0-beta5` / 可追问 Session + Tower 智能基线**（**架构已确认 2026-07-28；实现进行中**）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → 现有 Orchestrator.Execute**。诊断是升格专长，不是默认主轴。见笔记 `plan/milestone/0.1.0-beta5.md` 与 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
 
 前置：
 
@@ -41,7 +41,8 @@
 | 全景-3 | 集群侦察 | ✅ | `reconCluster` 走 `executeTask`（Factory 发 Task ID），跑一次只读 `kubectl api-resources` 发现集群资源类型（含 CRD）；精简 `ClusterResources` 喂 Planner payload（`cluster_resources`）；侦察 Evidence 进报告链（透明、失败也落 error evidence）但**不进 Verifier 输入**；`parseAPIResources` 锚定 NAMESPACED 列解析；`reconEnabled` 由 wiring 在 k8s 注册时开启，无集群环境静默跳过 |
 | 全景-4 | 反思环节（轻量版） | ✅ | 仅 `planner.md` prompt 强化：首轮猜想覆盖不同根因家族；后续轮新增「防确认偏误」规则（考虑替代解释 + 安排区分性取证）。三场景真集群回归：清晰单因场景不膨胀，真实歧义场景更严谨。未做结构化反思阶段 |
 | 全景-5 | exec 策略 | ✅ | 新增 `DiagnosticPolicy`（exec 放行、不校验二进制）；`config.Tools.AllowDiagnosticExec` 由 `ARUING_ALLOW_DIAGNOSTIC_EXEC` 控制，默认关；wiring 按开关选策略；planner.md 补 Pod 内探针指引。逐次审批留辅助修复阶段 |
-| beta5 | Session + Tower | ⏳ | 架构 confirmed；实现未开工。见笔记 `plan/0.1.0-beta5/` |
+| beta5-1 | Session / Message / Turn | ✅ 本步 | `internal/session`：Session/Message、`Service.Turn`、Echo/Diagnose Responder；`internal/store.MemoryStore`；升格时 `Run.SessionID` 写入；CLI 未接。见笔记 `plan/0.1.0-beta5/2026-7-28-session-message.md` |
+| beta5 | Session + Tower | ⏳ | 架构 confirmed；下一步 Tower / 真 Responder。见笔记 `plan/0.1.0-beta5/` |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -49,7 +50,7 @@
 
 ## 下一步
 
-**下一项：起草 beta5 第一步 step plan 并开工。** 架构见笔记 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
+**下一项：Tower（或最小 LLM Responder）+ 有限动作（reply / escalate / …）；基线 tool 时再做 `Task.RunID` 可空。** 架构见笔记 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`；beta5-1 钩子：只换 `Responder` 实现，Turn 流程不动。
 
 已确认（2026-07-28）：
 
