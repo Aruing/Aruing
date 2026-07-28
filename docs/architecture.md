@@ -28,7 +28,9 @@ flowchart LR
 
 一次诊断：用户提问 → Parser 提取线索 → Resolver 在集群中确认目标 → Planner 生成猜想和取证任务 → Dispatcher 调工具拿证据 → Verifier 基于证据判断 → Reporter 整理报告。每条结论可回溯到具体 `Evidence` 和工具调用。
 
-**当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。阶段之间仍是直线管道；**定位阶段内部**是编排可见的小循环（`ResolveDriver.Next` → 可选 `Dispatcher.Execute` → 回喂 → `submit_targets` / `fail`），默认最多 8 轮（`SetResolveMaxRounds`）。定位后、调查前编排跑一次**集群侦察**（`reconCluster`，经 `executeTask` 调只读 `kubectl api-resources`）：发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察产出的 Evidence 进报告链（透明可追溯、失败也落 error evidence），但**不进 Verifier 输入**（是 context 而非 verdict 依据）；仅当 wiring 注册了 k8s 工具时启用（`SetReconEnabled`）。这是最小单轮诊断的驱动方式，不是产品终态。用户侧多轮对话、Session、跨阶段挂起，将来通过编排升级（可步进 / 可挂起的状态机，`internal/graph` 占位）实现；领域实体仍按 `RunID` 扁平关联，`Run.SessionID` 预留会话。演进约定见下方硬约束 #15–#17。
+**当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。阶段之间仍是直线管道；**定位阶段内部**是编排可见的小循环（`ResolveDriver.Next` → 可选 `Dispatcher.Execute` → 回喂 → `submit_targets` / `fail`），默认最多 8 轮（`SetResolveMaxRounds`）。定位后、调查前编排跑一次**集群侦察**（`reconCluster`，经 `executeTask` 调只读 `kubectl api-resources`）：发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察产出的 Evidence 进报告链（透明可追溯、失败也落 error evidence），但**不进 Verifier 输入**（是 context 而非 verdict 依据）；仅当 wiring 注册了 k8s 工具时启用（`SetReconEnabled`）。这是最小单轮诊断的驱动方式，不是产品终态。
+
+**用户侧会话（已有骨架）**：`internal/session` 提供 `Service.Turn`：确认会话 → 读历史 → 落 user 消息 → `Responder.Respond` → 落 assistant 消息 → 刷新 `Session.UpdatedAt`。当前脚手架 Responder 为 `Echo`（直接回显）与 `Diagnose`（`escalate` → `Orchestrator.Execute`，写入 `Run.SessionID`，助手消息挂 `RunID`）。**CLI / 产品入口尚未接 Session**；**Tower 与有限动作集尚未实现**（后续只换 `Responder`，Turn 流程不变）。对话层不持证据账本；领域实体仍按 `RunID` 扁平关联。跨阶段挂起仍可由 `internal/graph`（占位）承接。演进约定见下方硬约束 #15–#17。
 
 ## 模块职责
 
@@ -42,8 +44,9 @@ flowchart LR
 | `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
-| `internal/store` | 持久化诊断状态和证据（占位） | 当前未实现 |
-| `internal/graph` | 流程编排状态机（占位） | 当前未用；线性流程暂由 `Orchestrator` 承担，多轮升级时承接状态机 |
+| `internal/session` | 用户侧多轮壳：`Session` / `Message`、`Store` 接口、`Service.Turn`、可替换 `Responder`（Echo / Diagnose） | 不持证据账本、不替代 Orchestrator；不实现 Tower；CLI 未接 |
+| `internal/store` | 持久化实现：`MemoryStore`（进程内会话与消息）；接口由使用方定义（如 `session.Store`） | 不定义业务接口；Run / Evidence 级持久化仍可后续扩展；进程退出即丢 |
+| `internal/graph` | 流程编排状态机（占位） | 当前未用；线性诊断仍由 `Orchestrator`；跨阶段挂起时再承接 |
 | `internal/config` | 从 env（`ARUING_*`）加载进程级配置：`LLM`（BaseURL/APIKey/Model）、`Tools.KubectlPath`；`LLM.Ready` / `ToClientConfig` | 不解析配置文件、不热更新、不读 `.env` 文件本身 |
 | `internal/api` | HTTP / 网络入口（占位） | 当前仅 CLI |
 
@@ -53,7 +56,9 @@ flowchart LR
 
 | 结构 | 字段要点 |
 | --- | --- |
-| `Run` | `ID / Question / Status / CreatedAt / UpdatedAt`；`SessionID` 预留多轮对话 |
+| `Run` | `ID / Question / Status / CreatedAt / UpdatedAt`；`SessionID` 在 Diagnose 升格路径写入所属会话 |
+| `Session`（`session` 包） | `ID / CreatedAt / UpdatedAt`；对话容器，不嵌装消息列表 |
+| `Message`（`session` 包） | `ID / SessionID / Role / Content / CreatedAt`；助手可选 `RunID` / `Mode`（baseline 或 diagnostic） |
 | `Query` | `ID / RunID / Goal / Nodes / Edges / TimeRange`；用户问题的开放图结构 |
 | `Node` | `ID / Type / Text / Attrs`；类型开放（如 `resource`、`symptom`），属性用 `k8s.*` / `hint.*` 前缀 |
 | `Edge` | `ID / From / To / Type / Attrs`；有向关系，类型开放（如 `calls`、`depends_on`） |
@@ -81,19 +86,23 @@ Report                    对 Verdict 和 Evidence 引用的整理，不编造
 
 ## 数据关联
 
-实体不嵌套，全部通过 `RunID` 扁平关联：
+诊断实体不嵌套，全部通过 `RunID` 扁平关联；会话与消息通过 `SessionID` 关联，助手消息可选挂 `RunID` 指向某次正式诊断：
 
 ```
-Run ──RunID──→ Query ──NodeID──→ Target
-                    │
-              ──RunID──→ Hypothesis ──Refs──→ Task ──TaskID──→ Evidence
-                              │                                          │
-                              └──HypothesisID──→ Verdict ←──EvidenceIDs───┘
-                                                       │
-                                                 映射为 Conclusion → Report
+Session ──SessionID──→ Message（可选 RunID）
+                              │
+Run ←──SessionID（升格时）────┘
+ │
+ └──RunID──→ Query ──NodeID──→ Target
+                 │
+           ──RunID──→ Hypothesis ──Refs──→ Task ──TaskID──→ Evidence
+                           │                                          │
+                           └──HypothesisID──→ Verdict ←──EvidenceIDs───┘
+                                                    │
+                                              映射为 Conclusion → Report
 ```
 
-存储层可 `WHERE run_id=?` 一次取出某次运行的全部实体。
+存储层可 `WHERE run_id=?` 一次取出某次运行的全部实体；会话消息可 `WHERE session_id=?` 按序取出。
 
 ## 硬约束
 
