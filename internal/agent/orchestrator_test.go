@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"strconv"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -684,8 +684,8 @@ func TestParseAPIResources(t *testing.T) {
 	// 超 maxKeep（300）截断；构造 305 行确认上限生效且不挑类别
 	var b strings.Builder
 	b.WriteString("NAME   SHORTNAMES   NAMESPACED   KIND\n")
-	for i := 0; i < 305; i++ {
-		b.WriteString("r" + strconv.Itoa(i) + "   x   true   Kind" + strconv.Itoa(i) + "\n")
+	for i := range 305 {
+		fmt.Fprintf(&b, "r%d   x   true   Kind%d\n", i, i)
 	}
 	if got := parseAPIResources(b.String()); len(got) != 300 {
 		t.Errorf("truncated len = %d, want 300", len(got))
