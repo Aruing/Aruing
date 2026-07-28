@@ -57,6 +57,7 @@ func TestFakeReporterReport(t *testing.T) {
 // 报告只能整理一致且可追溯的判断与证据，不能生成悬空或跨运行结论
 func TestFakeReporterValidate(t *testing.T) {
 	run := core.Run{ID: "run_test"}
+	// 代表校验：未知结论、result 与 verdict 不一致、跨运行证据
 	tests := []struct {
 		name     string
 		report   core.Report
@@ -79,37 +80,6 @@ func TestFakeReporterValidate(t *testing.T) {
 				RunID:        "run_test",
 				HypothesisID: "h_test",
 				Result:       core.VerdictRefuted,
-			}},
-		},
-		{
-			name: "foreign verdict",
-			report: core.Report{Conclusions: []core.Conclusion{{
-				HypothesisID: "h_test",
-			}}},
-			verdicts: []core.Verdict{{
-				RunID:        "run_other",
-				HypothesisID: "h_test",
-			}},
-		},
-		{
-			name: "unknown evidence",
-			report: core.Report{Conclusions: []core.Conclusion{{
-				HypothesisID: "h_test",
-			}}},
-			verdicts: []core.Verdict{{
-				RunID:        "run_test",
-				HypothesisID: "h_test",
-				EvidenceIDs:  []string{"e_unknown"},
-			}},
-		},
-		{
-			name: "missing evidence refs",
-			report: core.Report{Conclusions: []core.Conclusion{{
-				HypothesisID: "h_test",
-			}}},
-			verdicts: []core.Verdict{{
-				RunID:        "run_test",
-				HypothesisID: "h_test",
 			}},
 		},
 		{

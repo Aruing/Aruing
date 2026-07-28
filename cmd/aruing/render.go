@@ -15,10 +15,8 @@ import (
 func renderMarkdown(report core.Report, evidence []core.Evidence) string {
 	var b strings.Builder
 
-	b.WriteString("# " + nonEmpty(report.Title, "诊断报告") + "\n\n")
-
-	b.WriteString("## 摘要\n\n")
-	b.WriteString(nonEmpty(report.Summary, "（无摘要）") + "\n\n")
+	fmt.Fprintf(&b, "# %s\n\n", nonEmpty(report.Title, "诊断报告"))
+	fmt.Fprintf(&b, "## 摘要\n\n%s\n\n", nonEmpty(report.Summary, "（无摘要）"))
 
 	if len(report.Conclusions) == 0 {
 		b.WriteString("## 结论\n\n暂无结论\n\n")
@@ -84,11 +82,11 @@ func renderConclusionGroups(b *strings.Builder, conclusions []core.Conclusion) {
 			b.WriteString("## 结论\n\n")
 			first = false
 		}
-		b.WriteString("### " + g.title + "\n\n")
+		fmt.Fprintf(b, "### %s\n\n", g.title)
 		for _, c := range items {
-			b.WriteString("- " + nonEmpty(c.Reason, "（无说明）") + "\n")
+			fmt.Fprintf(b, "- %s\n", nonEmpty(c.Reason, "（无说明）"))
 			if len(c.EvidenceIDs) > 0 {
-				b.WriteString("  证据：" + joinIDs(c.EvidenceIDs) + "\n")
+				fmt.Fprintf(b, "  证据：%s\n", joinIDs(c.EvidenceIDs))
 			}
 		}
 		b.WriteString("\n")

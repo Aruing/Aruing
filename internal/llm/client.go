@@ -52,9 +52,11 @@ func NewClient(cfg Config) (Client, error) {
 // 仅改写 JSON object 请求；已显式带 stream 的请求原样转发
 // 不依赖具体 path 前缀以外的约定，兼容 /v1 与自定义 base
 type forceNonStreamTransport struct {
+	// 实际转发请求的底层 Transport，nil 时回退 http.DefaultTransport
 	base http.RoundTripper
 }
 
+// 对 chat/completions POST 补齐 stream=false 后转发
 func (t forceNonStreamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.base
 	if base == nil {
@@ -102,8 +104,11 @@ func ensureStreamFalse(body []byte) []byte {
 // 仅持有不可变依赖（sashabaranov 客户端、模型名、重试上限），可被多个 goroutine 复用
 // 重试退避时间在每次调用内独立计算，不存在跨请求共享状态
 type client struct {
-	api        *openai.Client
-	model      string
+	// sashabaranov OpenAI 兼容客户端
+	api *openai.Client
+	// 请求使用的模型名
+	model string
+	// 可恢复错误的最大重试次数
 	maxRetries int
 }
 

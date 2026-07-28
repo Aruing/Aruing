@@ -28,9 +28,12 @@ const maxReportAttempts = 3
 // 持有不可变依赖（客户端、工厂、prompt），可被多次运行复用
 // 不持有跨运行可变状态；每次 Report 独立发 GenerateJSON
 type LLMReporter struct {
-	client  llm.Client
+	// 大模型客户端，每次 Report 发一次 GenerateJSON
+	client llm.Client
+	// 领域编号与创建时间工厂，回填 Report 时使用
 	factory *core.Factory
-	prompt  string
+	// 嵌入的系统提示词全文，构造后只读
+	prompt string
 }
 
 // 创建基于大模型的报告器，prompt 从包内嵌入文件加载
@@ -137,24 +140,41 @@ func buildReporterUserPayload(
 	verdicts []core.Verdict,
 	evidence []core.Evidence,
 ) (string, error) {
+	// 已完成判断的精简视图，约束结论 result 与证据子集
 	type verdictView struct {
-		ID           string   `json:"id"`
-		HypothesisID string   `json:"hypothesisId"`
-		Result       string   `json:"result"`
-		Reason       string   `json:"reason"`
-		EvidenceIDs  []string `json:"evidenceIds"`
+		// 判断系统编号
+		ID string `json:"id"`
+		// 对应猜想编号
+		HypothesisID string `json:"hypothesisId"`
+		// 裁决结果枚举字符串
+		Result string `json:"result"`
+		// 判断理由
+		Reason string `json:"reason"`
+		// 该判断已引用的证据编号集合
+		EvidenceIDs []string `json:"evidenceIds"`
 	}
+	// 证据摘要视图，不含 Raw 以免撑爆 prompt
 	type evidenceView struct {
-		ID          string `json:"id"`
-		TaskID      string `json:"taskId,omitempty"`
-		ToolName    string `json:"toolName"`
+		// 证据系统编号
+		ID string `json:"id"`
+		// 产出任务编号
+		TaskID string `json:"taskId,omitempty"`
+		// 工具名
+		ToolName string `json:"toolName"`
+		// 可展示命令视图
 		CommandView string `json:"commandView,omitempty"`
-		Summary     string `json:"summary"`
-		Error       string `json:"error,omitempty"`
+		// 摘要
+		Summary string `json:"summary"`
+		// 失败错误，成功时可空
+		Error string `json:"error,omitempty"`
 	}
+	// 报告角色完整 user payload
 	type payload struct {
-		Question string         `json:"question"`
-		Verdicts []verdictView  `json:"verdicts"`
+		// 用户原始问题
+		Question string `json:"question"`
+		// 全部判断，结论必须一一覆盖
+		Verdicts []verdictView `json:"verdicts"`
+		// 已登记证据摘要
 		Evidence []evidenceView `json:"evidence"`
 	}
 
@@ -193,17 +213,26 @@ func buildReporterUserPayload(
 
 // 模型输出的中间结构，只含报告内容，不含系统编号或时间
 type reporterLLMOutput struct {
-	Title       string               `json:"title"`
-	Summary     string               `json:"summary"`
+	// 报告标题
+	Title string `json:"title"`
+	// 整体摘要
+	Summary string `json:"summary"`
+	// 按猜想列出的结论条目
 	Conclusions []reporterConclusion `json:"conclusions"`
-	Suggestions []string             `json:"suggestions"`
+	// 后续建议列表，可为空
+	Suggestions []string `json:"suggestions"`
 }
 
+// 模型侧一条结论，须对齐对应 Verdict 的 result 与证据子集
 type reporterConclusion struct {
-	HypothesisID string   `json:"hypothesis_id"`
-	Result       string   `json:"result"`
-	Reason       string   `json:"reason"`
-	EvidenceIDs  []string `json:"evidence_ids"`
+	// 对应猜想系统编号
+	HypothesisID string `json:"hypothesis_id"`
+	// 须与对应 Verdict.Result 一致
+	Result string `json:"result"`
+	// 面向读者的结论理由
+	Reason string `json:"reason"`
+	// 引用的证据编号，须为对应 Verdict.EvidenceIDs 的非空子集
+	EvidenceIDs []string `json:"evidence_ids"`
 }
 
 // 校验模型输出满足报告契约与信任边界

@@ -16,7 +16,9 @@ import (
 // 进程内会话与消息存储，实现 session.Store
 // 临时方案：不写文件、不写数据库；并发安全，但同一会话业务上仍约定串行 Turn
 type MemoryStore struct {
-	mu       sync.Mutex
+	// 保护 sessions 与 messages 的互斥锁
+	mu sync.Mutex
+	// 会话编号到会话实体的映射
 	sessions map[string]session.Session
 	// 按会话编号保存消息追加顺序
 	messages map[string][]session.Message

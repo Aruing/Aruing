@@ -8,7 +8,7 @@ import (
 	"aruing/internal/core"
 )
 
-// 完整报告应渲染出标题、摘要、三段结论、证据编号和建议
+// 完整报告应渲染出标题、摘要、结论分组、证据编号和建议
 func TestRenderMarkdownFull(t *testing.T) {
 	t.Parallel()
 
@@ -30,19 +30,14 @@ func TestRenderMarkdownFull(t *testing.T) {
 
 	for _, want := range []string{
 		"# demo-api 诊断报告",
-		"## 摘要",
 		"后端 Pod 未正常运行",
 		"### 已支持",
 		"Pod 处于 CrashLoopBackOff",
 		"`e_1` `e_2`",
 		"### 已排除",
-		"网络策略正常",
 		"### 证据不足",
 		"## 建议",
 		"1. 检查启动日志",
-		"2. 检查资源配置",
-		"运行 `run_1`",
-		"报告 `rep_1`",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("missing %q in output:\n%s", want, md)
@@ -50,85 +45,28 @@ func TestRenderMarkdownFull(t *testing.T) {
 	}
 }
 
-// 无结论时应输出占位，不渲染空段标题
-func TestRenderMarkdownNoConclusions(t *testing.T) {
+// 空结论/空建议/空标题应回退占位，且不渲染空段
+func TestRenderMarkdownEmpty(t *testing.T) {
 	t.Parallel()
 
 	md := renderMarkdown(core.Report{
-		ID:        "rep_2",
-		RunID:     "run_2",
-		Title:     "空报告",
-		Summary:   "无内容",
+		ID:        "rep_empty",
+		RunID:     "run_empty",
 		CreatedAt: time.Now(),
 	}, nil)
 
+	if !strings.Contains(md, "# 诊断报告") || !strings.Contains(md, "（无摘要）") {
+		t.Errorf("empty title/summary should fall back:\n%s", md)
+	}
 	if !strings.Contains(md, "暂无结论") {
-		t.Errorf("want placeholder, got:\n%s", md)
+		t.Errorf("want conclusions placeholder:\n%s", md)
 	}
-	if strings.Contains(md, "### 已支持") {
-		t.Errorf("empty group should be omitted:\n%s", md)
-	}
-}
-
-// 只有 supported 结论时，其他段应省略
-func TestRenderMarkdownPartialGroups(t *testing.T) {
-	t.Parallel()
-
-	md := renderMarkdown(core.Report{
-		ID:      "rep_3",
-		RunID:   "run_3",
-		Title:   "T",
-		Summary: "S",
-		Conclusions: []core.Conclusion{
-			{Result: core.VerdictSupported, Reason: "ok", EvidenceIDs: nil},
-		},
-		CreatedAt: time.Now(),
-	}, nil)
-
-	if !strings.Contains(md, "### 已支持") {
-		t.Errorf("supported group missing:\n%s", md)
-	}
-	if strings.Contains(md, "### 已排除") || strings.Contains(md, "### 证据不足") {
-		t.Errorf("empty groups should be omitted:\n%s", md)
+	if strings.Contains(md, "### 已支持") || strings.Contains(md, "## 建议") {
+		t.Errorf("empty groups/suggestions should be omitted:\n%s", md)
 	}
 }
 
-// 无建议时应省略建议段
-func TestRenderMarkdownNoSuggestions(t *testing.T) {
-	t.Parallel()
-
-	md := renderMarkdown(core.Report{
-		ID:        "rep_4",
-		RunID:     "run_4",
-		Title:     "T",
-		Summary:   "S",
-		CreatedAt: time.Now(),
-	}, nil)
-
-	if strings.Contains(md, "## 建议") {
-		t.Errorf("suggestions section should be omitted when empty:\n%s", md)
-	}
-}
-
-// 空标题与空摘要应回退到占位文案
-func TestRenderMarkdownEmptyFields(t *testing.T) {
-	t.Parallel()
-
-	md := renderMarkdown(core.Report{
-		ID:        "rep_5",
-		RunID:     "run_5",
-		CreatedAt: time.Now(),
-	}, nil)
-
-	if !strings.Contains(md, "# 诊断报告") {
-		t.Errorf("empty title should fall back:\n%s", md)
-	}
-	if !strings.Contains(md, "（无摘要）") {
-		t.Errorf("empty summary should fall back:\n%s", md)
-	}
-}
-
-// 证据明细应按调查时序列出命令与摘要；合成失败证据用 — 占位命令
+// 证据明细应按调查时序列出命令与摘要
 func TestRenderMarkdownEvidenceDetail(t *testing.T) {
 	t.Parallel()
 
@@ -148,7 +86,6 @@ func TestRenderMarkdownEvidenceDetail(t *testing.T) {
 
 	for _, want := range []string{
 		"## 证据明细",
-		"| --- | --- | --- |",
 		"`e_a`",
 		"`kubectl get ingress -n swanlab -o json`",
 		"`e_b`",

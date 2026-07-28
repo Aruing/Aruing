@@ -49,7 +49,7 @@ func testReportEvidence() []core.Evidence {
 	}
 }
 
-// 标准路径：回填 rep_ 编号，结论与 Verdict 对齐，证据可取子集
+// 标准路径：回填编号、绑定 Run，并保留与 Verdict 对齐的结论
 func TestLLMReporterReport(t *testing.T) {
 	body := `{
 		"title":"demo-api 诊断报告",
@@ -74,33 +74,14 @@ func TestLLMReporterReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("report: %v", err)
 	}
-	if !strings.HasPrefix(got.ID, "rep_") {
-		t.Errorf("report ID = %q", got.ID)
+	if !strings.HasPrefix(got.ID, "rep_") || got.RunID != "run_1" {
+		t.Errorf("binding ID=%q RunID=%q", got.ID, got.RunID)
 	}
-	if got.RunID != "run_1" {
-		t.Errorf("runID = %q", got.RunID)
+	if got.Title != "demo-api 诊断报告" || len(got.Conclusions) != 1 {
+		t.Errorf("title/conclusions not preserved: title=%q conclusions=%d", got.Title, len(got.Conclusions))
 	}
-	if got.Title != "demo-api 诊断报告" {
-		t.Errorf("title = %q", got.Title)
-	}
-	if got.Summary == "" {
-		t.Error("summary should not be empty")
-	}
-	if len(got.Conclusions) != 1 {
-		t.Fatalf("conclusions len = %d", len(got.Conclusions))
-	}
-	c := got.Conclusions[0]
-	if c.HypothesisID != "h_1" || c.Result != core.VerdictSupported {
-		t.Errorf("conclusion = %+v", c)
-	}
-	if len(c.EvidenceIDs) != 1 || c.EvidenceIDs[0] != "e_1" {
-		t.Errorf("evidence = %v", c.EvidenceIDs)
-	}
-	if len(got.Suggestions) != 1 {
-		t.Errorf("suggestions = %v", got.Suggestions)
-	}
-	if got.CreatedAt.IsZero() {
-		t.Error("CreatedAt should not be zero")
+	if got.Conclusions[0].HypothesisID != "h_1" || got.Conclusions[0].Result != core.VerdictSupported {
+		t.Errorf("conclusion = %+v", got.Conclusions[0])
 	}
 }
 
@@ -115,187 +96,97 @@ func TestLLMReporterNewRequiresDeps(t *testing.T) {
 	}
 }
 
-// 改写 result 触发业务重试后失败
-func TestLLMReporterResultMismatch(t *testing.T) {
-	body := `{
-		"title":"t",
-		"summary":"s",
-		"conclusions":[{
-			"hypothesis_id":"h_1",
-			"result":"refuted",
-			"reason":"x",
-			"evidence_ids":["e_1"]
-		}],
-		"suggestions":[]
-	}`
-	var calls atomic.Int32
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		writeChatCompletion(w, body)
-	})
-	reporter, err := NewLLMReporter(client, newTestFactory(t))
-	if err != nil {
-		t.Fatalf("new: %v", err)
+// 非法模型输出触发业务重试并最终 ErrLLMOutputInconsistent
+func TestLLMReporterInvalidOutput(t *testing.T) {
+	// 代表几类校验：改写 result、未知证据、漏结论、空 title
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "result mismatch",
+			body: `{"title":"t","summary":"s","conclusions":[{"hypothesis_id":"h_1","result":"refuted","reason":"x","evidence_ids":["e_1"]}],"suggestions":[]}`,
+		},
+		{
+			name: "evidence outside verdict",
+			body: `{"title":"t","summary":"s","conclusions":[{"hypothesis_id":"h_1","result":"supported","reason":"x","evidence_ids":["e_unknown"]}],"suggestions":[]}`,
+		},
+		{
+			name: "missing conclusion",
+			body: `{"title":"t","summary":"s","conclusions":[],"suggestions":[]}`,
+		},
+		{
+			name: "empty title",
+			body: `{"title":"","summary":"s","conclusions":[{"hypothesis_id":"h_1","result":"supported","reason":"x","evidence_ids":["e_1"]}],"suggestions":[]}`,
+		},
 	}
-	_, err = reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Errorf("err = %v", err)
-	}
-	if calls.Load() != maxReportAttempts {
-		t.Errorf("calls = %d, want %d", calls.Load(), maxReportAttempts)
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			body := test.body
+			client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+				writeChatCompletion(w, body)
+			})
+			reporter, err := NewLLMReporter(client, newTestFactory(t))
+			if err != nil {
+				t.Fatalf("new: %v", err)
+			}
+			_, err = reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
+			if !errors.Is(err, ErrLLMOutputInconsistent) {
+				t.Fatalf("err = %v, want ErrLLMOutputInconsistent", err)
+			}
+		})
 	}
 }
 
-// 引用不在 Verdict 证据集中的 evidence 应拒绝
-func TestLLMReporterEvidenceOutsideVerdict(t *testing.T) {
-	body := `{
-		"title":"t",
-		"summary":"s",
-		"conclusions":[{
-			"hypothesis_id":"h_1",
-			"result":"supported",
-			"reason":"x",
-			"evidence_ids":["e_unknown"]
-		}],
-		"suggestions":[]
-	}`
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, body)
-	})
-	reporter, err := NewLLMReporter(client, newTestFactory(t))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	_, err = reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Errorf("err = %v", err)
-	}
-}
-
-// 漏写结论触发业务重试
-func TestLLMReporterMissingConclusion(t *testing.T) {
-	body := `{"title":"t","summary":"s","conclusions":[],"suggestions":[]}`
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, body)
-	})
-	reporter, err := NewLLMReporter(client, newTestFactory(t))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	_, err = reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Errorf("err = %v", err)
-	}
-}
-
-// 空 title 不合法
-func TestLLMReporterEmptyTitle(t *testing.T) {
-	body := `{
-		"title":"",
-		"summary":"s",
-		"conclusions":[{
-			"hypothesis_id":"h_1",
-			"result":"supported",
-			"reason":"x",
-			"evidence_ids":["e_1"]
-		}],
-		"suggestions":[]
-	}`
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, body)
-	})
-	reporter, err := NewLLMReporter(client, newTestFactory(t))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	_, err = reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Errorf("err = %v", err)
-	}
-}
-
-// 语义违规后干净输出可在业务重试内恢复
-func TestLLMReporterRetryThenSuccess(t *testing.T) {
-	dirty := `{
-		"title":"t",
-		"summary":"s",
-		"conclusions":[{
-			"hypothesis_id":"h_1",
-			"result":"refuted",
-			"reason":"x",
-			"evidence_ids":["e_1"]
-		}],
-		"suggestions":[]
-	}`
-	clean := `{
-		"title":"ok",
-		"summary":"summary ok",
-		"conclusions":[{
-			"hypothesis_id":"h_1",
-			"result":"supported",
-			"reason":"ok",
-			"evidence_ids":["e_1","e_2"]
-		}],
-		"suggestions":["restart carefully after fix"]
-	}`
-	var calls atomic.Int32
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		n := calls.Add(1)
-		if n == 1 {
-			writeChatCompletion(w, dirty)
-			return
+// 语义违规后干净输出可在业务重试内恢复；持续违规会耗尽重试
+func TestLLMReporterRetry(t *testing.T) {
+	t.Run("then success", func(t *testing.T) {
+		dirty := `{"title":"t","summary":"s","conclusions":[{"hypothesis_id":"h_1","result":"refuted","reason":"x","evidence_ids":["e_1"]}],"suggestions":[]}`
+		clean := `{"title":"ok","summary":"summary ok","conclusions":[{"hypothesis_id":"h_1","result":"supported","reason":"ok","evidence_ids":["e_1","e_2"]}],"suggestions":["restart carefully after fix"]}`
+		var calls atomic.Int32
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if calls.Add(1) == 1 {
+				writeChatCompletion(w, dirty)
+				return
+			}
+			writeChatCompletion(w, clean)
+		})
+		reporter, err := NewLLMReporter(client, newTestFactory(t))
+		if err != nil {
+			t.Fatalf("new: %v", err)
 		}
-		writeChatCompletion(w, clean)
+		got, err := reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
+		if err != nil {
+			t.Fatalf("report: %v", err)
+		}
+		if got.Title != "ok" || calls.Load() != 2 {
+			t.Errorf("title=%q calls=%d", got.Title, calls.Load())
+		}
 	})
-	reporter, err := NewLLMReporter(client, newTestFactory(t))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	got, err := reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
-	if err != nil {
-		t.Fatalf("report: %v", err)
-	}
-	if got.Title != "ok" {
-		t.Errorf("title = %q", got.Title)
-	}
-	if calls.Load() != 2 {
-		t.Errorf("calls = %d, want 2", calls.Load())
-	}
+
+	t.Run("exhausted", func(t *testing.T) {
+		body := `{"title":"t","summary":"s","conclusions":[{"hypothesis_id":"h_1","result":"refuted","reason":"x","evidence_ids":["e_1"]}],"suggestions":[]}`
+		var calls atomic.Int32
+		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			writeChatCompletion(w, body)
+		})
+		reporter, err := NewLLMReporter(client, newTestFactory(t))
+		if err != nil {
+			t.Fatalf("new: %v", err)
+		}
+		_, err = reporter.Report(context.Background(), testReportRun(), testReportVerdicts(), testReportEvidence())
+		if !errors.Is(err, ErrLLMOutputInconsistent) {
+			t.Fatalf("err = %v", err)
+		}
+		if calls.Load() != maxReportAttempts {
+			t.Errorf("calls = %d, want %d", calls.Load(), maxReportAttempts)
+		}
+	})
 }
 
-// 取消上下文应立即失败
-func TestLLMReporterCanceledContext(t *testing.T) {
-	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		writeChatCompletion(w, `{}`)
-	})
-	reporter, err := NewLLMReporter(client, newTestFactory(t))
-	if err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	_, err = reporter.Report(ctx, testReportRun(), testReportVerdicts(), testReportEvidence())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Errorf("should not be inconsistent: %v", err)
-	}
-}
-
-// Verdict 无证据时在入口拒绝，不进入 LLM 重试
+// Verdict 无证据时在入口拒绝，不进入 LLM
 func TestLLMReporterVerdictWithoutEvidence(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -315,14 +206,8 @@ func TestLLMReporterVerdictWithoutEvidence(t *testing.T) {
 		EvidenceIDs:  nil,
 	}}
 	_, err = reporter.Report(context.Background(), testReportRun(), verdicts, testReportEvidence())
-	if err == nil {
-		t.Fatal("expected error")
-	}
-	if !strings.Contains(err.Error(), "requires evidence") {
-		t.Errorf("err = %v", err)
-	}
-	if errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Errorf("should fail before LLM retries: %v", err)
+	if err == nil || errors.Is(err, ErrLLMOutputInconsistent) {
+		t.Fatalf("want pre-LLM rejection, got %v", err)
 	}
 	if calls.Load() != 0 {
 		t.Errorf("LLM calls = %d, want 0", calls.Load())

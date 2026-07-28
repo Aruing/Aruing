@@ -29,8 +29,11 @@ const maxResolveAttempts = 3
 // 持有不可变依赖（客户端、工具规格快照、prompt），可被多次运行复用
 // 不持有跨运行可变状态；每轮 Next 独立发 GenerateJSON
 type LLMResolver struct {
+	// 大模型客户端，每轮 Next 发一次 GenerateJSON
 	client llm.Client
-	specs  []tools.ToolSpec
+	// 注册表工具规格快照，用于拼 system prompt 与校验 tool_name
+	specs []tools.ToolSpec
+	// 已注入工具规格的系统提示词全文，构造后只读
 	prompt string
 }
 
@@ -114,28 +117,48 @@ func buildResolverSystemPrompt(template string, specs []tools.ToolSpec) (string,
 
 // 序列化回喂状态：证据只带摘要与截断 raw，避免撑爆上下文
 func buildResolverUserPayload(state ResolveState) (string, error) {
+	// 喂给模型的证据摘要，不含完整 Raw
 	type evidenceView struct {
-		ID          string `json:"id"`
-		TaskID      string `json:"taskId"`
-		ToolName    string `json:"toolName"`
-		Summary     string `json:"summary"`
-		Error       string `json:"error,omitempty"`
+		// 证据系统编号
+		ID string `json:"id"`
+		// 产出该证据的任务编号
+		TaskID string `json:"taskId"`
+		// 实际调用的工具名
+		ToolName string `json:"toolName"`
+		// 人类可读摘要
+		Summary string `json:"summary"`
+		// 工具失败时的错误文案，成功时可空
+		Error string `json:"error,omitempty"`
+		// 可展示的命令视图（如 argv 拼串）
 		CommandView string `json:"commandView,omitempty"`
-		RawPreview  string `json:"rawPreview,omitempty"`
+		// 原始输出预览，超长已截断
+		RawPreview string `json:"rawPreview,omitempty"`
 	}
+	// 喂给模型的本轮已发起任务视图
 	type taskView struct {
-		ID        string          `json:"id"`
-		ToolName  string          `json:"toolName"`
-		Purpose   string          `json:"purpose,omitempty"`
-		Refs      []string        `json:"refs,omitempty"`
+		// 任务系统编号
+		ID string `json:"id"`
+		// 工具名
+		ToolName string `json:"toolName"`
+		// 取证目的说明
+		Purpose string `json:"purpose,omitempty"`
+		// 关联的 Node/Target 等通用引用
+		Refs []string `json:"refs,omitempty"`
+		// 工具入参 JSON
 		Arguments json.RawMessage `json:"arguments,omitempty"`
 	}
+	// 定位轮次完整 user payload
 	type payload struct {
-		Query     core.Query     `json:"query"`
-		Tasks     []taskView     `json:"tasks"`
-		Evidence  []evidenceView `json:"evidence"`
-		Round     int            `json:"round"`
-		MaxRounds int            `json:"maxRounds"`
+		// 当前问题的开放线索图
+		Query core.Query `json:"query"`
+		// 本定位阶段已执行过的任务
+		Tasks []taskView `json:"tasks"`
+		// 本定位阶段已收集的证据摘要
+		Evidence []evidenceView `json:"evidence"`
+		// 当前轮次（从 1 或 0 起，与编排约定一致）
+		Round int `json:"round"`
+		// 编排允许的最大定位轮数
+		MaxRounds int `json:"maxRounds"`
 	}
 
 	const maxRawPreview = 2000
@@ -181,27 +204,42 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 	return string(b), nil
 }
 
-// 模型输出中间结构
+// 模型输出中间结构，映射为 ResolveAction 前须校验
 type resolverLLMOutput struct {
-	Action    string              `json:"action"`
-	Reason    string              `json:"reason"`
-	ToolCalls []resolverToolCall  `json:"tool_calls"`
-	Targets   []resolverTargetOut `json:"targets"`
-	Error     string              `json:"error"`
+	// 动作：call_tool / submit_targets / fail
+	Action string `json:"action"`
+	// 选择该动作的理由，供编排与排障阅读
+	Reason string `json:"reason"`
+	// call_tool 时的工具提议列表，契约上本步仅允许恰好一条
+	ToolCalls []resolverToolCall `json:"tool_calls"`
+	// submit_targets 时提交的目标内容（无系统 Target.ID）
+	Targets []resolverTargetOut `json:"targets"`
+	// fail 时的错误说明
+	Error string `json:"error"`
 }
 
+// 模型提议的一次工具调用，不含 Task.ID（由编排发放）
 type resolverToolCall struct {
-	ToolName  string          `json:"tool_name"`
+	// 注册表中的工具名
+	ToolName string `json:"tool_name"`
+	// 符合对应 ToolSpec 的参数 JSON
 	Arguments json.RawMessage `json:"arguments"`
-	Purpose   string          `json:"purpose"`
-	Refs      []string        `json:"refs"`
+	// 本步取证目的
+	Purpose string `json:"purpose"`
+	// 关联线索节点等通用引用
+	Refs []string `json:"refs"`
 }
 
+// 模型提交的已确认目标内容，Target.ID 由编排在 submit 时发放
 type resolverTargetOut struct {
-	NodeID      string            `json:"node_id"`
-	Type        string            `json:"type"`
-	Attrs       map[string]string `json:"attrs"`
-	EvidenceIDs []string          `json:"evidence_ids"`
+	// 对应 Query 中节点的系统编号
+	NodeID string `json:"node_id"`
+	// 目标类型，如 k8s.resource
+	Type string `json:"type"`
+	// 环境中确认的属性（命名空间、kind、name 等）
+	Attrs map[string]string `json:"attrs"`
+	// 支撑该目标的证据编号列表
+	EvidenceIDs []string `json:"evidence_ids"`
 }
 
 // 校验并映射为编排使用的 ResolveAction

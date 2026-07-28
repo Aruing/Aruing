@@ -54,6 +54,7 @@ type Tool interface {
 // 工具注册表，维护工具名称到工具实例的映射
 // 规划器只能使用已注册的工具，未注册的工具名称会被调度器拒绝
 type Registry struct {
+	// 工具名到实例的映射，Register 时写入
 	tools map[string]Tool
 }
 
@@ -120,8 +121,9 @@ func (r *Registry) Specs() []ToolSpec {
 // 具体参数约束由对应工具校验，调度器不依赖不同后端的参数结构
 // 调度器在执行前调用 Policy：能力由 Registry 开放，授权由 Policy 决定
 type Dispatcher struct {
+	// 已注册工具查找表
 	registry *Registry
-	// 执行前授权；nil 时视为全部允许（仅便于测试）
+	// 执行前授权；构造时 nil 会换成 AllowAll（仅便于测试）
 	policy Policy
 }
 
@@ -155,7 +157,7 @@ func (d *Dispatcher) Execute(ctx context.Context, task core.Task) (*core.Evidenc
 	decision, reason := d.policy.Check(task.ToolName, task.Arguments)
 	switch decision {
 	case DecisionAllow:
-		// continue
+		// 已授权，继续执行工具
 	case DecisionDeny:
 		if reason == "" {
 			reason = "denied by policy"
