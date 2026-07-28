@@ -29,7 +29,7 @@ func TestMemoryStoreSessionLifecycle(t *testing.T) {
 	}
 
 	got.UpdatedAt = now.Add(time.Minute)
-	if err := s.UpdateSession(ctx, got); err != nil {
+	if err = s.UpdateSession(ctx, got); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	again, err := s.GetSession(ctx, "sess_1")

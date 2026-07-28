@@ -123,7 +123,7 @@ func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnRes
 	if err != nil {
 		return TurnResult{}, err
 	}
-	if err := s.store.AppendMessage(ctx, &userMsg); err != nil {
+	if err = s.store.AppendMessage(ctx, &userMsg); err != nil {
 		return TurnResult{}, fmt.Errorf("append user message: %w", err)
 	}
 
@@ -140,13 +140,13 @@ func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnRes
 	if err != nil {
 		return TurnResult{}, err
 	}
-	if err := s.store.AppendMessage(ctx, &assistantMsg); err != nil {
+	if err = s.store.AppendMessage(ctx, &assistantMsg); err != nil {
 		return TurnResult{}, fmt.Errorf("append assistant message: %w", err)
 	}
 
 	// 用助手消息时间刷新会话活跃时间
 	session.UpdatedAt = assistantMsg.CreatedAt
-	if err := s.store.UpdateSession(ctx, session); err != nil {
+	if err = s.store.UpdateSession(ctx, session); err != nil {
 		return TurnResult{}, fmt.Errorf("update session: %w", err)
 	}
 

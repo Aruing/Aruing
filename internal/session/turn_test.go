@@ -43,7 +43,7 @@ func TestTurnEchoMessageOrder(t *testing.T) {
 		t.Fatalf("echo should not set run id: %q / %q", r1.RunID, r1.AssistantMessage.RunID)
 	}
 
-	if _, err := svc.Turn(ctx, sess.ID, "b"); err != nil {
+	if _, err = svc.Turn(ctx, sess.ID, "b"); err != nil {
 		t.Fatalf("turn 2: %v", err)
 	}
 
