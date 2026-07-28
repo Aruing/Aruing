@@ -1,16 +1,19 @@
 # 项目当前状态
 
-> 最后更新：2026-07-26（beta4 诊断全景-5 exec 策略；beta4 六条完成标志全绿）
+> 最后更新：2026-07-28（关闭 `0.1.0-beta4`；当前 `0.1.0-beta5` 架构 confirmed、实现未开工）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**当前里程碑 `0.1.0-beta4` / 诊断信息全景**（**六条完成标志全绿，待关闭**）：让单轮诊断从「盲猜 + 窄框」变为「侦察集群 → 有上下文判断 → 反思多解释」。三根柱子：集群侦察（事实层）、Verifier 拿 Query + 定位证据复用（上下文层）、反思环节（推理层）；exec 策略作为配套。目标与完成标志见笔记 `arui-note/aruing/plan/milestone/0.1.0-beta4.md`。
+**当前里程碑 `0.1.0-beta5` / 可追问 Session + Tower 智能基线**（**架构已确认 2026-07-28，实现未开工**）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → 现有 Orchestrator.Execute**。诊断是升格专长，不是默认主轴。见笔记 `plan/milestone/0.1.0-beta5.md` 与 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
 
-前置：`0.0.1-beta3` 调查循环已完成（迭代取证 + pivot + 容错 + 报告调查链）。`0.0.1-beta2` 真实闭环已完成。`0.0.1-beta1` 最小假闭环已完成。
+前置：
 
-前置：`0.0.1-beta2` 真实闭环已完成（五角色全接 LLM，`aruing run` 端到端产出可追溯 Markdown 报告）。`0.0.1-beta1` 最小假闭环已完成（数据流跑通，模块边界立住）。
+- `0.1.0-beta4` 诊断信息全景 ✅ 完成并归档（2026-07-28 关闭；交付 2026-07-26，六条完成标志全绿：集群侦察含 CRD、Verifier 拿 Query、定位证据复用、反思环节、exec 策略、真集群验证）
+- `0.0.1-beta3` 调查循环 ✅（迭代取证 + pivot + 容错 + 报告调查链）
+- `0.0.1-beta2` 真实闭环 ✅（五角色全接 LLM，端到端 Markdown 报告）
+- `0.0.1-beta1` 最小假闭环 ✅
 
 ## 工作单元
 
@@ -36,56 +39,51 @@
 | 全景-1 | Verifier 拿 Query | ✅ | `Verify` 加 `Query` 入参；FakeVerifier 忽略、LLMVerifier payload 带 query（goal+节点文本）；prompt 补「比对证据与用户提问现象/对象」 |
 | 全景-2 | 定位证据复用 | ✅ | `resolveLoop` 透出定位阶段证据；`investigateLoop` 加 `seedEvidence` 入参，作为首轮 `PlanState.Evidence` 复用，不白查已取信息 |
 | 全景-3 | 集群侦察 | ✅ | `reconCluster` 走 `executeTask`（Factory 发 Task ID），跑一次只读 `kubectl api-resources` 发现集群资源类型（含 CRD）；精简 `ClusterResources` 喂 Planner payload（`cluster_resources`）；侦察 Evidence 进报告链（透明、失败也落 error evidence）但**不进 Verifier 输入**；`parseAPIResources` 锚定 NAMESPACED 列解析；`reconEnabled` 由 wiring 在 k8s 注册时开启，无集群环境静默跳过 |
-| 全景-4 | 反思环节（轻量版） | ✅ | 仅 `planner.md` prompt 强化：首轮猜想覆盖不同根因家族；后续轮新增「防确认偏误」规则（考虑替代解释 + 安排区分性取证）。三场景真集群回归：清晰单因场景不膨胀（多查替代路由层即收尾），真实歧义场景更严谨（不再从相关性证据自信下结论）。未做结构化反思阶段（边际价值在 checkpoint 看不出） |
-| 全景-5 | exec 策略 | ✅ | 新增 `DiagnosticPolicy`（exec 放行、不校验二进制，避免适配镜像内容的陷阱 #2）；`config.Tools.AllowDiagnosticExec` 由 `ARUING_ALLOW_DIAGNOSTIC_EXEC` 控制，默认关；wiring 按开关选 `DiagnosticPolicy`/`ReadonlyPolicy`；planner.md 补 Pod 内探针（curl/nslookup/nc）指引。逐次审批（RequireApproval 接线）留辅助修复阶段 |
+| 全景-4 | 反思环节（轻量版） | ✅ | 仅 `planner.md` prompt 强化：首轮猜想覆盖不同根因家族；后续轮新增「防确认偏误」规则（考虑替代解释 + 安排区分性取证）。三场景真集群回归：清晰单因场景不膨胀，真实歧义场景更严谨。未做结构化反思阶段 |
+| 全景-5 | exec 策略 | ✅ | 新增 `DiagnosticPolicy`（exec 放行、不校验二进制）；`config.Tools.AllowDiagnosticExec` 由 `ARUING_ALLOW_DIAGNOSTIC_EXEC` 控制，默认关；wiring 按开关选策略；planner.md 补 Pod 内探针指引。逐次审批留辅助修复阶段 |
+| beta5 | Session + Tower | ⏳ | 架构 confirmed；实现未开工。见笔记 `plan/0.1.0-beta5/` |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
-> PR 与 commit 历史以 `git log` 为权威来源，不在本文件维护清单（避免重复与滞后）；某能力由哪个 PR 交付见上方工作单元表的备注。
+> PR 与 commit 历史以 `git log` 为权威来源，不在本文件维护清单；某能力由哪个 PR 交付见上方工作单元表的备注。
 
 ## 下一步
 
-**beta4 六条完成标志全绿（集群侦察 / Verifier 拿 Query / 定位证据复用 / 反思环节 / exec 配套 / 真集群验证），待关闭并规划下一里程碑。**
+**下一项：起草 beta5 第一步 step plan 并开工。** 架构见笔记 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
 
-候选方向（不预排，定下里程碑时再析出）：
-1. 用户侧多轮 / Session（O-1，版本 0.1.0 北极星「可追问」的核心缺口；编排升级，保留扁平模型与 Dispatcher）
-2. 配置文件化（版本 0.1.0 想要能力；从 env 扩展到配置文件）
-3. 辅助修复（RequireApproval 接线 + 写工具，承接全景-5 的 exec 安全模型）
-4. 持久化（`internal/store` 占位；评估体系留后续）
+已确认（2026-07-28）：
 
-推进方向（beta4 内，已完成）：
-1. Verifier 拿 Query + 定位证据复用 ✅
-2. 集群侦察（事实层）✅
-3. 真集群验证 checkpoint ✅
-4. 反思环节（推理层）✅
-5. exec 策略（配套）✅
+1. 入口 `Session.Turn`；**Tower** 每轮必经（智能基线）；诊断 = escalate → 现有 Orchestrator
+2. Run = 正式证据账本；非每句必有 Run；调查追问倾向新 Run + SessionContext
+3. 扩展能力/工具，禁止 core 意图枚举；助手回答 vs 正式诊断报告可区分
+4. **Dispatcher.RunID 可空**：基线 tool 可无 Run；Task.ID 仍必填；空 RunID 的结果不得当 Verdict 证据（见架构笔记 §5.1）
+
+候选（不预排）：
+
+1. 配置文件化
+2. 辅助修复（RequireApproval + 写工具）
+3. 持久化 / `waiting_user` / 同 Run 续查路径
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 
-已落地要点：
+已落地要点（beta2–4，摘要）：
 
-1. **#4a**：`tools.Policy` + `ReadonlyPolicy` 挂在 `Dispatcher.Execute` 前；`wiring` 在 kubectl 可用时可选注册 `k8s`
-2. **#4b**：`Orchestrator.resolveTargets` 循环；`ResolveDriver` / `LLMResolver` / 按节点的 `FakeResolver`；Target ID 与定位阶段 Task/Evidence ID 由编排发放；L-1 关闭
-3. **#5**：`LLMPlanner` 单次 `Plan` + `Registry.Specs`；局部 ref 回填 Hypothesis/Task ID；业务重试；不在规划阶段多轮调 Tool（#15–#16）
-4. **#6**：`LLMVerifier` 单次 `Verify`；每条 Hypothesis 恰好一条 Verdict；`evidence_ids` 必须属于输入 Evidence；Factory 回填 Verdict ID；业务重试
-5. **#7**：`LLMReporter` 单次 `Report`；结论覆盖每条 Verdict 且 `result` 一致；`evidence_ids` ⊆ 对应 Verdict 证据集；Factory 回填 Report ID；业务重试
-6. **#8**：`internal/config` 唯一读 `ARUING_*`；`cmd` 不直接 `os.Getenv` 业务键；L-8 最小 `formatRunError`
-7. **R-1**：`renderMarkdown` 纯函数渲染；CLI 默认 Markdown，`--format json` 保留
-8. **全景-3**：`reconCluster` 经 `executeTask` 跑只读 `kubectl api-resources`（Factory 发 Task ID），发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察 Evidence 进报告链透明可追溯、失败也落 error evidence，但**不进 Verifier 输入**（是 context 不是 verdict 依据）；`reconEnabled` 由 wiring 在 k8s 注册时开启
-9. **全景-4**：仅 `planner.md` prompt 强化反思（首轮猜想覆盖不同根因家族；后续轮防确认偏误，考虑替代解释 + 区分性取证）；无结构化阶段、无新输出字段
-10. **全景-5**：`DiagnosticPolicy`（exec 放行、不枚举二进制）+ `ARUING_ALLOW_DIAGNOSTIC_EXEC` 开关；wiring 按开关选策略；planner.md 补 Pod 内探针指引；逐次审批留辅助修复阶段
+1. **#4a/#4b**：Policy + 可选 k8s；编排可见定位循环；Target/定位 Task/Evidence ID 由编排发放
+2. **#5–#7**：LLMPlanner / LLMVerifier / LLMReporter 单次调用 + Factory 回填 + 业务重试
+3. **#8 / R-1**：`internal/config`；CLI 默认 Markdown
+4. **beta3**：`investigateLoop` + 工具失败容错 + 报告证据明细
+5. **beta4**：Verifier 拿 Query、定位证据复用、集群侦察、反思 prompt、DiagnosticPolicy
 
-## 编排与多轮（2026-7-22 已确认）
+## 编排与多轮
 
 | 项 | 结论 |
 | --- | --- |
-| 当前目标 | 最小**单轮**真实诊断；线性 `Orchestrator` 可继续用 |
-| 定位阶段 | 编排内小循环（`ResolveDriver`），非用户 Session |
-| 会否大规模重构 | **否（非必然）**；主要改编排 + 角色调用方式，core/tools 多半保留 |
-| 延后成本量级 | 系统内多轮约数人日；完整 Session 对话约 1–3 周；若把直线冻成全局契约则更高 |
-| 现在是否开多轮大改 | **否**；多轮是编排升级，不是推翻领域模型/工具层 |
+| 诊断管道 | 线性 `Orchestrator.Execute` 仍是**诊断升格路径**的实现；#15–#17 不变 |
+| 用户侧多轮 | **beta5 目标**：`Session.Turn` + Tower 默认总控（O-1 实现中） |
+| 会否推倒 core/tools | **否**；主要加 Session/Tower + 编排入口，复用 Dispatcher 与扁平 Run 链 |
+| 单轮期禁止事项 | 仍适用于动编排/工具/角色时对照（见笔记 `plan/archive/0.0.1-beta2/2026-7-22.md` §4） |
 
-单轮期禁止事项与详细推理见笔记 `arui-note/aruing/plan/0.0.1-beta2/2026-7-22.md`；公开硬约束见 `architecture.md` #15–#17。
+公开硬约束见 `architecture.md` #15–#17。
 
 ## 当前硬约束摘要
 
@@ -97,9 +95,9 @@
 - `Verdict` 必须引用 `Evidence`
 - prompt 从文件加载（`//go:embed`），不写死代码
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`（挂在 Dispatcher 执行前）与注册控制；当前默认 `ReadonlyPolicy`
-- 不按资源类型或子命令**拆工具**（`k8s` 单一工具吃任意 argv，完整 kubectl 能力）；授权层另有 kubectl 子命令读/写白名单（见 `Policy`），做粗粒度读/写区分，与「不拆工具」不冲突
-- 线性 Orchestrator 是单轮临时驱动器；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（见 architecture #15–#17）
-- 编号与执行：Tool 只经 Dispatcher；定位阶段 `ResolveDriver` 只返回意图，`Target`/定位 `Task`/`Evidence` ID 由编排发放；规划阶段 `Hypothesis`/`Task` ID 由 `LLMPlanner` 经 `Factory` 回填；验证阶段 `Verdict` ID 由 `LLMVerifier` 经 `Factory` 回填，且只能引用已登记 Evidence；报告阶段 `Report` ID 由 `LLMReporter` 经 `Factory` 回填，结论对齐 Verdict 且证据引用不得越界
+- 不按资源类型或子命令**拆工具**（`k8s` 单一工具吃任意 argv）；授权层另有 kubectl 子命令读/写白名单
+- 线性 Orchestrator 是单轮临时驱动器 / 诊断升格实现；角色不私自多轮调 Tool；多轮升级保留扁平模型与 Dispatcher（#15–#17）
+- 编号与执行：Tool 只经 Dispatcher；各阶段 ID 经 `Factory` 发放；Verdict 只能引用已登记 Evidence
 
 ## 预留问题入口
 
@@ -109,7 +107,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
-| O-1 | 用户侧多轮 / Session 未开 |
+| O-1 | 用户侧多轮 / Session：**架构 confirmed（beta5）**，实现未开工 |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。
