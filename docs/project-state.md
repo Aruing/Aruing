@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-07-28（`0.1.0-beta5` 开工：beta5-1 Session / Message / Turn 骨架）
+> 最后更新：2026-07-28（`0.1.0-beta5`：beta5-2 最小 Tower reply / escalate）
 
 ## 当前阶段
 
@@ -41,8 +41,9 @@
 | 全景-3 | 集群侦察 | ✅ | `reconCluster` 走 `executeTask`（Factory 发 Task ID），跑一次只读 `kubectl api-resources` 发现集群资源类型（含 CRD）；精简 `ClusterResources` 喂 Planner payload（`cluster_resources`）；侦察 Evidence 进报告链（透明、失败也落 error evidence）但**不进 Verifier 输入**；`parseAPIResources` 锚定 NAMESPACED 列解析；`reconEnabled` 由 wiring 在 k8s 注册时开启，无集群环境静默跳过 |
 | 全景-4 | 反思环节（轻量版） | ✅ | 仅 `planner.md` prompt 强化：首轮猜想覆盖不同根因家族；后续轮新增「防确认偏误」规则（考虑替代解释 + 安排区分性取证）。三场景真集群回归：清晰单因场景不膨胀，真实歧义场景更严谨。未做结构化反思阶段 |
 | 全景-5 | exec 策略 | ✅ | 新增 `DiagnosticPolicy`（exec 放行、不校验二进制）；`config.Tools.AllowDiagnosticExec` 由 `ARUING_ALLOW_DIAGNOSTIC_EXEC` 控制，默认关；wiring 按开关选策略；planner.md 补 Pod 内探针指引。逐次审批留辅助修复阶段 |
-| beta5-1 | Session / Message / Turn | ✅ 本步 | `internal/session`：Session/Message、`Service.Turn`、Echo/Diagnose Responder；`internal/store.MemoryStore`；升格时 `Run.SessionID` 写入；CLI 未接。见笔记 `plan/0.1.0-beta5/2026-7-28-session-message.md` |
-| beta5 | Session + Tower | ⏳ | 架构 confirmed；下一步 Tower / 真 Responder。见笔记 `plan/0.1.0-beta5/` |
+| beta5-1 | Session / Message / Turn | ✅ | `internal/session`：Session/Message、`Service.Turn`、Echo/Diagnose；`MemoryStore`；`Run.SessionID`；CLI 未接。见笔记 `plan/0.1.0-beta5/2026-7-28-session-message.md` |
+| beta5-2 | 最小 Tower | ✅ 本步 | `agent.TowerResponder` + `FakeTower`：`GenerateJSON` 决策 reply/escalate；`session.Escalate` 共用升格；prompt `tower.md`；CLI 未接、无基线 tool。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-minimal.md` |
+| beta5 | Session + Tower | ⏳ | 架构 confirmed；下一步基线 tool（`Task.RunID` 可空）或 CLI 多轮入口。见笔记 `plan/0.1.0-beta5/` |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -50,7 +51,7 @@
 
 ## 下一步
 
-**下一项：Tower（或最小 LLM Responder）+ 有限动作（reply / escalate / …）；基线 tool 时再做 `Task.RunID` 可空。** 架构见笔记 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`；beta5-1 钩子：只换 `Responder` 实现，Turn 流程不动。
+**下一项：基线 tool 环（`Task.RunID` 可空 + Tower 扩展 call_tool）或 CLI 多轮入口接 `Session.Turn` + Tower。** 架构见笔记 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`；Turn 仍只换 Responder / 扩 Tower 内部。
 
 已确认（2026-07-28）：
 
@@ -108,7 +109,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
-| O-1 | 用户侧多轮 / Session：架构 confirmed；**beta5-1 骨架已落地**（Turn / Echo / Diagnose），Tower 与 CLI 入口未接 |
+| O-1 | 用户侧多轮 / Session：架构 confirmed；**beta5-1 骨架 + beta5-2 最小 Tower**（reply / escalate）已落地；CLI 入口与基线 tool 未接 |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。
