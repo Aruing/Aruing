@@ -185,6 +185,36 @@ func TestDispatcherExecute(t *testing.T) {
 	}
 }
 
+// 空 RunID 表示基线非诊断观察，调度器应允许执行并原样拷贝到证据
+func TestDispatcherExecuteEmptyRunID(t *testing.T) {
+	registry := NewRegistry()
+	tool := testEvidenceTool{
+		evidence: &core.Evidence{Summary: "baseline obs"},
+	}
+	if err := registry.Register(tool); err != nil {
+		t.Fatalf("register test tool: %v", err)
+	}
+
+	task := core.Task{
+		ID:       "t_baseline",
+		RunID:    "",
+		ToolName: TestToolName,
+	}
+	evidence, err := NewDispatcher(registry, nil).Execute(context.Background(), task)
+	if err != nil {
+		t.Fatalf("execute task: %v", err)
+	}
+	if evidence.RunID != "" {
+		t.Errorf("RunID = %q, want empty", evidence.RunID)
+	}
+	if evidence.TaskID != task.ID {
+		t.Errorf("TaskID = %q, want %q", evidence.TaskID, task.ID)
+	}
+	if evidence.Summary != "baseline obs" {
+		t.Errorf("Summary = %q", evidence.Summary)
+	}
+}
+
 // 缺少调度依赖或任务关联字段时应返回明确错误，避免执行阶段生成无法回溯的证据
 func TestDispatcherValidate(t *testing.T) {
 	registry := NewRegistry()

@@ -1,6 +1,16 @@
+// 会话总控：实现 session.Responder，在基线回复与正式诊断之间做有限动作决策
+//
+// 支持 reply / call_tool / escalate：
+// - reply：直接自然语言，Mode=baseline，无 Run
+// - call_tool：经 Dispatcher 取观察（Task.RunID 空），回喂后再决策，不落 Message
+// - escalate：Factory 建 Run，经 RunExecutor 走诊断管道
+//
+// 轮内 tool 中间态仅在本轮内存；call_tool 依赖可选 Dispatcher，nil 时禁止该动作
+// 业务级重试：单次决策最多 3 次；工具失败不计入业务重试，观察回喂后再决策
 package agent
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -11,37 +21,55 @@ import (
 	"aruing/internal/core"
 	"aruing/internal/llm"
 	"aruing/internal/session"
+	"aruing/internal/tools"
 )
 
 //go:embed prompts/tower.md
-var towerPrompt string
-
-// 业务级重试：模型可能偶发产出非法 action 或空 content
-const maxTowerAttempts = 3
-
-// 历史消息塞进 prompt 的条数上限，避免上下文无限膨胀
-const maxTowerHistoryMessages = 20
+var towerPromptTemplate string
 
 const (
+	// 单次决策业务级重试上限（非法 action / 空 content / 非法 tool 等）
+	maxTowerAttempts = 3
+	// 注入 prompt 的最近历史条数上限
+	maxTowerHistoryMessages = 20
+	// 基线 tool 环默认最多执行次数；超出则硬错误
+	defaultBaselineMaxToolRounds = 4
+
 	towerActionReply    = "reply"
+	towerActionCallTool = "call_tool"
 	towerActionEscalate = "escalate"
 )
 
-// 会话总控：实现 session.Responder；本步仅 reply / escalate
+// 会话总控：实现 session.Responder
+// 有限动作：reply / call_tool / escalate
 // 不持有跨 Turn 可变状态；每次 Respond 独立决策
 type TowerResponder struct {
 	// 大模型客户端，用于结构化决策（GenerateJSON）
 	client llm.Client
-	// 领域编号工厂，升格建 Run 时由 Escalate 使用
+	// 领域编号工厂，升格建 Run 与基线 Task 编号
 	factory *core.Factory
 	// 正式诊断执行器，escalate 时调用
 	executor session.RunExecutor
-	// 嵌入的系统提示词全文，构造后只读
-	prompt string
+	// 基线 tool 环调度器；nil 时不允许 call_tool
+	dispatcher *tools.Dispatcher
+	// 注入 prompt 的工具规格快照（可空切片）
+	specs []tools.ToolSpec
+	// 已渲染系统提示（含工具规格摘要）
+	systemPrompt string
+	// 本轮最多 call_tool 次数，默认 4
+	baselineMaxToolRounds int
 }
 
-// 创建基于大模型的 Tower；任一依赖缺失直接返回错误
-func NewTowerResponder(client llm.Client, factory *core.Factory, executor session.RunExecutor) (*TowerResponder, error) {
+// 组装总控；dispatcher 与 specs 可选
+// dispatcher == nil 时校验拒绝 call_tool，便于无工具单测
+// specs 为 nil 时按空列表处理；构造时复制切片，调用方后续修改不影响本实例
+func NewTowerResponder(
+	client llm.Client,
+	factory *core.Factory,
+	executor session.RunExecutor,
+	dispatcher *tools.Dispatcher,
+	specs []tools.ToolSpec,
+) (*TowerResponder, error) {
 	if client == nil {
 		return nil, errors.New("tower requires an llm client")
 	}
@@ -51,15 +79,39 @@ func NewTowerResponder(client llm.Client, factory *core.Factory, executor sessio
 	if executor == nil {
 		return nil, errors.New("tower requires a run executor")
 	}
+	copied := make([]tools.ToolSpec, len(specs))
+	copy(copied, specs)
+	for i := range copied {
+		if i < len(specs) {
+			copied[i].InputSchema = append(json.RawMessage(nil), specs[i].InputSchema...)
+		}
+	}
+	systemPrompt, err := buildTowerSystemPrompt(towerPromptTemplate, copied)
+	if err != nil {
+		return nil, err
+	}
 	return &TowerResponder{
-		client:   client,
-		factory:  factory,
-		executor: executor,
-		prompt:   towerPrompt,
+		client:                client,
+		factory:               factory,
+		executor:              executor,
+		dispatcher:            dispatcher,
+		specs:                 copied,
+		systemPrompt:          systemPrompt,
+		baselineMaxToolRounds: defaultBaselineMaxToolRounds,
 	}, nil
 }
 
-// 看历史与当前句，reply 或 escalate；写库由 session.Service.Turn 负责
+// 覆盖基线 tool 环预算；n <= 0 时恢复默认值
+func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
+	if n <= 0 {
+		t.baselineMaxToolRounds = defaultBaselineMaxToolRounds
+		return
+	}
+	t.baselineMaxToolRounds = n
+}
+
+// 看历史与当前句，在 reply / call_tool / escalate 间决策；写库由 session.Service.Turn 负责
+// call_tool 在本方法内循环执行，中间观察不落 Message
 func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
@@ -74,72 +126,149 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		return session.RespondOutput{}, errors.New("tower requires user text")
 	}
 
-	decision, err := t.decide(ctx, in)
-	if err != nil {
-		return session.RespondOutput{}, err
-	}
+	var observations []towerObservation
+	toolRounds := 0
 
-	switch decision.Action {
-	case towerActionReply:
-		return session.RespondOutput{
-			Content: decision.Content,
-			Mode:    session.ModeBaseline,
-		}, nil
-	case towerActionEscalate:
-		question := strings.TrimSpace(decision.Question)
-		if question == "" {
-			question = in.UserText
+	for {
+		if err := ctx.Err(); err != nil {
+			return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
 		}
-		return session.Escalate(ctx, t.factory, t.executor, in.SessionID, question)
-	default:
-		return session.RespondOutput{}, fmt.Errorf("tower: unknown action %q", decision.Action)
+
+		decision, err := t.decide(ctx, in, observations)
+		if err != nil {
+			return session.RespondOutput{}, err
+		}
+
+		switch decision.Action {
+		case towerActionReply:
+			return session.RespondOutput{
+				Content: decision.Content,
+				Mode:    session.ModeBaseline,
+			}, nil
+
+		case towerActionCallTool:
+			if toolRounds >= t.baselineMaxToolRounds {
+				return session.RespondOutput{}, fmt.Errorf(
+					"tower: baseline tool budget exhausted (%d rounds)", t.baselineMaxToolRounds)
+			}
+			obs, execErr := t.executeBaselineTool(ctx, decision.ToolCall)
+			if execErr != nil {
+				return session.RespondOutput{}, execErr
+			}
+			observations = append(observations, obs)
+			toolRounds++
+
+		case towerActionEscalate:
+			question := strings.TrimSpace(decision.Question)
+			if question == "" {
+				question = in.UserText
+			}
+			return session.Escalate(ctx, t.factory, t.executor, in.SessionID, question)
+
+		default:
+			return session.RespondOutput{}, fmt.Errorf("tower: unknown action %q", decision.Action)
+		}
 	}
 }
 
-// 模型一次决策的结构化输出
+// 单轮决策结果（校验后）
 type towerDecision struct {
-	// 动作：reply 或 escalate（校验后小写）
-	Action string `json:"action"`
-	// reply 时的助手正文，escalate 时可空
-	Content string `json:"content"`
+	// 动作：reply、call_tool 或 escalate
+	Action string
+	// reply 时的助手正文，其它动作可空
+	Content string
 	// escalate 时写入 Run 的诊断问题；空则回退为用户原文
-	Question string `json:"question"`
+	Question string
+	// call_tool 时的工具提议
+	ToolCall towerToolCall
 }
 
-// 请求模型决策并做业务级重试，返回已校验、已规范化的动作
-func (t *TowerResponder) decide(ctx context.Context, in session.RespondInput) (towerDecision, error) {
-	userPayload, err := buildTowerUserPayload(in)
+// 模型提议的一次工具调用（恰好一条）
+type towerToolCall struct {
+	// 白名单工具名，须在 specs 内
+	ToolName string
+	// 工具参数 JSON 对象；空则执行时用 {}
+	Arguments json.RawMessage
+	// 调用目的说明，写入 Task 与观察
+	Purpose string
+}
+
+// 轮内 tool 观察，仅进程内存，对齐 Evidence 可回放子集
+type towerObservation struct {
+	// 本轮任务编号
+	TaskID string `json:"taskId"`
+	// 实际工具名
+	ToolName string `json:"toolName"`
+	// 调用目的
+	Purpose string `json:"purpose,omitempty"`
+	// 成功时的摘要
+	Summary string `json:"summary,omitempty"`
+	// 可展示的命令视图
+	CommandView string `json:"commandView,omitempty"`
+	// 工具或策略失败时非空
+	Error string `json:"error,omitempty"`
+}
+
+// 模型每轮输出契约（GenerateJSON 反序列化目标）
+type towerLLMOutput struct {
+	// 动作：reply、call_tool 或 escalate
+	Action string `json:"action"`
+	// reply 时的助手正文
+	Content string `json:"content"`
+	// escalate 时的诊断问题
+	Question string `json:"question"`
+	// call_tool 时的工具字段
+	ToolCall *towerToolCallJSON `json:"tool_call"`
+}
+
+// 模型 tool_call JSON 形状
+type towerToolCallJSON struct {
+	// 工具名
+	ToolName string `json:"tool_name"`
+	// 参数对象；允许任意 JSON，校验时要求对象类型
+	Arguments json.RawMessage `json:"arguments"`
+	// 目的说明
+	Purpose string `json:"purpose"`
+}
+
+// 调用模型直至得到合法决策或业务重试耗尽
+func (t *TowerResponder) decide(
+	ctx context.Context,
+	in session.RespondInput,
+	observations []towerObservation,
+) (towerDecision, error) {
+	userPayload, err := buildTowerUserPayload(in, observations, t.specs)
 	if err != nil {
 		return towerDecision{}, fmt.Errorf("tower payload: %w", err)
 	}
 	req := llm.Request{
-		System: t.prompt,
+		System: t.systemPrompt,
 		User:   userPayload,
 	}
 
-	var lastOut towerDecision
+	var lastOut towerLLMOutput
 	var lastValidateErr error
 	for attempt := 0; attempt < maxTowerAttempts; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return towerDecision{}, fmt.Errorf("tower decide: %w", err)
 		}
-		var out towerDecision
+		var out towerLLMOutput
 		if gErr := t.client.GenerateJSON(ctx, req, &out); gErr != nil {
 			return towerDecision{}, fmt.Errorf("tower decide with LLM: %w", gErr)
 		}
-		if vErr := validateTowerDecision(out); vErr != nil {
+		if vErr := t.validateTowerDecision(out); vErr != nil {
 			lastOut = out
 			lastValidateErr = vErr
 			continue
 		}
-		return normalizeTowerDecision(out), nil
+		return t.mapTowerDecision(out), nil
 	}
 	return towerDecision{}, fmt.Errorf("%w: last error: %v, last output: %+v",
 		ErrLLMOutputInconsistent, lastValidateErr, lastOut)
 }
 
-// 校验决策动作与必填字段，不修改入参
-func validateTowerDecision(out towerDecision) error {
+// 校验决策：依赖本实例的 dispatcher / specs
+func (t *TowerResponder) validateTowerDecision(out towerLLMOutput) error {
 	action := strings.TrimSpace(strings.ToLower(out.Action))
 	switch action {
 	case towerActionReply:
@@ -149,46 +278,218 @@ func validateTowerDecision(out towerDecision) error {
 		return nil
 	case towerActionEscalate:
 		return nil
+	case towerActionCallTool:
+		if t.dispatcher == nil {
+			return errors.New("call_tool requires a dispatcher")
+		}
+		if out.ToolCall == nil {
+			return errors.New("call_tool requires tool_call")
+		}
+		name := strings.TrimSpace(out.ToolCall.ToolName)
+		if name == "" {
+			return errors.New("call_tool requires tool_name")
+		}
+		if !towerToolNameAllowed(name, t.specs) {
+			return fmt.Errorf("unknown tool %q", name)
+		}
+		if err := validateTowerToolArguments(out.ToolCall.Arguments); err != nil {
+			return err
+		}
+		return nil
 	default:
 		return fmt.Errorf("invalid action %q", out.Action)
 	}
 }
 
-// 去掉首尾空白并把 action 规范为小写，便于后续 switch
-func normalizeTowerDecision(out towerDecision) towerDecision {
-	out.Action = strings.TrimSpace(strings.ToLower(out.Action))
-	out.Content = strings.TrimSpace(out.Content)
-	out.Question = strings.TrimSpace(out.Question)
-	return out
+// 规范化并映射为内部决策
+func (t *TowerResponder) mapTowerDecision(out towerLLMOutput) towerDecision {
+	decision := towerDecision{
+		Action:   strings.TrimSpace(strings.ToLower(out.Action)),
+		Content:  strings.TrimSpace(out.Content),
+		Question: strings.TrimSpace(out.Question),
+	}
+	if decision.Action == towerActionCallTool && out.ToolCall != nil {
+		args := out.ToolCall.Arguments
+		if len(bytes.TrimSpace(args)) == 0 {
+			args = json.RawMessage(`{}`)
+		}
+		decision.ToolCall = towerToolCall{
+			ToolName:  strings.TrimSpace(out.ToolCall.ToolName),
+			Arguments: args,
+			Purpose:   strings.TrimSpace(out.ToolCall.Purpose),
+		}
+	}
+	return decision
 }
 
-// 序列化本轮输入供模型消费；历史只保留最近 maxTowerHistoryMessages 条
-func buildTowerUserPayload(in session.RespondInput) (string, error) {
-	// 写入 prompt 的精简历史项，只保留角色与正文
+// 经 Dispatcher 执行一次基线工具调用，成功或失败都返回 observation
+// 仅在无法发号或 ctx 取消时返回 error 中断环
+func (t *TowerResponder) executeBaselineTool(ctx context.Context, call towerToolCall) (towerObservation, error) {
+	obs := towerObservation{
+		ToolName: call.ToolName,
+		Purpose:  call.Purpose,
+	}
+	if t.dispatcher == nil {
+		obs.Error = "dispatcher is not configured"
+		return obs, nil
+	}
+
+	taskID, idErr := t.factory.NewID("t")
+	if idErr != nil {
+		return obs, fmt.Errorf("tower: create task id: %w", idErr)
+	}
+	obs.TaskID = taskID
+
+	args := call.Arguments
+	if len(args) == 0 {
+		args = json.RawMessage(`{}`)
+	}
+	task := core.Task{
+		ID:        taskID,
+		RunID:     "",
+		ToolName:  call.ToolName,
+		Arguments: args,
+		Purpose:   call.Purpose,
+	}
+
+	item, execErr := t.dispatcher.Execute(ctx, task)
+	if execErr != nil {
+		if ctx.Err() != nil {
+			return obs, fmt.Errorf("tower: execute tool %q: %w", call.ToolName, ctx.Err())
+		}
+		obs.Error = execErr.Error()
+		obs.Summary = "工具执行失败"
+		return obs, nil
+	}
+	if item == nil {
+		obs.Error = "tool returned nil evidence"
+		obs.Summary = "工具执行失败"
+		return obs, nil
+	}
+
+	// Dispatcher 已写入归属字段；观察只取可回放子集
+	obs.Summary = item.Summary
+	obs.CommandView = item.CommandView
+	if item.Error != "" {
+		obs.Error = item.Error
+	}
+	return obs, nil
+}
+
+// 将 prompt 中的工具规格占位符替换为名称与描述摘要（截断 schema，避免撑爆上下文）
+func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, error) {
+	if !strings.Contains(template, "{{TOOL_SPECS}}") {
+		return "", errors.New("tower prompt missing {{TOOL_SPECS}} placeholder")
+	}
+	type toolView struct {
+		// 工具名
+		Name string `json:"name"`
+		// 能力描述
+		Description string `json:"description"`
+	}
+	views := make([]toolView, 0, len(specs))
+	for _, s := range specs {
+		views = append(views, toolView{Name: s.Name, Description: s.Description})
+	}
+	raw, err := json.MarshalIndent(views, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("tower: marshal tool specs: %w", err)
+	}
+	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
+}
+
+// 组装 user JSON：当前句、截断历史、本轮观察、可用工具名列表
+func buildTowerUserPayload(
+	in session.RespondInput,
+	observations []towerObservation,
+	specs []tools.ToolSpec,
+) (string, error) {
+	// 写入 prompt 的精简历史项
 	type histMsg struct {
-		// 消息角色，与 session.Message.Role 一致
+		// 消息角色
 		Role string `json:"role"`
 		// 消息正文
 		Content string `json:"content"`
+		// 可选展示模式
+		Mode string `json:"mode,omitempty"`
+		// 可选关联诊断 Run
+		RunID string `json:"runId,omitempty"`
 	}
+	type toolItem struct {
+		// 工具名
+		Name string `json:"name"`
+		// 描述
+		Description string `json:"description"`
+	}
+	type payload struct {
+		// 本轮用户原文
+		UserText string `json:"user_text"`
+		// 截断后的会话历史
+		History []histMsg `json:"history"`
+		// 本轮已执行的 tool 观察（仅内存）
+		Observations []towerObservation `json:"observations"`
+		// 可用工具名与描述
+		Tools []toolItem `json:"tools"`
+	}
+
 	history := in.History
 	if len(history) > maxTowerHistoryMessages {
 		history = history[len(history)-maxTowerHistoryMessages:]
 	}
 	msgs := make([]histMsg, 0, len(history))
 	for _, m := range history {
-		msgs = append(msgs, histMsg{Role: m.Role, Content: m.Content})
+		msgs = append(msgs, histMsg{
+			Role:    m.Role,
+			Content: m.Content,
+			Mode:    m.Mode,
+			RunID:   m.RunID,
+		})
 	}
-	payload := struct {
-		UserText string    `json:"user_text"`
-		History  []histMsg `json:"history"`
-	}{
-		UserText: in.UserText,
-		History:  msgs,
+	toolItems := make([]toolItem, 0, len(specs))
+	for _, s := range specs {
+		toolItems = append(toolItems, toolItem{Name: s.Name, Description: s.Description})
 	}
-	b, err := json.Marshal(payload)
+	if observations == nil {
+		observations = []towerObservation{}
+	}
+
+	raw, err := json.Marshal(payload{
+		UserText:     in.UserText,
+		History:      msgs,
+		Observations: observations,
+		Tools:        toolItems,
+	})
 	if err != nil {
 		return "", err
 	}
-	return string(b), nil
+	return string(raw), nil
+}
+
+// 检查工具名是否在 specs 白名单
+func towerToolNameAllowed(name string, specs []tools.ToolSpec) bool {
+	for _, s := range specs {
+		if s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// arguments 须为 JSON 对象或空（空表示 {}）
+func validateTowerToolArguments(args json.RawMessage) error {
+	if len(args) == 0 {
+		return nil
+	}
+	trimmed := bytes.TrimSpace(args)
+	if len(trimmed) == 0 {
+		return nil
+	}
+	if trimmed[0] != '{' {
+		return errors.New("tool_call.arguments must be a JSON object")
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &obj); err != nil {
+		return fmt.Errorf("tool_call.arguments: %w", err)
+	}
+	return nil
 }
