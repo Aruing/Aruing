@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-版本 `0.1.0` / 可追问的诊断助手 进行中；里程碑 `0.1.0-beta4` / 诊断信息全景 已完成并关闭。当前里程碑 `0.1.0-beta5` / Session + Tower（架构已确认，实现未开工）：默认经 Tower 智能基线，需要根因时升格现有诊断管道。`aruing run` 在真实 Kubernetes 集群 + 真实 LLM 下端到端产出可追溯的 Markdown 报告。
+版本 `0.1.0` / 可追问的诊断助手 进行中；里程碑 `0.1.0-beta4` 已关闭。当前里程碑 `0.1.0-beta5` / Session + Tower（实现进行中：库内 Session + Tower reply/call_tool/escalate 已落地，CLI 未接 Session）。默认经 Tower 智能基线，需要根因时升格现有诊断管道。`aruing run` 在真实 Kubernetes 集群 + 真实 LLM 下端到端产出可追溯的 Markdown 报告。
 
 详细状态见 [`docs/project-state.md`](docs/project-state.md)。
 
