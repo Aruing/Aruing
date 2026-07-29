@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-28（`0.1.0-beta5`：beta5-2 最小 Tower reply / escalate）
+> 最后更新：2026-07-29（`0.1.0-beta5`：beta5-4 CLI chat 已接）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**当前里程碑 `0.1.0-beta5` / 可追问 Session + Tower 智能基线**（**架构已确认 2026-07-28；实现进行中**）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → 现有 Orchestrator.Execute**。诊断是升格专长，不是默认主轴。见笔记 `plan/milestone/0.1.0-beta5.md` 与 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
+**当前里程碑 `0.1.0-beta5` / 可追问 Session + Tower 智能基线**（**架构已确认 2026-07-28；beta5-1～4 已落地**）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → 现有 Orchestrator.Execute**；CLI `aruing chat` 已接。诊断是升格专长，不是默认主轴。见笔记 `plan/milestone/0.1.0-beta5.md` 与 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
 
 前置：
 
@@ -41,9 +41,11 @@
 | 全景-3 | 集群侦察 | ✅ | `reconCluster` 走 `executeTask`（Factory 发 Task ID），跑一次只读 `kubectl api-resources` 发现集群资源类型（含 CRD）；精简 `ClusterResources` 喂 Planner payload（`cluster_resources`）；侦察 Evidence 进报告链（透明、失败也落 error evidence）但**不进 Verifier 输入**；`parseAPIResources` 锚定 NAMESPACED 列解析；`reconEnabled` 由 wiring 在 k8s 注册时开启，无集群环境静默跳过 |
 | 全景-4 | 反思环节（轻量版） | ✅ | 仅 `planner.md` prompt 强化：首轮猜想覆盖不同根因家族；后续轮新增「防确认偏误」规则（考虑替代解释 + 安排区分性取证）。三场景真集群回归：清晰单因场景不膨胀，真实歧义场景更严谨。未做结构化反思阶段 |
 | 全景-5 | exec 策略 | ✅ | 新增 `DiagnosticPolicy`（exec 放行、不校验二进制）；`config.Tools.AllowDiagnosticExec` 由 `ARUING_ALLOW_DIAGNOSTIC_EXEC` 控制，默认关；wiring 按开关选策略；planner.md 补 Pod 内探针指引。逐次审批留辅助修复阶段 |
-| beta5-1 | Session / Message / Turn | ✅ | `internal/session`：Session/Message、`Service.Turn`、Echo/Diagnose；`MemoryStore`；`Run.SessionID`；CLI 未接。见笔记 `plan/0.1.0-beta5/2026-7-28-session-message.md` |
-| beta5-2 | 最小 Tower | ✅ 本步 | `agent.TowerResponder` + `FakeTower`：`GenerateJSON` 决策 reply/escalate；`session.Escalate` 共用升格；prompt `tower.md`；CLI 未接、无基线 tool。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-minimal.md` |
-| beta5 | Session + Tower | ⏳ | 架构 confirmed；下一步基线 tool（`Task.RunID` 可空）或 CLI 多轮入口。见笔记 `plan/0.1.0-beta5/` |
+| beta5-1 | Session / Message / Turn | ✅ | PR #36：`internal/session`：Session/Message、`Service.Turn`、Echo/Diagnose；`MemoryStore`；`Run.SessionID`；CLI 未接。见笔记 `plan/0.1.0-beta5/2026-7-28-session-message.md` |
+| beta5-2 | 最小 Tower | ✅ | PR #37：`agent.TowerResponder` + `FakeTower`：`GenerateJSON` 决策 reply/escalate；`session.Escalate` 共用升格；prompt `tower.md`。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-minimal.md` |
+| beta5-3 | 基线 tool 环 | ✅ | PR #39：`Task.RunID`/`Evidence.RunID` 可空；Dispatcher 放行空 RunID；Tower `call_tool` 轮内环（默认最多 4 次，观察不落 Message）；空 RunID 不得进 Verdict。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-baseline-tool.md` |
+| beta5-4 | CLI 接 Turn + Tower | ✅ | `aruing chat` → `Session.Turn` + Tower + MemoryStore；`run` 仍直连 Execute；共用 `buildTooling` Dispatcher；无 LLM 硬失败。见笔记 `plan/0.1.0-beta5/2026-7-29-tower-cli.md` |
+| beta5 | Session + Tower | ✅ | 架构 confirmed；beta5-1～4 落地（库内 + CLI chat）。见笔记 `plan/0.1.0-beta5/` |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
 
@@ -51,37 +53,40 @@
 
 ## 下一步
 
-**下一项：基线 tool 环（`Task.RunID` 可空 + Tower 扩展 call_tool）或 CLI 多轮入口接 `Session.Turn` + Tower。** 架构见笔记 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`；Turn 仍只换 Responder / 扩 Tower 内部。
+**beta5 库内 + CLI 入口已齐**（Session/Turn/Tower + `aruing chat`）。下一项从候选选：诊断后读历史解释、配置文件化、辅助修复、会话持久化 / `waiting_user` 等。
 
 已确认（2026-07-28）：
 
 1. 入口 `Session.Turn`；**Tower** 每轮必经（智能基线）；诊断 = escalate → 现有 Orchestrator
 2. Run = 正式证据账本；非每句必有 Run；调查追问倾向新 Run + SessionContext
 3. 扩展能力/工具，禁止 core 意图枚举；助手回答 vs 正式诊断报告可区分
-4. **Dispatcher.RunID 可空**：基线 tool 可无 Run；Task.ID 仍必填；空 RunID 的结果不得当 Verdict 证据（见架构笔记 §5.1）
+4. **`Task.RunID` 可空**（beta5-3 ✅）：基线 tool 经同一 Dispatcher；空 RunID 观察不得当 Verdict 证据
+5. **CLI**（beta5-4 ✅）：`aruing chat` 接 Turn+Tower；`run` 保留；进程内 MemoryStore
 
 候选（不预排）：
 
-1. 配置文件化
-2. 辅助修复（RequireApproval + 写工具）
-3. 持久化 / `waiting_user` / 同 Run 续查路径
+1. 诊断后读历史解释（不强制全管道）
+2. 配置文件化
+3. 辅助修复（RequireApproval + 写工具）
+4. 持久化 / `waiting_user` / 同 Run 续查路径
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`。
 
-已落地要点（beta2–4，摘要）：
+已落地要点（beta2–5 摘要）：
 
 1. **#4a/#4b**：Policy + 可选 k8s；编排可见定位循环；Target/定位 Task/Evidence ID 由编排发放
 2. **#5–#7**：LLMPlanner / LLMVerifier / LLMReporter 单次调用 + Factory 回填 + 业务重试
 3. **#8 / R-1**：`internal/config`；CLI 默认 Markdown
 4. **beta3**：`investigateLoop` + 工具失败容错 + 报告证据明细
 5. **beta4**：Verifier 拿 Query、定位证据复用、集群侦察、反思 prompt、DiagnosticPolicy
+6. **beta5-1～4**：Session/Turn；Tower reply/call_tool/escalate；空 RunID 基线观察；`aruing chat`
 
 ## 编排与多轮
 
 | 项 | 结论 |
 | --- | --- |
 | 诊断管道 | 线性 `Orchestrator.Execute` 仍是**诊断升格路径**的实现；#15–#17 不变 |
-| 用户侧多轮 | **beta5 目标**：`Session.Turn` + Tower 默认总控（O-1 实现中） |
+| 用户侧多轮 | **beta5**：`Session.Turn` + Tower + `aruing chat` 已落地（O-1） |
 | 会否推倒 core/tools | **否**；主要加 Session/Tower + 编排入口，复用 Dispatcher 与扁平 Run 链 |
 | 单轮期禁止事项 | 仍适用于动编排/工具/角色时对照（见笔记 `plan/archive/0.0.1-beta2/2026-7-22.md` §4） |
 
@@ -109,7 +114,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
-| O-1 | 用户侧多轮 / Session：架构 confirmed；**beta5-1 骨架 + beta5-2 最小 Tower**（reply / escalate）已落地；CLI 入口与基线 tool 未接 |
+| O-1 | ✅ 用户侧多轮 / Session：beta5-1～4 落地；`aruing chat` 接 Turn+Tower |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。

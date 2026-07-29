@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-版本 `0.1.0` / 可追问的诊断助手 进行中；里程碑 `0.1.0-beta4` / 诊断信息全景 已完成并关闭。当前里程碑 `0.1.0-beta5` / Session + Tower（架构已确认，实现未开工）：默认经 Tower 智能基线，需要根因时升格现有诊断管道。`aruing run` 在真实 Kubernetes 集群 + 真实 LLM 下端到端产出可追溯的 Markdown 报告。
+版本 `0.1.0` / 可追问的诊断助手 进行中；里程碑 `0.1.0-beta4` 已关闭。当前里程碑 `0.1.0-beta5` / Session + Tower（库内 + `aruing chat` 已接）。默认经 Tower 智能基线，需要根因时升格现有诊断管道。`aruing run` 单轮诊断；`aruing chat` 多轮会话（须配置 LLM）。
 
 详细状态见 [`docs/project-state.md`](docs/project-state.md)。
 
@@ -29,8 +29,10 @@ make build              # 编译 cmd/aruing
 make test               # 跑全部测试
 make check              # 完整 CI 检查（test-ci + vet + lint + fmt + tidy + vuln）
 
-./bin/aruing run default 里的 demo-api 为什么访问不了          # 默认输出 Markdown 报告
+./bin/aruing run default 里的 demo-api 为什么访问不了          # 单轮诊断，默认 Markdown 报告
 ./bin/aruing run --format json default 里的 demo-api 为什么访问不了  # 结构化 JSON
+./bin/aruing chat hello                                    # 多轮 chat（须 LLM；session id 打在 stderr）
+./bin/aruing chat --session sess_xxx 再查一下 redis           # 续聊同一会话
 ```
 
 ### 本地 LLM 调试（推荐）

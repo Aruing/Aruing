@@ -30,21 +30,21 @@ flowchart LR
 
 **当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。阶段之间仍是直线管道；**定位阶段内部**是编排可见的小循环（`ResolveDriver.Next` → 可选 `Dispatcher.Execute` → 回喂 → `submit_targets` / `fail`），默认最多 8 轮（`SetResolveMaxRounds`）。定位后、调查前编排跑一次**集群侦察**（`reconCluster`，经 `executeTask` 调只读 `kubectl api-resources`）：发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察产出的 Evidence 进报告链（透明可追溯、失败也落 error evidence），但**不进 Verifier 输入**（是 context 而非 verdict 依据）；仅当 wiring 注册了 k8s 工具时启用（`SetReconEnabled`）。这是最小单轮诊断的驱动方式，不是产品终态。
 
-**用户侧会话（已有骨架 + 最小 Tower）**：`internal/session` 提供 `Service.Turn`：确认会话 → 读历史 → 落 user 消息 → `Responder.Respond` → 落 assistant 消息 → 刷新 `Session.UpdatedAt`。产品路径 `agent.TowerResponder`：LLM 决策 **reply**（基线自然语言）或 **escalate**（`session.Escalate` → `Orchestrator.Execute`，写入 `Run.SessionID`）。另有 `Echo` / `Diagnose` / `FakeTower` 供测。**CLI 尚未接 Session**；本步无基线 tool 环。对话层不持证据账本；领域实体仍按 `RunID` 扁平关联。跨阶段挂起仍可由 `internal/graph`（占位）承接。演进约定见下方硬约束 #15–#17。
+**用户侧会话（Session + Tower）**：`internal/session` 提供 `Service.Turn`：确认会话 → 读历史 → 落 user 消息 → `Responder.Respond` → 落 assistant 消息 → 刷新 `Session.UpdatedAt`。产品路径 `agent.TowerResponder`：LLM 有限动作 **reply**（基线自然语言）/ **call_tool**（经同一 `Dispatcher`，`Task.RunID` 空，轮内回喂，默认最多 4 次，观察不落 Message）/ **escalate**（`session.Escalate` → `Orchestrator.Execute`，写入 `Run.SessionID`）。空 RunID 的观察不得作为 Verdict 证据。另有 `Echo` / `Diagnose` / `FakeTower` 供测。**CLI**：`aruing chat` → `Session.Turn` + Tower（须 LLM；进程内 `MemoryStore`；`--session` 续聊）；`aruing run` 仍直连 `Orchestrator.Execute`（无 LLM 走 fake）。Tower 与 Orchestrator **共用同一 Dispatcher**。对话层不持证据账本；领域实体仍按 `RunID` 扁平关联。跨阶段挂起仍可由 `internal/graph`（占位）承接。演进约定见下方硬约束 #15–#17。
 
 ## 模块职责
 
 | 包 | 负责 | 不负责 |
 | --- | --- | --- |
-| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go` 吃 `config.Config`：无 LLM 全 fake；有 LLM 时五角色换真实现）；`formatRunError` 对 LLM 类失败附人话提示 | 不承担推理、不查集群、不直接读业务 env |
+| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`：`buildTooling` 共用 Dispatcher；`newOrchestrator` / `newSessionStack`；`run` 无 LLM 全 fake；`chat` 须 LLM + Tower + MemoryStore）；`formatRunError` 对 LLM 类失败附人话提示 | 不承担推理、不查集群、不直接读业务 env |
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
-| `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner`（`LLMPlanner` / `FakePlanner`）/ `Verifier`（`LLMVerifier` / `FakeVerifier`）/ `Reporter`（`LLMReporter` / `FakeReporter`）及 `Orchestrator` 编排；**`TowerResponder` / `FakeTowerResponder`** 实现 `session.Responder`（reply / escalate）；角色可接 LLM（prompt `//go:embed`）；规划、验证与报告均为单次调用，工具规格来自 `Registry.Specs` | 不直接查集群、不持久化；不写 Message；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool；本步 Tower 无基线 tool 环 |
+| `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner`（`LLMPlanner` / `FakePlanner`）/ `Verifier`（`LLMVerifier` / `FakeVerifier`）/ `Reporter`（`LLMReporter` / `FakeReporter`）及 `Orchestrator` 编排；**`TowerResponder` / `FakeTowerResponder`** 实现 `session.Responder`（reply / call_tool / escalate；基线 tool 环在 `Respond` 内编排可见）；角色可接 LLM（prompt `//go:embed`）；规划、验证与报告均为单次调用，工具规格来自 `Registry.Specs` | 不直接查集群、不持久化；不写 Message；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool（Tower 工具只经 Dispatcher） |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
 | `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`Policy`（`ReadonlyPolicy` / `DiagnosticPolicy` / `AllowAll`）、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema；执行前经 Policy 授权 | 不判断业务、不做推理、不枚举资源类型 |
 | `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
-| `internal/session` | 用户侧多轮壳：`Session` / `Message`、`Store`、`Service.Turn`、`Responder`、`Escalate`（建 Run + Execute）；脚手架 Echo / Diagnose | 不持证据账本、不替代 Orchestrator；不实现 LLM Tower（在 agent）；CLI 未接 |
+| `internal/session` | 用户侧多轮壳：`Session` / `Message`、`Store`、`Service.Turn`、`Responder`、`Escalate`（建 Run + Execute）；脚手架 Echo / Diagnose | 不持证据账本、不替代 Orchestrator；不实现 LLM Tower（在 agent）；CLI 经 `aruing chat` 接入 |
 | `internal/store` | 持久化实现：`MemoryStore`（进程内会话与消息）；接口由使用方定义（如 `session.Store`） | 不定义业务接口；Run / Evidence 级持久化仍可后续扩展；进程退出即丢 |
 | `internal/graph` | 流程编排状态机（占位） | 当前未用；线性诊断仍由 `Orchestrator`；跨阶段挂起时再承接 |
 | `internal/config` | 从 env（`ARUING_*`）加载进程级配置：`LLM`（BaseURL/APIKey/Model）、`Tools.KubectlPath`；`LLM.Ready` / `ToClientConfig` | 不解析配置文件、不热更新、不读 `.env` 文件本身 |
@@ -64,8 +64,8 @@ flowchart LR
 | `Edge` | `ID / From / To / Type / Attrs`；有向关系，类型开放（如 `calls`、`depends_on`） |
 | `Target` | `ID / RunID / NodeID / Type / Attrs / EvidenceIDs`；定位阶段在真实环境中确认的对象 |
 | `Hypothesis` | `ID / RunID / Statement / Reason / ExpectedSignals`；待证据验证的候选原因 |
-| `Task` | `ID / RunID / Refs / ToolName / Arguments / Purpose / DependsOn`；通用 `Refs` 关联 Node / Target / Hypothesis |
-| `Evidence` | `ID / RunID / TaskID / Source / ToolName / CommandView / Summary / Raw / Error`；工具产出的证据 |
+| `Task` | `ID / RunID / Refs / ToolName / Arguments / Purpose / DependsOn`；通用 `Refs` 关联 Node / Target / Hypothesis；**`RunID` 在基线 tool 环可空**，正式诊断必填 |
+| `Evidence` | `ID / RunID / TaskID / Source / ToolName / CommandView / Summary / Raw / Error`；工具产出的证据；**`RunID` 可空 = 非诊断观察，不得进 Verdict** |
 | `ToolSpec` | `Name / Description / InputSchema`；注册表可发现的工具元数据，`InputSchema` 为 JSON Schema |
 | `Verdict` | `ID / RunID / HypothesisID / Result / Reason / EvidenceIDs`；`Result` ∈ {supported, refuted, insufficient} |
 | `Report` | `ID / RunID / Title / Summary / Conclusions / Suggestions` |
