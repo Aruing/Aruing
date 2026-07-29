@@ -137,18 +137,16 @@ func NewDispatcher(r *Registry, policy Policy) *Dispatcher {
 }
 
 // 执行一个工具任务，返回产出的证据
-// 调度器和任务的关联编号必须完整，任务中的工具名称必须在注册表中存在，否则返回错误
+// 任务必须具备 ID 与工具名，工具须在注册表中存在，否则返回错误
+// RunID 可空：基线 tool 环表示非诊断观察，不得进入 Verdict 证据账本；正式诊断管道仍应填写
 // 授权未通过时返回错误且不调用工具；参数校验失败时透传带工具名称的上下文错误
-// 任务的 RunID 和 TaskID 会被写入证据，保持证据到任务的回溯链
+// 任务的 RunID（可空）和 TaskID 会被写入证据，保持证据到任务的回溯链
 func (d *Dispatcher) Execute(ctx context.Context, task core.Task) (*core.Evidence, error) {
 	if d == nil || d.registry == nil {
 		return nil, errors.New("dispatcher requires a registry")
 	}
 	if task.ID == "" {
 		return nil, errors.New("task requires an ID")
-	}
-	if task.RunID == "" {
-		return nil, errors.New("task requires a run ID")
 	}
 	if task.ToolName == "" {
 		return nil, errors.New("task requires a tool name")

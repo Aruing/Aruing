@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"aruing/internal/core"
 	"aruing/internal/session"
 	"aruing/internal/store"
+	"aruing/internal/tools"
 )
 
 // 假诊断管道：记录收到的 Run，并返回固定报告
@@ -132,6 +134,51 @@ func TestFakeTowerEscalateQuestionFallback(t *testing.T) {
 	}
 }
 
+// Fake call_tool 后 reply：经 Dispatcher，RunID 空，最终 baseline 无 Run
+func TestFakeTowerCallToolThenReply(t *testing.T) {
+	ctx := context.Background()
+	factory := newTestFactory(t)
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+
+	var steps atomic.Int32
+	tower := &FakeTowerResponder{
+		Factory:    factory,
+		Dispatcher: dispatcher,
+		CallTool: towerToolCall{
+			ToolName:  "fake.list_pods",
+			Arguments: json.RawMessage(`{}`),
+			Purpose:   "查 demo-api pod",
+		},
+		Decide: func(in session.RespondInput) (string, string, string) {
+			if steps.Add(1) == 1 {
+				return towerActionCallTool, "", ""
+			}
+			return towerActionReply, "根据查询，Pod 未就绪", ""
+		},
+	}
+
+	out, err := tower.Respond(ctx, session.RespondInput{
+		SessionID: "sess_tool",
+		UserText:  "demo-api 状态如何",
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeBaseline || out.RunID != "" {
+		t.Fatalf("output: %+v", out)
+	}
+	if out.Content != "根据查询，Pod 未就绪" {
+		t.Fatalf("content: %q", out.Content)
+	}
+	if steps.Load() < 2 {
+		t.Fatalf("expected at least 2 decide steps, got %d", steps.Load())
+	}
+}
+
 // mock LLM 合法 reply JSON
 func TestTowerLLMReply(t *testing.T) {
 	body := `{"action":"reply","content":"这是概念解释","question":""}`
@@ -139,7 +186,7 @@ func TestTowerLLMReply(t *testing.T) {
 		writeChatCompletion(w, body)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec)
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -172,7 +219,7 @@ func TestTowerLLMEscalate(t *testing.T) {
 		report: core.Report{Title: "T", Summary: "S"},
 	}
 	factory := newTestFactory(t)
-	tower, err := NewTowerResponder(client, factory, exec)
+	tower, err := NewTowerResponder(client, factory, exec, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -195,6 +242,52 @@ func TestTowerLLMEscalate(t *testing.T) {
 	}
 }
 
+// mock LLM：先 call_tool 再 reply；空 RunID 观察不落 Message
+func TestTowerLLMCallToolThenReply(t *testing.T) {
+	var calls atomic.Int32
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n == 1 {
+			writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"查 pod 状态"}}`)
+			return
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"Pod 处于 CrashLoopBackOff","question":""}`)
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	specs := registry.Specs()
+
+	exec := &fakeRunExecutor{}
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, dispatcher, specs)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_ct",
+		UserText:  "demo-api pod 怎样了",
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeBaseline || out.RunID != "" {
+		t.Fatalf("output: %+v", out)
+	}
+	if !strings.Contains(out.Content, "CrashLoopBackOff") {
+		t.Fatalf("content: %q", out.Content)
+	}
+	if calls.Load() < 2 {
+		t.Fatalf("llm calls: %d", calls.Load())
+	}
+	if exec.lastRun.ID != "" {
+		t.Fatal("diagnostic executor should not run")
+	}
+}
+
 // 非法 action 持续不合规 → ErrLLMOutputInconsistent
 func TestTowerLLMInvalidActionRetries(t *testing.T) {
 	var calls atomic.Int32
@@ -202,7 +295,7 @@ func TestTowerLLMInvalidActionRetries(t *testing.T) {
 		calls.Add(1)
 		writeChatCompletion(w, `{"action":"fly","content":"x"}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{})
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -227,7 +320,29 @@ func TestTowerLLMEmptyReplyContent(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"reply","content":"  "}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{})
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, nil, nil)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+	_, err = tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_z",
+		UserText:  "hi",
+	})
+	if !errors.Is(err, ErrLLMOutputInconsistent) {
+		t.Fatalf("want ErrLLMOutputInconsistent, got %v", err)
+	}
+}
+
+// 无 dispatcher 时 call_tool 应业务重试失败
+func TestTowerLLMCallToolWithoutDispatcher(t *testing.T) {
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"x"}}`)
+	})
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, nil, []tools.ToolSpec{{
+		Name:        "fake.list_pods",
+		Description: "d",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}})
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -247,28 +362,61 @@ func TestNewTowerResponderRequiresDeps(t *testing.T) {
 	factory := newTestFactory(t)
 	exec := &fakeRunExecutor{}
 
-	if _, err := NewTowerResponder(nil, factory, exec); err == nil {
+	if _, err := NewTowerResponder(nil, factory, exec, nil, nil); err == nil {
 		t.Fatal("expected nil client error")
 	}
-	if _, err := NewTowerResponder(client, nil, exec); err == nil {
+	if _, err := NewTowerResponder(client, nil, exec, nil, nil); err == nil {
 		t.Fatal("expected nil factory error")
 	}
-	if _, err := NewTowerResponder(client, factory, nil); err == nil {
+	if _, err := NewTowerResponder(client, factory, nil, nil, nil); err == nil {
 		t.Fatal("expected nil executor error")
 	}
 }
 
 func TestValidateTowerDecision(t *testing.T) {
-	if err := validateTowerDecision(towerDecision{Action: "reply", Content: "ok"}); err != nil {
+	specs := []tools.ToolSpec{{
+		Name:        "fake.list_pods",
+		Description: "d",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}}
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	tower := &TowerResponder{
+		dispatcher: tools.NewDispatcher(registry, nil),
+		specs:      specs,
+	}
+
+	if err := tower.validateTowerDecision(towerLLMOutput{Action: "reply", Content: "ok"}); err != nil {
 		t.Fatalf("valid reply: %v", err)
 	}
-	if err := validateTowerDecision(towerDecision{Action: "escalate"}); err != nil {
+	if err := tower.validateTowerDecision(towerLLMOutput{Action: "escalate"}); err != nil {
 		t.Fatalf("valid escalate: %v", err)
 	}
-	if err := validateTowerDecision(towerDecision{Action: "reply"}); err == nil {
+	if err := tower.validateTowerDecision(towerLLMOutput{
+		Action: "call_tool",
+		ToolCall: &towerToolCallJSON{
+			ToolName:  "fake.list_pods",
+			Arguments: json.RawMessage(`{}`),
+			Purpose:   "查",
+		},
+	}); err != nil {
+		t.Fatalf("valid call_tool: %v", err)
+	}
+	if err := tower.validateTowerDecision(towerLLMOutput{Action: "reply"}); err == nil {
 		t.Fatal("empty reply content should fail")
 	}
-	if err := validateTowerDecision(towerDecision{Action: "other"}); err == nil {
+	if err := tower.validateTowerDecision(towerLLMOutput{Action: "other"}); err == nil {
 		t.Fatal("invalid action should fail")
+	}
+	if err := tower.validateTowerDecision(towerLLMOutput{
+		Action: "call_tool",
+		ToolCall: &towerToolCallJSON{
+			ToolName:  "not.registered",
+			Arguments: json.RawMessage(`{}`),
+		},
+	}); err == nil {
+		t.Fatal("unknown tool should fail")
 	}
 }

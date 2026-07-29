@@ -111,7 +111,8 @@ type Task struct {
 	// 任务编号，格式为 t_ + UUIDv7，创建时生成，同时作为数据库主键
 	// 证据通过它回连到具体取证动作
 	ID string `json:"id"`
-	// 所属运行编号，用于存储层和编排层按运行查询任务
+	// 所属运行编号；正式诊断管道必填，基线 tool 环可空（非诊断观察）
+	// 空 RunID 的任务与证据不得进入 Verdict 的证据引用链
 	RunID string `json:"runId"`
 
 	// 相关数据的编号，可以引用问题节点、确认目标或故障猜想
@@ -135,7 +136,8 @@ type Evidence struct {
 	// 证据编号，格式为 e_ + UUIDv7，创建时生成，同时作为数据库主键
 	// 验证结果和报告通过它引用该证据
 	ID string `json:"id"`
-	// 所属运行编号，用于存储层和编排层按运行查询证据
+	// 所属运行编号，通常拷贝自 Task；基线观察可空
+	// 空值表示非诊断账本中的观察，不得作为正式 Verdict 的 evidence_ids
 	RunID string `json:"runId"`
 	// 产生该证据的取证任务编号
 	TaskID string `json:"taskId"`

@@ -20,7 +20,7 @@ type TurnResult struct {
 }
 
 // 本轮「业务上怎么答」的可注入接口；写库只在 Service.Turn 内完成
-// 实现可为 Echo / Diagnose / agent.TowerResponder；接口形状保持稳定
+// 实现可为 Echo / Diagnose / agent.TowerResponder（reply / call_tool / escalate）；接口形状保持稳定
 type Responder interface {
 	Respond(ctx context.Context, in RespondInput) (RespondOutput, error)
 }
