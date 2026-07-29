@@ -49,6 +49,15 @@ make run-llm QUESTION='default 里的 demo-api 为什么访问不了'
 
 三个 LLM 变量都非空时走真角色；任一缺失或没有 `.env` 时与现行为一致（全 fake）。  
 也可在 shell 里自行 `export`，不经过 Make。
+
+`aruing chat` / `make chat` 必须三件套齐全；无 LLM 时硬失败，不会走 fake。
+
+```bash
+make chat                 # stdin 交互（须 LLM）
+make chat CHAT_MSG='hello'
+# make chat ENV_FILE=.env.ollama
+```
+
 ## 关键约束摘要
 
 - `Run` 不嵌套子实体，所有实体通过 `RunID` 扁平关联
@@ -57,7 +66,7 @@ make run-llm QUESTION='default 里的 demo-api 为什么访问不了'
 - `Verdict` 必须引用 `Evidence`
 - `Task` 只用通用 `Refs` 关联数据，不增加阶段专用引用字段
 - 工具接口不限定读写；当前阶段只注册读工具，后续"辅助修复"阶段会加入需用户确认的写工具
-- 当前 `Orchestrator` 为线性单轮驱动（临时）；多轮对话与系统内连查通过后续编排升级实现，不推翻扁平领域模型与工具协议
+- 入口：`aruing run` 直连线性 `Orchestrator`（单轮诊断）；`aruing chat` 经 `Session.Turn` + Tower（多轮基线，需根因时 escalate）。不推翻扁平领域模型与 Dispatcher
 
 完整硬约束见 [`docs/architecture.md`](docs/architecture.md#硬约束)。
 
