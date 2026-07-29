@@ -198,10 +198,10 @@ func TestChatTurnEchoStack(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := chatTurn(ctx, svc, sess.ID, "hello", "markdown", &out); err != nil {
+	if err = chatTurn(ctx, svc, sess.ID, "hello", "markdown", &out); err != nil {
 		t.Fatalf("turn 1: %v", err)
 	}
-	if err := chatTurn(ctx, svc, sess.ID, "again", "markdown", &out); err != nil {
+	if err = chatTurn(ctx, svc, sess.ID, "again", "markdown", &out); err != nil {
 		t.Fatalf("turn 2: %v", err)
 	}
 
