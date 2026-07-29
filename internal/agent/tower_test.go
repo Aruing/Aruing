@@ -209,6 +209,58 @@ func TestTowerLLMReply(t *testing.T) {
 	}
 }
 
+// 有 prior 诊断时解释追问 → reply，不调用诊断管道
+func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
+	var sawUser string
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		// 捕获 user 载荷，确认含 prior_diagnostics
+		var reqBody struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		for _, m := range reqBody.Messages {
+			if m.Role == "user" {
+				sawUser = m.Content
+			}
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"上次依据 ImagePullBackOff 判定镜像问题","question":""}`)
+	})
+	exec := &fakeRunExecutor{}
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, nil, nil)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_explain",
+		UserText:  "为什么上次那么判断",
+		History: []session.Message{
+			{Role: session.RoleUser, Content: "demo-api 挂了"},
+			{
+				Role:    session.RoleAssistant,
+				Content: "根因：ImagePullBackOff",
+				Mode:    session.ModeDiagnostic,
+				RunID:   "run_prior",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeBaseline {
+		t.Fatalf("mode: %q", out.Mode)
+	}
+	if exec.lastRun.ID != "" {
+		t.Fatal("executor must not run for explain reply")
+	}
+	if !strings.Contains(sawUser, "prior_diagnostics") || !strings.Contains(sawUser, "run_prior") {
+		t.Fatalf("user payload should include prior: %s", sawUser)
+	}
+}
+
 // mock LLM escalate
 func TestTowerLLMEscalate(t *testing.T) {
 	body := `{"action":"escalate","content":"","question":"查 demo-api 根因"}`

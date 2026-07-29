@@ -30,9 +30,7 @@ var towerPromptTemplate string
 const (
 	// 单次决策业务级重试上限（非法 action / 空 content / 非法 tool 等）
 	maxTowerAttempts = 3
-	// 注入 prompt 的最近历史条数上限
-	maxTowerHistoryMessages = 20
-	// 基线 tool 环默认最多执行次数；超出则硬错误
+	// 基线 tool 环默认最多执行次数；超出则硬错误（单轮熔断，非会话记忆上限，#18）
 	defaultBaselineMaxToolRounds = 4
 
 	towerActionReply    = "reply"
@@ -398,23 +396,13 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 组装 user JSON：当前句、截断历史、本轮观察、可用工具名列表
+// 组装 user JSON：当前句、全量/压缩历史、prior_diagnostics、本轮观察、工具列表
+// 禁止 last-N 静默截断（#18）；超预算见 buildTowerContextView L0/L1
 func buildTowerUserPayload(
 	in session.RespondInput,
 	observations []towerObservation,
 	specs []tools.ToolSpec,
 ) (string, error) {
-	// 写入 prompt 的精简历史项
-	type histMsg struct {
-		// 消息角色
-		Role string `json:"role"`
-		// 消息正文
-		Content string `json:"content"`
-		// 可选展示模式
-		Mode string `json:"mode,omitempty"`
-		// 可选关联诊断 Run
-		RunID string `json:"runId,omitempty"`
-	}
 	type toolItem struct {
 		// 工具名
 		Name string `json:"name"`
@@ -424,27 +412,22 @@ func buildTowerUserPayload(
 	type payload struct {
 		// 本轮用户原文
 		UserText string `json:"user_text"`
-		// 截断后的会话历史
-		History []histMsg `json:"history"`
+		// 会话历史视图（预算内全文；超预算 L0/L1 compact）
+		History []towerHistMsg `json:"history"`
+		// 本会话既有诊断摘要（无条数 cap，由预算统一治理）
+		PriorDiagnostics []towerPriorDiagnostic `json:"prior_diagnostics"`
 		// 本轮已执行的 tool 观察（仅内存）
 		Observations []towerObservation `json:"observations"`
 		// 可用工具名与描述
 		Tools []toolItem `json:"tools"`
 	}
 
-	history := in.History
-	if len(history) > maxTowerHistoryMessages {
-		history = history[len(history)-maxTowerHistoryMessages:]
-	}
-	msgs := make([]histMsg, 0, len(history))
-	for _, m := range history {
-		msgs = append(msgs, histMsg{
-			Role:    m.Role,
-			Content: m.Content,
-			Mode:    m.Mode,
-			RunID:   m.RunID,
-		})
-	}
+	hist, priors := buildTowerContextView(
+		in.History,
+		defaultTowerContextBudgetTokens,
+		defaultMaxMessageContentTokens,
+		defaultTruncatedPreviewTokens,
+	)
 	toolItems := make([]toolItem, 0, len(specs))
 	for _, s := range specs {
 		toolItems = append(toolItems, toolItem{Name: s.Name, Description: s.Description})
@@ -452,12 +435,19 @@ func buildTowerUserPayload(
 	if observations == nil {
 		observations = []towerObservation{}
 	}
+	if priors == nil {
+		priors = []towerPriorDiagnostic{}
+	}
+	if hist == nil {
+		hist = []towerHistMsg{}
+	}
 
 	raw, err := json.Marshal(payload{
-		UserText:     in.UserText,
-		History:      msgs,
-		Observations: observations,
-		Tools:        toolItems,
+		UserText:         in.UserText,
+		History:          hist,
+		PriorDiagnostics: priors,
+		Observations:     observations,
+		Tools:            toolItems,
 	})
 	if err != nil {
 		return "", err

@@ -59,18 +59,56 @@ func Escalate(
 	}, nil
 }
 
-// 用报告标题与摘要拼一段面向用户的短回复
+// 将 Report 展开为可落库的诊断摘要（供后续会话解释引用，#18 不人为砍字段条数）
+// 单条 Message 体积由 Tower 上下文预算治理，不在此用固定 N 截肢
 func formatDiagnosticReply(report core.Report) string {
+	var b strings.Builder
+
 	title := strings.TrimSpace(report.Title)
 	summary := strings.TrimSpace(report.Summary)
 	switch {
 	case title != "" && summary != "":
-		return title + "：" + summary
+		b.WriteString(title)
+		b.WriteString("：")
+		b.WriteString(summary)
 	case title != "":
-		return title
+		b.WriteString(title)
 	case summary != "":
-		return summary
+		b.WriteString(summary)
 	default:
-		return "诊断已完成"
+		b.WriteString("诊断已完成")
 	}
+
+	if len(report.Conclusions) > 0 {
+		b.WriteString("\n\n结论：")
+		for _, c := range report.Conclusions {
+			reason := strings.TrimSpace(c.Reason)
+			if reason == "" {
+				reason = string(c.Result)
+			}
+			b.WriteString("\n- [")
+			b.WriteString(string(c.Result))
+			b.WriteString("] ")
+			b.WriteString(reason)
+			if id := strings.TrimSpace(c.HypothesisID); id != "" {
+				b.WriteString(" (")
+				b.WriteString(id)
+				b.WriteString(")")
+			}
+		}
+	}
+
+	if len(report.Suggestions) > 0 {
+		b.WriteString("\n\n建议：")
+		for _, s := range report.Suggestions {
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			b.WriteString("\n- ")
+			b.WriteString(s)
+		}
+	}
+
+	return b.String()
 }
