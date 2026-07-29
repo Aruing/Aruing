@@ -44,7 +44,7 @@
 | beta5-1 | Session / Message / Turn | ✅ | PR #36：`internal/session`：Session/Message、`Service.Turn`、Echo/Diagnose；`MemoryStore`；`Run.SessionID`；CLI 未接。见笔记 `plan/0.1.0-beta5/2026-7-28-session-message.md` |
 | beta5-2 | 最小 Tower | ✅ | PR #37：`agent.TowerResponder` + `FakeTower`：`GenerateJSON` 决策 reply/escalate；`session.Escalate` 共用升格；prompt `tower.md`。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-minimal.md` |
 | beta5-3 | 基线 tool 环 | ✅ | PR #39：`Task.RunID`/`Evidence.RunID` 可空；Dispatcher 放行空 RunID；Tower `call_tool` 轮内环（默认最多 4 次，观察不落 Message）；空 RunID 不得进 Verdict。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-baseline-tool.md` |
-| beta5-4 | CLI 接 Turn + Tower | ✅ | `aruing chat` → `Session.Turn` + Tower + MemoryStore；`run` 仍直连 Execute；共用 `buildTooling` Dispatcher；无 LLM 硬失败。见笔记 `plan/0.1.0-beta5/2026-7-29-tower-cli.md` |
+| beta5-4 | CLI 接 Turn + Tower | ✅ | PR #40：`aruing chat` → `Session.Turn` + Tower + MemoryStore；`run` 仍直连 Execute；共用 `buildTooling` Dispatcher；无 LLM 硬失败。见笔记 `plan/0.1.0-beta5/2026-7-29-tower-cli.md` |
 | beta5 | Session + Tower | ✅ | 架构 confirmed；beta5-1～4 落地（库内 + CLI chat）。见笔记 `plan/0.1.0-beta5/` |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
