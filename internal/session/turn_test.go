@@ -188,8 +188,8 @@ func (s *historySpyResponder) Respond(_ context.Context, in session.RespondInput
 	}, nil
 }
 
-// CheckpointContent 非空时：user → checkpoint → assistant
-func TestTurnWritesCheckpointBeforeAssistant(t *testing.T) {
+// CheckpointContent 非空时写序：user → checkpoint → assistant；user 原文不丢
+func TestTurnCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	mem := store.NewMemoryStore()
 	svc := session.NewService(mem, newTestFactory(), &checkpointResponder{})

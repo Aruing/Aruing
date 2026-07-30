@@ -42,13 +42,14 @@ type RespondInput struct {
 type RespondOutput struct {
 	// 助手回复正文
 	Content string
-	// baseline 或 diagnostic
+	// 助手展示模式：baseline 或 diagnostic（checkpoint 由 CheckpointContent 另写）
 	Mode string
 	// 本轮若开了诊断则有
 	RunID string
 	// 本轮若开了诊断则非空
 	Report *core.Report
-	// 本轮若做了 L2 handoff compact，非空；Turn 在 assistant 前写入 ModeCheckpoint 消息
+	// L2 handoff 摘要；非空时 Turn 在 assistant 前写入 ModeCheckpoint
+	// Store 仍保留压缩前全量历史，checkpoint 是增补不是替换
 	CheckpointContent string
 }
 
@@ -97,8 +98,9 @@ func (s *Service) NewSession(ctx context.Context) (*Session, error) {
 	return session, nil
 }
 
-// 处理一轮用户输入：校验会话 → 写 user → Responder → 写 assistant → 刷新 UpdatedAt
+// 处理一轮用户输入：校验会话 → 写 user → Responder → 可选 checkpoint → 写 assistant → 刷新 UpdatedAt
 // History 传给 Responder 时不含本轮 user（见 RespondInput）
+// CheckpointContent 非空时先落 ModeCheckpoint，再落助手回复；两者均进 Store 全量时间线
 func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnResult, error) {
 	if err := ctx.Err(); err != nil {
 		return TurnResult{}, fmt.Errorf("turn: %w", err)

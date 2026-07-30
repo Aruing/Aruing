@@ -10,8 +10,8 @@ import (
 	"aruing/internal/session"
 )
 
-func TestBuildTowerUserPayloadIncludesAllHistoryWhenShort(t *testing.T) {
-	// 远超原 last-20 的条数，但内容很短 → 应全量进入 payload
+// 短消息远超原 last-20 条数时，预算内应全量进 payload，禁止 last-N
+func TestTowerPayloadHistory(t *testing.T) {
 	history := make([]session.Message, 0, 30)
 	for i := 0; i < 30; i++ {
 		history = append(history, session.Message{
@@ -41,7 +41,8 @@ func TestBuildTowerUserPayloadIncludesAllHistoryWhenShort(t *testing.T) {
 	}
 }
 
-func TestBuildTowerUserPayloadPriorDiagnostics(t *testing.T) {
+// prior_diagnostics 只收录诊断助手消息，不含基线闲聊
+func TestTowerPayloadPrior(t *testing.T) {
 	history := []session.Message{
 		{Role: session.RoleUser, Content: "查 demo-api"},
 		{
@@ -82,7 +83,8 @@ func TestBuildTowerUserPayloadPriorDiagnostics(t *testing.T) {
 	}
 }
 
-func TestCompactL0TruncatesLongMessage(t *testing.T) {
+// L0 对超长单条打 truncated，体积须小于原文
+func TestCompactL0(t *testing.T) {
 	long := strings.Repeat("字", 5000)
 	hist := []towerHistMsg{{
 		Role:    session.RoleAssistant,
@@ -95,11 +97,13 @@ func TestCompactL0TruncatesLongMessage(t *testing.T) {
 		t.Fatal("expected truncation")
 	}
 	if !strings.Contains(out[0].Content, "truncated") {
-		t.Fatalf("want truncated marker, got %q", out[0].Content[:min(80, len(out[0].Content))])
+		n := min(80, len(out[0].Content))
+		t.Fatalf("want truncated marker, got %q", out[0].Content[:n])
 	}
 }
 
-func TestCompactL1FoldsNonDiagnosticFirst(t *testing.T) {
+// L1 优先折叠非诊断；带 RunID 的诊断不得当非诊断 fold
+func TestCompactL1(t *testing.T) {
 	hist := []towerHistMsg{
 		{Role: session.RoleUser, Content: "闲聊很长" + strings.Repeat("x", 200)},
 		{Role: session.RoleAssistant, Content: "闲聊答", Mode: session.ModeBaseline},
@@ -110,7 +114,7 @@ func TestCompactL1FoldsNonDiagnosticFirst(t *testing.T) {
 			RunID:   "run_keep",
 		},
 	}
-	// 中等偏紧预算：应先折非诊断，诊断尽量不 fold
+	// 中等偏紧预算：应先折非诊断
 	out := compactL1(hist, 80, nil)
 	folded := 0
 	for _, m := range out {
@@ -136,7 +140,8 @@ func TestCompactL1FoldsNonDiagnosticFirst(t *testing.T) {
 	}
 }
 
-func TestBuildTowerContextViewOverBudgetAppliesCompact(t *testing.T) {
+// 超预算时 L0/L1 留下 compact 痕迹，且诊断 run 不丢
+func TestTowerContextBudget(t *testing.T) {
 	history := make([]session.Message, 0, 40)
 	for i := 0; i < 40; i++ {
 		history = append(history, session.Message{
@@ -155,7 +160,6 @@ func TestBuildTowerContextViewOverBudgetAppliesCompact(t *testing.T) {
 	if len(hist) == 0 {
 		t.Fatal("empty hist")
 	}
-	// 超预算后应有折叠或截断痕迹，且 prior 仍指向诊断
 	hasCompactMark := false
 	for _, m := range hist {
 		if strings.HasPrefix(m.Content, "[folded]") || strings.Contains(m.Content, "truncated") {
@@ -164,7 +168,7 @@ func TestBuildTowerContextViewOverBudgetAppliesCompact(t *testing.T) {
 		}
 	}
 	if !hasCompactMark {
-		// 若仍未超（估算宽松）则至少 prior 存在
+		// 估算宽松时可能未触发标记，但若仍超预算则失败
 		if estimateHistTokens(hist)+estimatePriorTokens(priors) > 200 {
 			t.Fatal("over budget without compact marks")
 		}
@@ -177,7 +181,6 @@ func TestBuildTowerContextViewOverBudgetAppliesCompact(t *testing.T) {
 		}
 	}
 	if !found {
-		// prior 从 hist 重生；诊断若未 fold 应在
 		for _, m := range hist {
 			if m.RunID == "run_z" {
 				found = true
@@ -190,16 +193,8 @@ func TestBuildTowerContextViewOverBudgetAppliesCompact(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// L2：超预算时 handoff + 近期原文，并产出 CheckpointContent
-func TestPrepareTowerContextL2Handoff(t *testing.T) {
-	// 构造足够多长消息，逼出 L2
+// L2：紧预算 + mock LLM → handoff checkpoint 与近期原文
+func TestPrepareTowerContextL2(t *testing.T) {
 	history := make([]session.Message, 0, 30)
 	for i := 0; i < 24; i++ {
 		history = append(history, session.Message{
@@ -222,7 +217,6 @@ func TestPrepareTowerContextL2Handoff(t *testing.T) {
 		Mode:    session.ModeDiagnostic,
 		RunID:   "run_keep",
 	})
-	// 近期几条
 	history = append(history, session.Message{Role: session.RoleUser, Content: "最近一句"})
 	history = append(history, session.Message{
 		Role:    session.RoleAssistant,
@@ -234,7 +228,7 @@ func TestPrepareTowerContextL2Handoff(t *testing.T) {
 		writeChatCompletion(w, `{"summary":"用户曾查 demo；诊断 run_keep 结论镜像拉取失败","run_ids":["run_keep"],"open_questions":[]}`)
 	})
 
-	// 极紧预算：L0/L1 后仍超，触发 L2
+	// 极紧预算：逼出 L0/L1 后仍超，进入 L2
 	view, err := prepareTowerContext(context.Background(), client, history, 120, 40, 20)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -249,7 +243,6 @@ func TestPrepareTowerContextL2Handoff(t *testing.T) {
 		t.Fatalf("checkpoint should retain diagnosis: %q", view.CheckpointContent)
 	}
 
-	// 模型视图中应有 checkpoint 模式项 + 近期保留
 	hasCP := false
 	for _, m := range view.Hist {
 		if m.Mode == session.ModeCheckpoint {
@@ -262,8 +255,8 @@ func TestPrepareTowerContextL2Handoff(t *testing.T) {
 	}
 }
 
-// nil client 不调用 L2，仅 L0/L1
-func TestPrepareTowerContextNilClientSkipsL2(t *testing.T) {
+// nil client 不得触发 L2，CheckpointContent 须为空
+func TestPrepareTowerContextNoClient(t *testing.T) {
 	history := make([]session.Message, 0, 20)
 	for i := 0; i < 20; i++ {
 		history = append(history, session.Message{
@@ -280,8 +273,8 @@ func TestPrepareTowerContextNilClientSkipsL2(t *testing.T) {
 	}
 }
 
-// checkpoint 消息不进 prior_diagnostics
-func TestExtractPriorSkipsCheckpoint(t *testing.T) {
+// checkpoint 消息不得进入 prior_diagnostics
+func TestExtractPriorCheckpoint(t *testing.T) {
 	history := []session.Message{
 		{
 			Role:    session.RoleAssistant,

@@ -110,7 +110,8 @@ func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
 
 // 看历史与当前句，在 reply / call_tool / escalate 间决策；写库由 session.Service.Turn 负责
 // call_tool 在本方法内循环执行，中间观察不落 Message
-// 上下文预算：Respond 入口 prepare 一次（含可选 L2 checkpoint），tool 环复用同一视图
+// 入口 prepareTowerContext 一次（L0/L1/L2）；tool 环复用同一视图
+// reply / escalate 时把 view.CheckpointContent 带回，供 Turn 落 ModeCheckpoint
 func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
