@@ -406,8 +406,9 @@ func (t *TowerResponder) executeBaselineTool(ctx context.Context, call towerTool
 	return obs, nil
 }
 
-// 生成写入 prompt 的 observations 副本；不修改环内权威切片
-// 全部 raw 共享 budgetTokens；从最新向旧分配，新条优先全文（T-obs-2）
+// 生成写入 prompt 的 observations 副本，不修改环内权威切片
+// 全部 raw 共享一份预算；从最新向旧分配，优先保留较新观察的全文
+// budgetTokens <= 0 时使用默认合计预算
 func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int) []towerObservation {
 	if len(obs) == 0 {
 		return obs
@@ -415,6 +416,8 @@ func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int)
 	if budgetTokens <= 0 {
 		budgetTokens = defaultTowerObservationsBudgetTokens
 	}
+
+	// 深拷贝 raw，避免后续截断写穿权威切片
 	out := make([]towerObservation, len(obs))
 	for i, o := range obs {
 		out[i] = o
@@ -426,6 +429,7 @@ func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int)
 		out[i].Raw = append(json.RawMessage(nil), o.Raw...)
 	}
 
+	// 从尾部（最新）向前扣减；够则全文，不够则截断预览，耗尽则占位
 	remaining := budgetTokens
 	for i := len(out) - 1; i >= 0; i-- {
 		if len(out[i].Raw) == 0 {
@@ -448,7 +452,8 @@ func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int)
 	return out
 }
 
-// 将超预算 raw 收成合法 JSON 对象，附 truncated 说明；完整结果仍在轮内内存
+// 将超预算 raw 收成合法 JSON，附 truncated 预览；完整结果仍在轮内内存
+// budgetTokens 按估算单位换算为预览 rune 上限（约 4 rune / token）
 func truncateObservationRaw(raw json.RawMessage, budgetTokens int) json.RawMessage {
 	runes := []rune(string(raw))
 	maxRunes := budgetTokens * 4
@@ -479,7 +484,8 @@ func truncateObservationRaw(raw json.RawMessage, budgetTokens int) json.RawMessa
 	return wrapped
 }
 
-// 共享预算已耗尽时的 raw 占位；summary/commandView 仍可见
+// 共享预算已耗尽时写入的 raw 占位 JSON
+// summary 与 commandView 仍注入模型，完整 raw 仍在轮内内存
 func omitObservationRawForBudget() json.RawMessage {
 	return json.RawMessage(
 		`{"truncated":true,"preview":"","note":"omitted for shared model budget; newer observations prioritized; full result retained in-turn"}`,
