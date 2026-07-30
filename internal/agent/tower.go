@@ -32,6 +32,9 @@ const (
 	maxTowerAttempts = 3
 	// 基线 tool 环默认最多执行次数；超出则硬错误（单轮熔断，非会话记忆上限，#18）
 	defaultBaselineMaxToolRounds = 4
+	// 单条 observation 注入模型时 raw 的估算 token 预算（自上下文总预算分出）
+	// 轮内内存仍保留完整 Evidence.Raw；禁止用固定字数当业务能力墙（#18）
+	defaultTowerObservationRawBudgetTokens = 8_000
 
 	towerActionReply    = "reply"
 	towerActionCallTool = "call_tool"
@@ -212,6 +215,7 @@ type towerToolCall struct {
 }
 
 // 轮内 tool 观察，仅进程内存，对齐 Evidence 可回放子集
+// 内存侧 Raw 全量；注入模型前经 prepareTowerObservationsForPrompt 按预算截断
 type towerObservation struct {
 	// 本轮任务编号
 	TaskID string `json:"taskId"`
@@ -225,6 +229,10 @@ type towerObservation struct {
 	CommandView string `json:"commandView,omitempty"`
 	// 工具或策略失败时非空
 	Error string `json:"error,omitempty"`
+	// 工具 Evidence.Raw 全量拷贝（k8s 含 stdout/stderr/exitCode 等）
+	Raw json.RawMessage `json:"raw,omitempty"`
+	// 仅当注入副本对 raw 做了预算截断时为 true；权威内存观察不置位
+	RawTruncated bool `json:"rawTruncated,omitempty"`
 }
 
 // 模型每轮输出契约（GenerateJSON 反序列化目标）
@@ -386,13 +394,74 @@ func (t *TowerResponder) executeBaselineTool(ctx context.Context, call towerTool
 		return obs, nil
 	}
 
-	// Dispatcher 已写入归属字段；观察只取可回放子集
+	// Dispatcher 已写入归属字段；观察取可回放子集，含完整 Raw（#18 内存不阉割）
 	obs.Summary = item.Summary
 	obs.CommandView = item.CommandView
 	if item.Error != "" {
 		obs.Error = item.Error
 	}
+	if len(item.Raw) > 0 {
+		obs.Raw = append(json.RawMessage(nil), item.Raw...)
+	}
 	return obs, nil
+}
+
+// 生成写入 prompt 的 observations 副本；不修改环内权威切片
+// 每条 raw 相对 budgetTokens 独立校验；跨条共享预算见 T-obs-2
+func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int) []towerObservation {
+	if len(obs) == 0 {
+		return obs
+	}
+	if budgetTokens <= 0 {
+		budgetTokens = defaultTowerObservationRawBudgetTokens
+	}
+	out := make([]towerObservation, len(obs))
+	for i, o := range obs {
+		out[i] = o
+		out[i].RawTruncated = false
+		if len(o.Raw) == 0 {
+			out[i].Raw = nil
+			continue
+		}
+		out[i].Raw = append(json.RawMessage(nil), o.Raw...)
+		if estimateTokens(string(o.Raw)) <= budgetTokens {
+			continue
+		}
+		out[i].Raw = truncateObservationRaw(o.Raw, budgetTokens)
+		out[i].RawTruncated = true
+	}
+	return out
+}
+
+// 将超预算 raw 收成合法 JSON 对象，附 truncated 说明；完整结果仍在轮内内存
+func truncateObservationRaw(raw json.RawMessage, budgetTokens int) json.RawMessage {
+	runes := []rune(string(raw))
+	maxRunes := budgetTokens * 4
+	if maxRunes <= 0 {
+		maxRunes = 200
+	}
+	preview := string(runes)
+	shown := len(runes)
+	if len(runes) > maxRunes {
+		preview = string(runes[:maxRunes])
+		shown = maxRunes
+	}
+	wrapped, err := json.Marshal(struct {
+		Truncated bool   `json:"truncated"`
+		Preview   string `json:"preview"`
+		Note      string `json:"note"`
+	}{
+		Truncated: true,
+		Preview:   preview,
+		Note: fmt.Sprintf(
+			"truncated for model budget; full result retained in-turn; shown %d/%d runes",
+			shown, len(runes),
+		),
+	})
+	if err != nil {
+		return json.RawMessage(`{"truncated":true,"preview":"","note":"truncate marshal failed"}`)
+	}
+	return wrapped
 }
 
 // 将 prompt 中的工具规格占位符替换为名称与描述摘要（截断 schema，避免撑爆上下文）
@@ -418,7 +487,7 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 }
 
 // 组装 user JSON：当前句、已 prepare 的历史视图、prior_diagnostics、本轮观察、工具列表
-// 禁止 last-N 静默截断（#18）；超预算见 prepareTowerContext L0/L1/L2
+// 禁止 last-N 静默截断（#18）；历史超预算见 prepareTowerContext；观察 raw 见 prepareTowerObservationsForPrompt
 func buildTowerUserPayload(
 	in session.RespondInput,
 	view towerContextView,
@@ -438,7 +507,7 @@ func buildTowerUserPayload(
 		History []towerHistMsg `json:"history"`
 		// 本会话既有诊断摘要（无条数 cap，由预算统一治理）
 		PriorDiagnostics []towerPriorDiagnostic `json:"prior_diagnostics"`
-		// 本轮已执行的 tool 观察（仅内存）
+		// 本轮 tool 观察（raw 经预算治理后的注入副本）
 		Observations []towerObservation `json:"observations"`
 		// 可用工具名与描述
 		Tools []toolItem `json:"tools"`
@@ -453,6 +522,9 @@ func buildTowerUserPayload(
 	if observations == nil {
 		observations = []towerObservation{}
 	}
+	// 注入副本：预算内全文 raw；超预算带 rawTruncated（权威切片不变）
+	observations = prepareTowerObservationsForPrompt(
+		observations, defaultTowerObservationRawBudgetTokens)
 	if priors == nil {
 		priors = []towerPriorDiagnostic{}
 	}
