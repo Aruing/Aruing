@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-30（**`0.1.0-beta5-fix-1`** T-obs-1/2/4 已合；收尾中）
+> 最后更新：2026-07-30（**`0.1.0-beta5-fix-1`** 已关闭并归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta5-fix-1` / 基线观察回喂**（进行中 · **修复型**，非功能 beta）：修 Tower `call_tool` 只回喂摘要、丢掉 `Evidence.Raw`/stdout 的洞；定位注入 raw 已对齐 #18。plan：笔记 `plan/0.1.0-beta5-fix-1/`。下一项：手工 smoke（namespace 计数）后关里程碑；可选 T-obs-3。
+**`0.1.0-beta5-fix-1` / 基线观察回喂** ✅ 完成并归档（2026-07-30 关闭 · **修复型**）：Tower/Resolver 注入 `Evidence.Raw` + 共享预算 / `rawTruncated`（#18）；#45–#48；smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta5-fix-1/`。T-obs-3 Summary 人读仍为候选。
 
 **`0.1.0-beta5` / Session + Tower 智能基线** ✅ 完成并归档（2026-07-30 关闭）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → Orchestrator.Execute**；CLI `aruing chat`；L0/L1/L2 compact + `ModeCheckpoint`（#18）。plan 在笔记 `plan/archive/0.1.0-beta5/`。
 
@@ -46,7 +46,8 @@
 | beta5-fix-1 T-obs-1 | 基线观察回喂 Raw | ✅ #45 | 内存全量 `Evidence.Raw`；注入按预算截断并 `rawTruncated`（#18） |
 | beta5-fix-1 T-obs-2 | 多观察预算治理 | ✅ #46 | 全部 raw 共享预算、优先保新 |
 | beta5-fix-1 T-obs-4 | Resolver raw 预算 | ✅ #47 | 去掉固定 2000 预览，共享预算优先保新（#18） |
-| beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选；不挡关里程碑 |
+| beta5-fix-1 | 基线观察回喂（fix） | ✅ | 五条完成标志全绿；2026-07-30 关闭；#45–#48 |
+| beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选；关后仍可做 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -54,15 +55,15 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta5-fix-1` 手工 smoke（`make chat` namespace 计数）→ 完成标志全绿后关里程碑并归档笔记；可选 T-obs-3（k8s Summary 人读）可关后仍作 0.1.0 候选。
+**下一项**：尚未立新里程碑；从 0.1.0 北极星与下列候选现场析出（优先关注「基线浅查 vs escalate」若要做域名/访问类根因）。
 
-**功能向候选（不预排；fix 里程碑关后仍可从北极星析出）**：
+**功能向候选（不预排）**：
 
-1. **PR-C** locate + rehydrate（压缩后保真解释旧步）
-2. 按 run 深解（Store / 领域侧拉 Report、证据）
-3. 配置文件化
-4. 辅助修复（RequireApproval + 写工具）
-5. 持久化 / `waiting_user` / 同 Run 续查路径
+1. **基线浅查误判 / escalate 策略**（已知洞 · 2026-07-30）：域名访问类问题常停在 `call_tool`+`reply`，只查标准 Ingress 空列表即下结论，不 escalate、不发现 Traefik IngressRoute 等 CRD；与 Raw 回喂无关。细节见笔记 `plan/archive/0.1.0-beta5-fix-1/`「关后已知洞」与历程《基线观察回喂与预算对齐》
+2. **PR-C** locate + rehydrate（压缩后保真解释旧步）
+3. T-obs-3：k8s Summary 人读增强
+4. 按 run 深解（Store / 领域侧拉 Report、证据）
+5. 配置文件化 / 辅助修复 / 持久化 / `waiting_user`
 
 已确认（beta5 交付后仍有效）：
 
@@ -81,6 +82,7 @@
 2. **beta3**：`investigateLoop` + 工具失败容错 + 报告证据明细
 3. **beta4**：Verifier 拿 Query、定位证据复用、集群侦察、反思 prompt、DiagnosticPolicy
 4. **beta5**：Session/Turn；Tower reply/call_tool/escalate；`aruing chat`；prior + L0–L2 + checkpoint
+5. **beta5-fix-1**：基线/定位观察注入 Raw + 共享预算 #18（#45–#47）；不修 escalate 策略
 
 ## 编排与多轮
 
