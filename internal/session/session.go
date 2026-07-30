@@ -22,6 +22,8 @@ const (
 	ModeBaseline = "baseline"
 	// 本轮走了正式诊断管道
 	ModeDiagnostic = "diagnostic"
+	// 上下文压缩 checkpoint（模型视图用，权威历史仍全量保留，#18）
+	ModeCheckpoint = "checkpoint"
 )
 
 // 一场用户与助手的对话容器

@@ -110,6 +110,7 @@ func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
 
 // 看历史与当前句，在 reply / call_tool / escalate 间决策；写库由 session.Service.Turn 负责
 // call_tool 在本方法内循环执行，中间观察不落 Message
+// 上下文预算：Respond 入口 prepare 一次（含可选 L2 checkpoint），tool 环复用同一视图
 func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
@@ -124,6 +125,18 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		return session.RespondOutput{}, errors.New("tower requires user text")
 	}
 
+	view, err := prepareTowerContext(
+		ctx,
+		t.client,
+		in.History,
+		defaultTowerContextBudgetTokens,
+		defaultMaxMessageContentTokens,
+		defaultTruncatedPreviewTokens,
+	)
+	if err != nil {
+		return session.RespondOutput{}, fmt.Errorf("tower context: %w", err)
+	}
+
 	var observations []towerObservation
 	toolRounds := 0
 
@@ -132,7 +145,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
 		}
 
-		decision, err := t.decide(ctx, in, observations)
+		decision, err := t.decide(ctx, in, view, observations)
 		if err != nil {
 			return session.RespondOutput{}, err
 		}
@@ -140,8 +153,9 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		switch decision.Action {
 		case towerActionReply:
 			return session.RespondOutput{
-				Content: decision.Content,
-				Mode:    session.ModeBaseline,
+				Content:           decision.Content,
+				Mode:              session.ModeBaseline,
+				CheckpointContent: view.CheckpointContent,
 			}, nil
 
 		case towerActionCallTool:
@@ -161,7 +175,12 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			if question == "" {
 				question = in.UserText
 			}
-			return session.Escalate(ctx, t.factory, t.executor, in.SessionID, question)
+			out, escErr := session.Escalate(ctx, t.factory, t.executor, in.SessionID, question)
+			if escErr != nil {
+				return session.RespondOutput{}, escErr
+			}
+			out.CheckpointContent = view.CheckpointContent
+			return out, nil
 
 		default:
 			return session.RespondOutput{}, fmt.Errorf("tower: unknown action %q", decision.Action)
@@ -233,9 +252,10 @@ type towerToolCallJSON struct {
 func (t *TowerResponder) decide(
 	ctx context.Context,
 	in session.RespondInput,
+	view towerContextView,
 	observations []towerObservation,
 ) (towerDecision, error) {
-	userPayload, err := buildTowerUserPayload(in, observations, t.specs)
+	userPayload, err := buildTowerUserPayload(in, view, observations, t.specs)
 	if err != nil {
 		return towerDecision{}, fmt.Errorf("tower payload: %w", err)
 	}
@@ -396,10 +416,11 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 组装 user JSON：当前句、全量/压缩历史、prior_diagnostics、本轮观察、工具列表
-// 禁止 last-N 静默截断（#18）；超预算见 buildTowerContextView L0/L1
+// 组装 user JSON：当前句、已 prepare 的历史视图、prior_diagnostics、本轮观察、工具列表
+// 禁止 last-N 静默截断（#18）；超预算见 prepareTowerContext L0/L1/L2
 func buildTowerUserPayload(
 	in session.RespondInput,
+	view towerContextView,
 	observations []towerObservation,
 	specs []tools.ToolSpec,
 ) (string, error) {
@@ -412,7 +433,7 @@ func buildTowerUserPayload(
 	type payload struct {
 		// 本轮用户原文
 		UserText string `json:"user_text"`
-		// 会话历史视图（预算内全文；超预算 L0/L1 compact）
+		// 会话历史视图（预算内全文；超预算 L0/L1/L2 compact）
 		History []towerHistMsg `json:"history"`
 		// 本会话既有诊断摘要（无条数 cap，由预算统一治理）
 		PriorDiagnostics []towerPriorDiagnostic `json:"prior_diagnostics"`
@@ -422,12 +443,8 @@ func buildTowerUserPayload(
 		Tools []toolItem `json:"tools"`
 	}
 
-	hist, priors := buildTowerContextView(
-		in.History,
-		defaultTowerContextBudgetTokens,
-		defaultMaxMessageContentTokens,
-		defaultTruncatedPreviewTokens,
-	)
+	hist := view.Hist
+	priors := view.Priors
 	toolItems := make([]toolItem, 0, len(specs))
 	for _, s := range specs {
 		toolItems = append(toolItems, toolItem{Name: s.Name, Description: s.Description})

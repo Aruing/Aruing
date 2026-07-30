@@ -1,14 +1,21 @@
 // Tower 注入模型的上下文视图：Store 全量历史为权威源；
-// 进模型时预算内尽量全文，超预算做 L0/L1 压缩（#18），禁止 last-N 静默截断。
+// 进模型时预算内尽量全文，超预算做 L0/L1/L2 压缩（#18），禁止 last-N 静默截断。
 package agent
 
 import (
+	"context"
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
+	"aruing/internal/llm"
 	"aruing/internal/session"
 )
+
+//go:embed prompts/compact.md
+var compactPromptTemplate string
 
 const (
 	// 用户侧 payload 默认 token 预算（估算单位）；预留 system/tools/输出
@@ -17,6 +24,10 @@ const (
 	defaultMaxMessageContentTokens = 4_000
 	// L0 截断后保留的估算 token 上限（预览窗口）
 	defaultTruncatedPreviewTokens = 800
+	// L2 时近期 turn 原文条数（从尾部保留）
+	defaultL2KeepRecentMessages = 6
+	// L2 后若仍超预算，对 handoff 摘要的截断预览 token
+	defaultL2SummaryPreviewTokens = 1_200
 )
 
 // 写入 prompt 的精简历史项
@@ -37,6 +48,26 @@ type towerPriorDiagnostic struct {
 	RunID string `json:"run_id"`
 	// 该助手消息正文（已落库的诊断摘要）
 	Summary string `json:"summary"`
+}
+
+// 一轮 Respond 的模型侧上下文视图；L2 时附带可落库的 checkpoint 正文
+type towerContextView struct {
+	// 注入 history 字段
+	Hist []towerHistMsg
+	// 注入 prior_diagnostics
+	Priors []towerPriorDiagnostic
+	// L2 handoff 摘要；非空时 Turn 写入 ModeCheckpoint 消息
+	CheckpointContent string
+}
+
+// L2 GenerateJSON 输出
+type compactLLMOutput struct {
+	// 接续摘要
+	Summary string `json:"summary"`
+	// 旧段中的 run id
+	RunIDs []string `json:"run_ids"`
+	// 未决问题
+	OpenQuestions []string `json:"open_questions"`
 }
 
 // 估算文本占用的 token（字符近似，非精确计费）
@@ -66,10 +97,14 @@ func estimatePriorTokens(priors []towerPriorDiagnostic) int {
 }
 
 // 从全量历史提取 diagnostic 助手消息；无条数上限
+// checkpoint 不进 prior（有 runId 的诊断摘要才算）
 func extractPriorDiagnostics(history []session.Message) []towerPriorDiagnostic {
 	out := make([]towerPriorDiagnostic, 0)
 	for _, m := range history {
 		if m.Role != session.RoleAssistant {
+			continue
+		}
+		if m.Mode == session.ModeCheckpoint {
 			continue
 		}
 		if m.Mode != session.ModeDiagnostic && strings.TrimSpace(m.RunID) == "" {
@@ -99,13 +134,17 @@ func messagesToHist(history []session.Message) []towerHistMsg {
 	return msgs
 }
 
-// 组装并在超预算时应用 L0→L1 compact，返回注入用 history 与 prior
-func buildTowerContextView(
+// 组装并在超预算时应用 L0→L1→L2 compact。
+// client 可为 nil：跳过 L2，仅 L0/L1（单测与无 LLM 路径）。
+// L2 成功时 CheckpointContent 非空，供 Turn 落 ModeCheckpoint。
+func prepareTowerContext(
+	ctx context.Context,
+	client llm.Client,
 	history []session.Message,
 	budgetTokens int,
 	maxMsgTokens int,
 	previewTokens int,
-) (hist []towerHistMsg, priors []towerPriorDiagnostic) {
+) (towerContextView, error) {
 	if budgetTokens <= 0 {
 		budgetTokens = defaultTowerContextBudgetTokens
 	}
@@ -116,30 +155,56 @@ func buildTowerContextView(
 		previewTokens = defaultTruncatedPreviewTokens
 	}
 
-	hist = messagesToHist(history)
-	priors = extractPriorDiagnostics(history)
+	hist := messagesToHist(history)
+	priors := extractPriorDiagnostics(history)
 
 	if estimateHistTokens(hist)+estimatePriorTokens(priors) <= budgetTokens {
-		return hist, priors
+		return towerContextView{Hist: hist, Priors: priors}, nil
 	}
 
 	// L0：超长单条截断预览
 	hist = compactL0(hist, maxMsgTokens, previewTokens)
 	priors = extractPriorFromHist(hist)
 	if estimateHistTokens(hist)+estimatePriorTokens(priors) <= budgetTokens {
-		return hist, priors
+		return towerContextView{Hist: hist, Priors: priors}, nil
 	}
 
 	// L1：诊断优先，折叠旧非诊断轮
 	hist = compactL1(hist, budgetTokens, priors)
 	priors = extractPriorFromHist(hist)
-	return hist, priors
+	if estimateHistTokens(hist)+estimatePriorTokens(priors) <= budgetTokens {
+		return towerContextView{Hist: hist, Priors: priors}, nil
+	}
+
+	// L2：handoff summary + 近期原文
+	if client == nil {
+		return towerContextView{Hist: hist, Priors: priors}, nil
+	}
+	return compactL2(ctx, client, hist, budgetTokens)
+}
+
+// 兼容旧测试与无 LLM 路径：仅 L0/L1
+func buildTowerContextView(
+	history []session.Message,
+	budgetTokens int,
+	maxMsgTokens int,
+	previewTokens int,
+) (hist []towerHistMsg, priors []towerPriorDiagnostic) {
+	view, err := prepareTowerContext(context.Background(), nil, history, budgetTokens, maxMsgTokens, previewTokens)
+	if err != nil {
+		// nil client 路径不应失败
+		return messagesToHist(history), extractPriorDiagnostics(history)
+	}
+	return view.Hist, view.Priors
 }
 
 func extractPriorFromHist(hist []towerHistMsg) []towerPriorDiagnostic {
 	out := make([]towerPriorDiagnostic, 0)
 	for _, m := range hist {
 		if m.Role != session.RoleAssistant {
+			continue
+		}
+		if m.Mode == session.ModeCheckpoint {
 			continue
 		}
 		if m.Mode != session.ModeDiagnostic && strings.TrimSpace(m.RunID) == "" {
@@ -228,6 +293,13 @@ func firstUnfoldedNonDiagnostic(hist []towerHistMsg) int {
 		if isDiagnosticHist(m) {
 			continue
 		}
+		if m.Mode == session.ModeCheckpoint {
+			// checkpoint 可折叠以腾空间
+			if strings.HasPrefix(m.Content, "[folded]") {
+				continue
+			}
+			return i
+		}
 		if strings.HasPrefix(m.Content, "[folded]") {
 			continue
 		}
@@ -276,4 +348,155 @@ func foldLine(m towerHistMsg) string {
 		runID = "-"
 	}
 	return fmt.Sprintf("[folded] %s mode=%s runId=%s | %s", m.Role, mode, runID, preview)
+}
+
+// L2：对装不下的旧段做 handoff summary，保留近期原文；返回 checkpoint 正文供落库
+func compactL2(
+	ctx context.Context,
+	client llm.Client,
+	hist []towerHistMsg,
+	budgetTokens int,
+) (towerContextView, error) {
+	if len(hist) == 0 {
+		return towerContextView{Hist: hist, Priors: nil}, nil
+	}
+
+	keepN := defaultL2KeepRecentMessages
+	if keepN > len(hist) {
+		keepN = len(hist)
+	}
+	split := len(hist) - keepN
+	if split <= 0 {
+		// 无旧段可摘要：再截近期
+		hist = compactL1(hist, budgetTokens, nil)
+		return towerContextView{Hist: hist, Priors: extractPriorFromHist(hist)}, nil
+	}
+
+	oldSeg := hist[:split]
+	recent := hist[split:]
+
+	summary, err := generateHandoffSummary(ctx, client, oldSeg)
+	if err != nil {
+		return towerContextView{}, err
+	}
+
+	checkpointBody := formatCheckpointContent(summary)
+	merged := make([]towerHistMsg, 0, 1+len(recent))
+	merged = append(merged, towerHistMsg{
+		Role:    session.RoleAssistant,
+		Mode:    session.ModeCheckpoint,
+		Content: checkpointBody,
+	})
+	merged = append(merged, recent...)
+
+	// 仍超预算：先压 recent 非诊断，再截 checkpoint
+	if estimateHistTokens(merged)+estimatePriorTokens(extractPriorFromHist(merged)) > budgetTokens {
+		merged = compactL1(merged, budgetTokens, nil)
+	}
+	if estimateHistTokens(merged) > budgetTokens {
+		// 截 checkpoint 摘要本身
+		for i := range merged {
+			if merged[i].Mode == session.ModeCheckpoint {
+				merged[i].Content = truncateContentPreview(merged[i].Content, defaultL2SummaryPreviewTokens)
+				break
+			}
+		}
+	}
+
+	priors := extractPriorFromHist(merged)
+	return towerContextView{
+		Hist:              merged,
+		Priors:            priors,
+		CheckpointContent: checkpointBody,
+	}, nil
+}
+
+func formatCheckpointContent(summary compactLLMOutput) string {
+	var b strings.Builder
+	b.WriteString("[checkpoint] session handoff summary\n")
+	b.WriteString(strings.TrimSpace(summary.Summary))
+	if len(summary.RunIDs) > 0 {
+		b.WriteString("\nrun_ids: ")
+		b.WriteString(strings.Join(summary.RunIDs, ", "))
+	}
+	if len(summary.OpenQuestions) > 0 {
+		b.WriteString("\nopen_questions: ")
+		b.WriteString(strings.Join(summary.OpenQuestions, "; "))
+	}
+	return b.String()
+}
+
+func generateHandoffSummary(
+	ctx context.Context,
+	client llm.Client,
+	oldSeg []towerHistMsg,
+) (compactLLMOutput, error) {
+	// 旧段可能很大：序列化前对单条再压预览，避免 L2 请求本身爆窗
+	seg := compactL0(oldSeg, defaultMaxMessageContentTokens, defaultTruncatedPreviewTokens)
+	raw, err := json.Marshal(struct {
+		Messages []towerHistMsg `json:"messages"`
+	}{Messages: seg})
+	if err != nil {
+		return compactLLMOutput{}, fmt.Errorf("compact L2 marshal: %w", err)
+	}
+
+	var out compactLLMOutput
+	if gErr := client.GenerateJSON(ctx, llm.Request{
+		System: compactPromptTemplate,
+		User:   string(raw),
+	}, &out); gErr != nil {
+		return compactLLMOutput{}, fmt.Errorf("compact L2: %w", gErr)
+	}
+	if strings.TrimSpace(out.Summary) == "" {
+		// 回退：规则拼骨架，避免整轮失败
+		out.Summary = fallbackHandoffSummary(oldSeg)
+		out.RunIDs = collectRunIDs(oldSeg)
+	}
+	if out.RunIDs == nil {
+		out.RunIDs = []string{}
+	}
+	if out.OpenQuestions == nil {
+		out.OpenQuestions = []string{}
+	}
+	return out, nil
+}
+
+func collectRunIDs(hist []towerHistMsg) []string {
+	seen := make(map[string]struct{})
+	var ids []string
+	for _, m := range hist {
+		id := strings.TrimSpace(m.RunID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+func fallbackHandoffSummary(hist []towerHistMsg) string {
+	var parts []string
+	for _, m := range hist {
+		if !isDiagnosticHist(m) {
+			continue
+		}
+		line := strings.TrimSpace(m.Content)
+		runes := []rune(line)
+		if len(runes) > 120 {
+			line = string(runes[:120]) + "…"
+		}
+		if m.RunID != "" {
+			parts = append(parts, fmt.Sprintf("run %s: %s", m.RunID, line))
+		} else {
+			parts = append(parts, line)
+		}
+	}
+	if len(parts) == 0 {
+		return fmt.Sprintf("Earlier conversation (%d messages) compacted; full history retained in store.", len(hist))
+	}
+	return "Prior diagnostics: " + strings.Join(parts, " | ")
 }

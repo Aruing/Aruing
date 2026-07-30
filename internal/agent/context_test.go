@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -17,10 +19,14 @@ func TestBuildTowerUserPayloadIncludesAllHistoryWhenShort(t *testing.T) {
 			Content: "msg",
 		})
 	}
+	view, err := prepareTowerContext(context.Background(), nil, history, defaultTowerContextBudgetTokens, 0, 0)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
 	raw, err := buildTowerUserPayload(session.RespondInput{
 		UserText: "hi",
 		History:  history,
-	}, nil, nil)
+	}, view, nil, nil)
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
@@ -51,10 +57,14 @@ func TestBuildTowerUserPayloadPriorDiagnostics(t *testing.T) {
 			Mode:    session.ModeBaseline,
 		},
 	}
+	view, err := prepareTowerContext(context.Background(), nil, history, defaultTowerContextBudgetTokens, 0, 0)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
 	raw, err := buildTowerUserPayload(session.RespondInput{
 		UserText: "为什么上次那么判断",
 		History:  history,
-	}, nil, nil)
+	}, view, nil, nil)
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
@@ -185,4 +195,108 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// L2：超预算时 handoff + 近期原文，并产出 CheckpointContent
+func TestPrepareTowerContextL2Handoff(t *testing.T) {
+	// 构造足够多长消息，逼出 L2
+	history := make([]session.Message, 0, 30)
+	for i := 0; i < 24; i++ {
+		history = append(history, session.Message{
+			Role:    session.RoleUser,
+			Content: strings.Repeat("旧闲聊块", 40),
+		})
+		history = append(history, session.Message{
+			Role:    session.RoleAssistant,
+			Content: strings.Repeat("旧基线答", 40),
+			Mode:    session.ModeBaseline,
+		})
+	}
+	history = append(history, session.Message{
+		Role:    session.RoleUser,
+		Content: "最早诊断问题",
+	})
+	history = append(history, session.Message{
+		Role:    session.RoleAssistant,
+		Content: "根因：镜像拉取失败，请检查 ImagePullSecrets",
+		Mode:    session.ModeDiagnostic,
+		RunID:   "run_keep",
+	})
+	// 近期几条
+	history = append(history, session.Message{Role: session.RoleUser, Content: "最近一句"})
+	history = append(history, session.Message{
+		Role:    session.RoleAssistant,
+		Content: "最近回复",
+		Mode:    session.ModeBaseline,
+	})
+
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeChatCompletion(w, `{"summary":"用户曾查 demo；诊断 run_keep 结论镜像拉取失败","run_ids":["run_keep"],"open_questions":[]}`)
+	})
+
+	// 极紧预算：L0/L1 后仍超，触发 L2
+	view, err := prepareTowerContext(context.Background(), client, history, 120, 40, 20)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if view.CheckpointContent == "" {
+		t.Fatal("expected CheckpointContent from L2")
+	}
+	if !strings.Contains(view.CheckpointContent, "[checkpoint]") {
+		t.Fatalf("checkpoint marker: %q", view.CheckpointContent)
+	}
+	if !strings.Contains(view.CheckpointContent, "run_keep") && !strings.Contains(view.CheckpointContent, "镜像") {
+		t.Fatalf("checkpoint should retain diagnosis: %q", view.CheckpointContent)
+	}
+
+	// 模型视图中应有 checkpoint 模式项 + 近期保留
+	hasCP := false
+	for _, m := range view.Hist {
+		if m.Mode == session.ModeCheckpoint {
+			hasCP = true
+			break
+		}
+	}
+	if !hasCP {
+		t.Fatalf("hist missing checkpoint mode: %+v", view.Hist)
+	}
+}
+
+// nil client 不调用 L2，仅 L0/L1
+func TestPrepareTowerContextNilClientSkipsL2(t *testing.T) {
+	history := make([]session.Message, 0, 20)
+	for i := 0; i < 20; i++ {
+		history = append(history, session.Message{
+			Role:    session.RoleUser,
+			Content: strings.Repeat("块", 80),
+		})
+	}
+	view, err := prepareTowerContext(context.Background(), nil, history, 50, 30, 15)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if view.CheckpointContent != "" {
+		t.Fatalf("nil client should not L2: %q", view.CheckpointContent)
+	}
+}
+
+// checkpoint 消息不进 prior_diagnostics
+func TestExtractPriorSkipsCheckpoint(t *testing.T) {
+	history := []session.Message{
+		{
+			Role:    session.RoleAssistant,
+			Mode:    session.ModeCheckpoint,
+			Content: "[checkpoint] old",
+		},
+		{
+			Role:    session.RoleAssistant,
+			Mode:    session.ModeDiagnostic,
+			RunID:   "run_1",
+			Content: "结论",
+		},
+	}
+	priors := extractPriorDiagnostics(history)
+	if len(priors) != 1 || priors[0].RunID != "run_1" {
+		t.Fatalf("priors: %+v", priors)
+	}
 }
