@@ -426,7 +426,7 @@ func TestNewTowerResponderRequiresDeps(t *testing.T) {
 }
 
 // Summary 无业务标记、Raw 含唯一串时，第二轮 user JSON 必须回喂该串
-func TestTowerLLMCallToolFeedsRawIntoObservations(t *testing.T) {
+func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	const mark = "NS_MARK_raw_feed_42"
 	var secondUser string
 	var calls atomic.Int32
@@ -485,11 +485,11 @@ func TestTowerLLMCallToolFeedsRawIntoObservations(t *testing.T) {
 	}
 }
 
-// 超预算 raw：注入副本 rawTruncated；权威观测仍保留完整 Raw
-func TestPrepareTowerObservationsForPromptTruncatesRaw(t *testing.T) {
-	// 远超 budget=10 token（~40 runes）的 raw
-	big := strings.Repeat("A", 500)
-	raw := json.RawMessage(`{"stdout":"` + big + `"}`)
+// 单条超预算时注入副本截断并标记；环内权威 raw 不变
+// 预算充足时保持全文，证明不是无条件截断
+func TestPrepareTowerObservationsTruncates(t *testing.T) {
+	// 远超 10 token 预算，迫使走截断路径
+	raw := json.RawMessage(`{"stdout":"` + strings.Repeat("A", 500) + `"}`)
 	auth := []towerObservation{{
 		TaskID:   "t_1",
 		ToolName: "k8s",
@@ -498,38 +498,59 @@ func TestPrepareTowerObservationsForPromptTruncatesRaw(t *testing.T) {
 	}}
 
 	view := prepareTowerObservationsForPrompt(auth, 10)
-	if len(view) != 1 {
-		t.Fatalf("len: %d", len(view))
-	}
-	if !view[0].RawTruncated {
-		t.Fatal("expected rawTruncated on injection copy")
-	}
-	if estimateTokens(string(view[0].Raw)) > 200 {
-		// 截断后应明显小于原文；wrapped JSON 仍可控
-		t.Fatalf("injected raw still huge: %d tokens", estimateTokens(string(view[0].Raw)))
+	if len(view) != 1 || !view[0].RawTruncated {
+		t.Fatalf("want truncated injection, got len=%d trunc=%v", len(view), len(view) > 0 && view[0].RawTruncated)
 	}
 	if !strings.Contains(string(view[0].Raw), "truncated") {
-		t.Fatalf("injected raw should note truncation: %s", view[0].Raw)
+		t.Fatalf("injection raw missing truncate mark: %s", view[0].Raw)
 	}
-	// 权威切片未改
-	if auth[0].RawTruncated {
-		t.Fatal("authoritative observation must not set rawTruncated")
-	}
-	if string(auth[0].Raw) != string(raw) {
-		t.Fatalf("authoritative raw mutated")
+	if auth[0].RawTruncated || string(auth[0].Raw) != string(raw) {
+		t.Fatal("authoritative observation must stay full")
 	}
 
-	// 预算内全文
 	small := []towerObservation{{
 		ToolName: "k8s",
 		Raw:      json.RawMessage(`{"stdout":"hi","exitCode":0}`),
 	}}
 	full := prepareTowerObservationsForPrompt(small, 8_000)
-	if full[0].RawTruncated {
-		t.Fatal("small raw should not truncate")
+	if full[0].RawTruncated || string(full[0].Raw) != string(small[0].Raw) {
+		t.Fatalf("small raw should stay full: trunc=%v raw=%s", full[0].RawTruncated, full[0].Raw)
 	}
-	if string(full[0].Raw) != string(small[0].Raw) {
-		t.Fatalf("small raw: got %s", full[0].Raw)
+}
+
+// 多条共享预算时优先保留较新观察全文；旧条截断或占位，权威切片不变
+func TestPrepareTowerObservationsBudget(t *testing.T) {
+	oldMark := "OLD_RAW_MARK_zzz"
+	newMark := "NEW_RAW_MARK_yyy"
+	// 单条均大于预算份额，迫使新条吃满、旧条退让
+	oldRaw := json.RawMessage(`{"stdout":"` + oldMark + strings.Repeat("o", 200) + `"}`)
+	newRaw := json.RawMessage(`{"stdout":"` + newMark + strings.Repeat("n", 200) + `"}`)
+	auth := []towerObservation{
+		{TaskID: "t_old", ToolName: "k8s", Summary: "old", Raw: append(json.RawMessage(nil), oldRaw...)},
+		{TaskID: "t_new", ToolName: "k8s", Summary: "new", Raw: append(json.RawMessage(nil), newRaw...)},
+	}
+
+	view := prepareTowerObservationsForPrompt(auth, 60)
+	if view[1].RawTruncated || string(view[1].Raw) != string(newRaw) {
+		t.Fatalf("newest must stay full: trunc=%v raw=%s", view[1].RawTruncated, view[1].Raw)
+	}
+	if !view[0].RawTruncated {
+		t.Fatal("oldest must yield when shared budget is tight")
+	}
+	if auth[0].RawTruncated || auth[1].RawTruncated {
+		t.Fatal("authoritative observations must not set rawTruncated")
+	}
+	if string(auth[0].Raw) != string(oldRaw) || string(auth[1].Raw) != string(newRaw) {
+		t.Fatal("authoritative raw must not mutate")
+	}
+
+	// 预算刚好等于新条成本时，旧条只能占位
+	tiny := prepareTowerObservationsForPrompt(auth, estimateTokens(string(newRaw)))
+	if tiny[1].RawTruncated || string(tiny[1].Raw) != string(newRaw) {
+		t.Fatalf("newest must stay full when budget equals its cost: %s", tiny[1].Raw)
+	}
+	if !tiny[0].RawTruncated || !strings.Contains(string(tiny[0].Raw), "omitted for shared") {
+		t.Fatalf("oldest must omit when remaining is zero: %s", tiny[0].Raw)
 	}
 }
 

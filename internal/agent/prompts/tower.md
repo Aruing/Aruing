@@ -37,7 +37,7 @@
 - `user_text`：本轮用户原文
 - `history`：本轮之前的消息列表（role + content，可能含 mode/runId）；预算内尽量全文，超预算可能折叠/截断预览
 - `prior_diagnostics`：本会话已落库的诊断摘要列表（`run_id` + `summary`），可能为空；**无固定条数上限**
-- `observations`：本轮已执行的工具观察（taskId/toolName/purpose/summary/commandView/error/`raw`），仅本轮有效。`raw` 为工具原始 JSON（k8s 常含 stdout/stderr/exitCode）；超上下文预算时可能带 `rawTruncated` 与截断预览。**必须基于 `raw`/stdout 回答实时事实**；不得在 `raw` 已有 stdout 时声称「未获取到输出」
+- `observations`：本轮已执行的工具观察（taskId/toolName/purpose/summary/commandView/error/`raw`），仅本轮有效。`raw` 为工具原始 JSON（k8s 常含 stdout/stderr/exitCode）；多条共享上下文预算且优先保留较新观察，超预算时旧条可能带 `rawTruncated`/截断或省略预览。**必须基于 `raw`/stdout 回答实时事实**；不得在 `raw` 已有 stdout 时声称「未获取到输出」
 - `tools`：可用工具名与描述列表
 
 ## 可用工具（名称与描述）
