@@ -273,6 +273,57 @@ func TestPrepareTowerContextNoClient(t *testing.T) {
 	}
 }
 
+// L2 后仍超预算时优先压 recent，注入视图的 checkpoint 不得先被 fold 再截断
+func TestFitMergedL2View(t *testing.T) {
+	marker := "HANDOFF_MARKER_run_keep_镜像拉取失败"
+	body := "[checkpoint] session handoff summary\n" + marker + "\n" + strings.Repeat("详", 200)
+	merged := []towerHistMsg{
+		{Role: session.RoleAssistant, Mode: session.ModeCheckpoint, Content: body},
+		{Role: session.RoleUser, Content: strings.Repeat("近期闲聊", 80)},
+		{Role: session.RoleAssistant, Content: strings.Repeat("近期基线", 80), Mode: session.ModeBaseline},
+		{
+			Role:    session.RoleAssistant,
+			Content: "近期诊断 " + strings.Repeat("论", 40),
+			Mode:    session.ModeDiagnostic,
+			RunID:   "run_recent",
+		},
+	}
+	// 紧预算：若走旧逻辑会先 fold checkpoint
+	out := fitMergedL2View(merged, 100, body)
+
+	var cp *towerHistMsg
+	for i := range out {
+		if out[i].Mode == session.ModeCheckpoint {
+			cp = &out[i]
+			break
+		}
+	}
+	if cp == nil {
+		t.Fatal("checkpoint missing from hist")
+	}
+	if strings.HasPrefix(cp.Content, "[folded]") {
+		t.Fatalf("checkpoint must not be folded first: %q", cp.Content)
+	}
+	if !strings.Contains(cp.Content, marker) {
+		t.Fatalf("injected checkpoint should keep handoff marker, got %q", cp.Content)
+	}
+
+	// recent 非诊断应已被折叠
+	foldedRecent := false
+	for _, m := range out {
+		if m.Mode == session.ModeCheckpoint {
+			continue
+		}
+		if strings.HasPrefix(m.Content, "[folded]") {
+			foldedRecent = true
+			break
+		}
+	}
+	if !foldedRecent {
+		t.Fatalf("expected recent non-diagnostic fold first: %+v", out)
+	}
+}
+
 // checkpoint 消息不得进入 prior_diagnostics
 func TestExtractPriorCheckpoint(t *testing.T) {
 	history := []session.Message{

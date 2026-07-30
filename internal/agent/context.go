@@ -411,18 +411,8 @@ func compactL2(
 	})
 	merged = append(merged, recent...)
 
-	// 仍超预算：先 L1 压 recent，再截 checkpoint 摘要本身
-	if estimateHistTokens(merged)+estimatePriorTokens(extractPriorFromHist(merged)) > budgetTokens {
-		merged = compactL1(merged, budgetTokens, nil)
-	}
-	if estimateHistTokens(merged) > budgetTokens {
-		for i := range merged {
-			if merged[i].Mode == session.ModeCheckpoint {
-				merged[i].Content = truncateContentPreview(merged[i].Content, defaultL2SummaryPreviewTokens)
-				break
-			}
-		}
-	}
+	// 仍超预算：优先压 recent；checkpoint 最后才截注入视图（落库始终完整）
+	merged = fitMergedL2View(merged, budgetTokens, checkpointBody)
 
 	priors := extractPriorFromHist(merged)
 	return towerContextView{
@@ -430,6 +420,66 @@ func compactL2(
 		Priors:            priors,
 		CheckpointContent: checkpointBody,
 	}, nil
+}
+
+// L2 合并后压预算：先折/截 recent，不动 checkpoint；仍超才截 checkpoint 注入正文
+// 截断始终以完整 checkpointBody 为源，避免先 fold 再 truncate 丢失 handoff
+// CheckpointContent 由调用方单独持有完整正文，本函数只改注入 hist
+func fitMergedL2View(merged []towerHistMsg, budgetTokens int, checkpointBody string) []towerHistMsg {
+	if len(merged) == 0 {
+		return merged
+	}
+	out := make([]towerHistMsg, len(merged))
+	copy(out, merged)
+
+	const maxPasses = 10_000
+	for pass := 0; pass < maxPasses && estimateHistTokens(out) > budgetTokens; pass++ {
+		// 优先折 recent 非诊断，跳过 ModeCheckpoint
+		if idx := firstUnfoldedNonDiagnosticSkipCheckpoint(out); idx >= 0 {
+			out[idx].Content = foldLine(out[idx])
+			continue
+		}
+		// 再截 recent 诊断
+		if idx := firstUntruncatedDiagnostic(out); idx >= 0 {
+			prev := out[idx].Content
+			out[idx].Content = truncateContentPreview(prev, defaultTruncatedPreviewTokens/2)
+			if out[idx].Content == prev {
+				out[idx].Content = forceCompactMark(prev)
+			}
+			continue
+		}
+		break
+	}
+
+	// recent 已尽力仍超：才截 checkpoint 注入视图（源用完整 body）
+	if estimateHistTokens(out) > budgetTokens {
+		for i := range out {
+			if out[i].Mode != session.ModeCheckpoint {
+				continue
+			}
+			out[i].Content = truncateContentPreview(checkpointBody, defaultL2SummaryPreviewTokens)
+			break
+		}
+	}
+	return out
+}
+
+// 返回最旧尚未 [folded] 的非诊断下标，跳过 ModeCheckpoint
+// 供 L2 后压预算：先腾 recent 空间；无候选时返回 -1
+func firstUnfoldedNonDiagnosticSkipCheckpoint(hist []towerHistMsg) int {
+	for i, m := range hist {
+		if m.Mode == session.ModeCheckpoint {
+			continue
+		}
+		if isDiagnosticHist(m) {
+			continue
+		}
+		if strings.HasPrefix(m.Content, "[folded]") {
+			continue
+		}
+		return i
+	}
+	return -1
 }
 
 // 把 L2 结构化输出格式化为可落库的 checkpoint 正文
