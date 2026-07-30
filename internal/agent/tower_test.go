@@ -425,6 +425,149 @@ func TestNewTowerResponderRequiresDeps(t *testing.T) {
 	}
 }
 
+// Summary 无业务标记、Raw 含唯一串时，第二轮 user JSON 必须回喂该串
+func TestTowerLLMCallToolFeedsRawIntoObservations(t *testing.T) {
+	const mark = "NS_MARK_raw_feed_42"
+	var secondUser string
+	var calls atomic.Int32
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n == 1 {
+			writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.raw_only","arguments":{},"purpose":"取 raw"}}`)
+			return
+		}
+		var reqBody struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		for _, m := range reqBody.Messages {
+			if m.Role == "user" {
+				secondUser = m.Content
+			}
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"ok","question":""}`)
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(&rawOnlyFakeTool{mark: mark}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	specs := registry.Specs()
+
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, specs)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_raw",
+		UserText:  "集群里有什么",
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeBaseline {
+		t.Fatalf("mode: %q", out.Mode)
+	}
+	if !strings.Contains(secondUser, mark) {
+		t.Fatalf("second-round user payload must include raw mark %q; got: %s", mark, secondUser)
+	}
+	if !strings.Contains(secondUser, `"raw"`) {
+		t.Fatalf("payload should include raw field: %s", secondUser)
+	}
+	// Summary 故意无 mark，确保不是从 summary 漏进
+	if strings.Contains(secondUser, `"summary":"NS_MARK`) {
+		t.Fatal("mark must not appear only via summary")
+	}
+}
+
+// 超预算 raw：注入副本 rawTruncated；权威观测仍保留完整 Raw
+func TestPrepareTowerObservationsForPromptTruncatesRaw(t *testing.T) {
+	// 远超 budget=10 token（~40 runes）的 raw
+	big := strings.Repeat("A", 500)
+	raw := json.RawMessage(`{"stdout":"` + big + `"}`)
+	auth := []towerObservation{{
+		TaskID:   "t_1",
+		ToolName: "k8s",
+		Summary:  "exitCode=0",
+		Raw:      append(json.RawMessage(nil), raw...),
+	}}
+
+	view := prepareTowerObservationsForPrompt(auth, 10)
+	if len(view) != 1 {
+		t.Fatalf("len: %d", len(view))
+	}
+	if !view[0].RawTruncated {
+		t.Fatal("expected rawTruncated on injection copy")
+	}
+	if estimateTokens(string(view[0].Raw)) > 200 {
+		// 截断后应明显小于原文；wrapped JSON 仍可控
+		t.Fatalf("injected raw still huge: %d tokens", estimateTokens(string(view[0].Raw)))
+	}
+	if !strings.Contains(string(view[0].Raw), "truncated") {
+		t.Fatalf("injected raw should note truncation: %s", view[0].Raw)
+	}
+	// 权威切片未改
+	if auth[0].RawTruncated {
+		t.Fatal("authoritative observation must not set rawTruncated")
+	}
+	if string(auth[0].Raw) != string(raw) {
+		t.Fatalf("authoritative raw mutated")
+	}
+
+	// 预算内全文
+	small := []towerObservation{{
+		ToolName: "k8s",
+		Raw:      json.RawMessage(`{"stdout":"hi","exitCode":0}`),
+	}}
+	full := prepareTowerObservationsForPrompt(small, 8_000)
+	if full[0].RawTruncated {
+		t.Fatal("small raw should not truncate")
+	}
+	if string(full[0].Raw) != string(small[0].Raw) {
+		t.Fatalf("small raw: got %s", full[0].Raw)
+	}
+}
+
+// Summary 无业务标记；业务事实只在 Raw
+type rawOnlyFakeTool struct {
+	mark string
+}
+
+func (t *rawOnlyFakeTool) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
+		Name:        "fake.raw_only",
+		Description: "returns exitCode-style summary and raw with stdout",
+		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
+	}
+}
+
+func (t *rawOnlyFakeTool) Execute(_ context.Context, _ json.RawMessage) (*core.Evidence, error) {
+	mark := t.mark
+	if mark == "" {
+		mark = "NS_MARK_default"
+	}
+	raw, err := json.Marshal(map[string]any{
+		"stdout":   mark + "\n",
+		"stderr":   "",
+		"exitCode": 0,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &core.Evidence{
+		Source:      "fake",
+		ToolName:    "fake.raw_only",
+		CommandView: "fake raw-only",
+		Summary:     "tool completed, exitCode=0",
+		Raw:         raw,
+	}, nil
+}
+
 func TestValidateTowerDecision(t *testing.T) {
 	specs := []tools.ToolSpec{{
 		Name:        "fake.list_pods",

@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-30（`0.1.0-beta5` 关闭并归档；下一里程碑未立）
+> 最后更新：2026-07-30（立项 **`0.1.0-beta5-fix-1`** 修复型里程碑）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta5-fix-1` / 基线观察回喂**（进行中 · **修复型**，非功能 beta）：修 Tower `call_tool` 只回喂摘要、丢掉 `Evidence.Raw`/stdout 的洞。plan：笔记 `plan/0.1.0-beta5-fix-1/`。下一项 **T-obs-2**（多观察预算）。
 
 **`0.1.0-beta5` / Session + Tower 智能基线** ✅ 完成并归档（2026-07-30 关闭）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → Orchestrator.Execute**；CLI `aruing chat`；L0/L1/L2 compact + `ModeCheckpoint`（#18）。plan 在笔记 `plan/archive/0.1.0-beta5/`。
 
@@ -41,6 +43,9 @@
 | beta5-5 PR-B | L2 handoff + checkpoint | ✅ | PR #43：`compact.md` + `ModeCheckpoint` |
 | beta5-5 PR-C | locate + rehydrate | 候选 | 压缩后 Store 范围回灌；关 beta5 时未做 |
 | beta5 | Session + Tower | ✅ | 六条完成标志全绿；2026-07-30 关闭 |
+| beta5-fix-1 T-obs-1 | 基线观察回喂 Raw | ✅ | 内存全量 `Evidence.Raw`；注入按预算截断并 `rawTruncated`（#18） |
+| beta5-fix-1 T-obs-2 | 多观察预算治理 | 下一项 | 多轮 tool 共享预算 |
+| beta5-fix-1 T-obs-3/4 | Summary / Resolver 2000 | 候选 | 可选对齐 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -48,9 +53,9 @@
 
 ## 下一步
 
-**下一项**：从 `0.1.0` 北极星**现场析出**下一里程碑（尚未立项）。候选转「下一项」前须有 draft plan + 设计闸门。
+**下一项**：**T-obs-2**（`0.1.0-beta5-fix-1`）— 多条 observation 共享注入预算与新旧优先级。T-obs-1 已合本分支。
 
-**候选（不预排）**：
+**功能向候选（不预排；fix 里程碑关后仍可从北极星析出）**：
 
 1. **PR-C** locate + rehydrate（压缩后保真解释旧步）
 2. 按 run 深解（Store / 领域侧拉 Report、证据）
