@@ -533,6 +533,61 @@ func TestPrepareTowerObservationsForPromptTruncatesRaw(t *testing.T) {
 	}
 }
 
+// 多条共享预算：优先保新；旧条 truncated/omit；权威不变
+func TestPrepareTowerObservationsSharedBudgetPrefersNewest(t *testing.T) {
+	oldMark := "OLD_RAW_MARK_zzz"
+	newMark := "NEW_RAW_MARK_yyy"
+	// 各约 50+ token，共享预算 60 → 新条全文、旧条被截/omit
+	oldRaw := json.RawMessage(`{"stdout":"` + oldMark + strings.Repeat("o", 200) + `"}`)
+	newRaw := json.RawMessage(`{"stdout":"` + newMark + strings.Repeat("n", 200) + `"}`)
+	auth := []towerObservation{
+		{TaskID: "t_old", ToolName: "k8s", Summary: "old", Raw: append(json.RawMessage(nil), oldRaw...)},
+		{TaskID: "t_new", ToolName: "k8s", Summary: "new", Raw: append(json.RawMessage(nil), newRaw...)},
+	}
+
+	budget := 60
+	view := prepareTowerObservationsForPrompt(auth, budget)
+	if len(view) != 2 {
+		t.Fatalf("len: %d", len(view))
+	}
+	if view[1].RawTruncated {
+		t.Fatalf("newest should keep full raw under shared budget: %s", view[1].Raw)
+	}
+	if string(view[1].Raw) != string(newRaw) {
+		t.Fatalf("newest raw mutated: %s", view[1].Raw)
+	}
+	if !strings.Contains(string(view[1].Raw), newMark) {
+		t.Fatal("newest mark missing from injection")
+	}
+	if !view[0].RawTruncated {
+		t.Fatal("oldest should be truncated when shared budget exhausted by newer")
+	}
+	if strings.Contains(string(view[0].Raw), oldMark) && !strings.Contains(string(view[0].Raw), "truncated") {
+		// 若仍含 mark 则必须是 truncated 预览路径
+		t.Fatalf("oldest full raw leaked: %s", view[0].Raw)
+	}
+	// 注入 raw 合计相对预算受控（wrap 开销上界）
+	total := estimateTokens(string(view[0].Raw)) + estimateTokens(string(view[1].Raw))
+	if total > budget*4 {
+		t.Fatalf("injected raw sum too large: %d tokens (budget %d)", total, budget)
+	}
+	if auth[0].RawTruncated || auth[1].RawTruncated {
+		t.Fatal("authoritative observations must not set rawTruncated")
+	}
+	if string(auth[0].Raw) != string(oldRaw) || string(auth[1].Raw) != string(newRaw) {
+		t.Fatal("authoritative raw mutated")
+	}
+
+	// remaining=0 时旧条 omit stub
+	tiny := prepareTowerObservationsForPrompt(auth, estimateTokens(string(newRaw)))
+	if tiny[1].RawTruncated || string(tiny[1].Raw) != string(newRaw) {
+		t.Fatalf("newest full when budget equals its cost: trunc=%v raw=%s", tiny[1].RawTruncated, tiny[1].Raw)
+	}
+	if !tiny[0].RawTruncated || !strings.Contains(string(tiny[0].Raw), "omitted for shared") {
+		t.Fatalf("oldest should omit when remaining=0: %s", tiny[0].Raw)
+	}
+}
+
 // Summary 无业务标记；业务事实只在 Raw
 type rawOnlyFakeTool struct {
 	mark string
