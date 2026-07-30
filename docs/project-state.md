@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-30（立项 **`0.1.0-beta5-fix-1`** 修复型里程碑）
+> 最后更新：2026-07-30（**`0.1.0-beta5-fix-1`** T-obs-1/2/4 已合；收尾中）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta5-fix-1` / 基线观察回喂**（进行中 · **修复型**，非功能 beta）：修 Tower `call_tool` 只回喂摘要、丢掉 `Evidence.Raw`/stdout 的洞。plan：笔记 `plan/0.1.0-beta5-fix-1/`。下一项：里程碑收尾（smoke / 候选 T-obs-3/4）。
+**`0.1.0-beta5-fix-1` / 基线观察回喂**（进行中 · **修复型**，非功能 beta）：修 Tower `call_tool` 只回喂摘要、丢掉 `Evidence.Raw`/stdout 的洞；定位注入 raw 已对齐 #18。plan：笔记 `plan/0.1.0-beta5-fix-1/`。下一项：手工 smoke（namespace 计数）后关里程碑；可选 T-obs-3。
 
 **`0.1.0-beta5` / Session + Tower 智能基线** ✅ 完成并归档（2026-07-30 关闭）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → Orchestrator.Execute**；CLI `aruing chat`；L0/L1/L2 compact + `ModeCheckpoint`（#18）。plan 在笔记 `plan/archive/0.1.0-beta5/`。
 
@@ -43,10 +43,10 @@
 | beta5-5 PR-B | L2 handoff + checkpoint | ✅ | PR #43：`compact.md` + `ModeCheckpoint` |
 | beta5-5 PR-C | locate + rehydrate | 候选 | 压缩后 Store 范围回灌；关 beta5 时未做 |
 | beta5 | Session + Tower | ✅ | 六条完成标志全绿；2026-07-30 关闭 |
-| beta5-fix-1 T-obs-1 | 基线观察回喂 Raw | ✅ | 内存全量 `Evidence.Raw`；注入按预算截断并 `rawTruncated`（#18） |
-| beta5-fix-1 T-obs-2 | 多观察预算治理 | ✅ | 全部 raw 共享预算、优先保新 |
-| beta5-fix-1 T-obs-4 | Resolver raw 预算 | ⏳ | 去掉固定 2000 预览，共享预算优先保新（#18） |
-| beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选 |
+| beta5-fix-1 T-obs-1 | 基线观察回喂 Raw | ✅ #45 | 内存全量 `Evidence.Raw`；注入按预算截断并 `rawTruncated`（#18） |
+| beta5-fix-1 T-obs-2 | 多观察预算治理 | ✅ #46 | 全部 raw 共享预算、优先保新 |
+| beta5-fix-1 T-obs-4 | Resolver raw 预算 | ✅ #47 | 去掉固定 2000 预览，共享预算优先保新（#18） |
+| beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选；不挡关里程碑 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -54,7 +54,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta5-fix-1` T-obs-4（Resolver raw 预算对齐 #18）；其后可选 T-obs-3 或关里程碑。
+**下一项**：`0.1.0-beta5-fix-1` 手工 smoke（`make chat` namespace 计数）→ 完成标志全绿后关里程碑并归档笔记；可选 T-obs-3（k8s Summary 人读）可关后仍作 0.1.0 候选。
 
 **功能向候选（不预排；fix 里程碑关后仍可从北极星析出）**：
 

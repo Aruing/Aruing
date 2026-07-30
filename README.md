@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-版本 `0.1.0` / 可追问的诊断助手 进行中；`0.1.0-beta5` Session + Tower 已关闭（2026-07-30）。默认经 Tower 智能基线，需要根因时升格诊断管道；L0–L2 compact + checkpoint。`aruing run` 单轮诊断；`aruing chat` 多轮会话（须配置 LLM）。下一里程碑未立，见 `docs/project-state.md`。
+版本 `0.1.0` / 可追问的诊断助手 进行中；`0.1.0-beta5` Session + Tower 已关闭（2026-07-30）。当前修复型里程碑 **`0.1.0-beta5-fix-1`**（基线观察回喂 Raw + 预算 #18；T-obs-1/2/4 已合，收尾 smoke 中）。默认经 Tower 智能基线，需要根因时升格诊断管道；L0–L2 compact + checkpoint。`aruing run` 单轮诊断；`aruing chat` 多轮会话（须配置 LLM）。详见 `docs/project-state.md`。
 
 详细状态见 [`docs/project-state.md`](docs/project-state.md)。
 
