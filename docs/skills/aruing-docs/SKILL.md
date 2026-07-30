@@ -49,7 +49,7 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 3. 核心数据结构（Run / Query / Node / Edge / Target / Hypothesis / Task / Evidence / Verdict / Report / Factory 各字段职责）
 4. 信任边界（用户输入 / 线索 / 已确认目标 / 待验证猜想 / 工具产出证据 / 基于证据的判断）
 5. 数据关联（扁平 ID 关联，子实体不嵌套）
-6. 硬约束清单（当前约 17 条：beta1 继承 + beta2 工具/编排演进；含 #15–#17 线性 Orchestrator 临时驱动与禁止固化）
+6. 硬约束清单（当前约 18 条：beta1 继承 + 工具/编排演进 + #15–#17 线性 Orchestrator 临时驱动 + **#18 禁止人为阉割正常能力**）
 
 长度：100~200 行。只放当前事实，不放设计推理过程。诊断流程图后若编排形态与终态不同，须用一段标明**当前事实 vs 临时驱动**，并链到对应硬约束编号
 

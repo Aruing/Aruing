@@ -62,13 +62,12 @@ make chat CHAT_MSG='hello'
 
 - `Run` 不嵌套子实体，所有实体通过 `RunID` 扁平关联
 - `Query` 线索不能直接当作 `Target`，必须经真实环境确认
-- 模型输出不能冒充 `Evidence`
-- `Verdict` 必须引用 `Evidence`
-- `Task` 只用通用 `Refs` 关联数据，不增加阶段专用引用字段
+- 模型输出不能冒充 `Evidence`；`Verdict` 必须引用 `Evidence`
+- 不枚举用户操作 / 资源类型；**也不用人为条数 / 步数阉割正常能力**（超物理预算则压缩上下文等，不静默截肢）
 - 工具接口不限定读写；当前阶段只注册读工具，后续"辅助修复"阶段会加入需用户确认的写工具
 - 入口：`aruing run` 直连线性 `Orchestrator`（单轮诊断）；`aruing chat` 经 `Session.Turn` + Tower（多轮基线，需根因时 escalate）。不推翻扁平领域模型与 Dispatcher
 
-完整硬约束见 [`docs/architecture.md`](docs/architecture.md#硬约束)。
+完整硬约束见 [`docs/architecture.md`](docs/architecture.md#硬约束)（含 #18）。
 
 ## 文档入口
 
