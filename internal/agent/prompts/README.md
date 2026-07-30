@@ -9,6 +9,7 @@
 - `planner.md`：生成故障猜想和白名单取证任务
 - `verifier.md`：只根据已登记证据验证猜想
 - `reporter.md`：生成不编造证据的诊断报告
-- `tower.md`：会话总控 reply / escalate（本步无基线 tool）
+- `tower.md`：会话总控 reply / call_tool / escalate
+- `compact.md`：会话 L2 handoff 压缩（装不进窗口的旧段 → checkpoint 摘要）
 
 提示词不要散落在源码中，除非后续有明确的工程理由

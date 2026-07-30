@@ -22,6 +22,8 @@ const (
 	ModeBaseline = "baseline"
 	// 本轮走了正式诊断管道
 	ModeDiagnostic = "diagnostic"
+	// 上下文压缩 checkpoint（模型视图用，权威历史仍全量保留，#18）
+	ModeCheckpoint = "checkpoint"
 )
 
 // 一场用户与助手的对话容器
@@ -50,6 +52,6 @@ type Message struct {
 	CreatedAt time.Time
 	// 可选；本条助手回复关联的诊断 Run 编号
 	RunID string
-	// 可选；baseline 或 diagnostic，便于展示，不是意图枚举
+	// 可选；baseline / diagnostic / checkpoint，便于展示，不是意图枚举
 	Mode string
 }

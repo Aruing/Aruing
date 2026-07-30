@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-29（`0.1.0-beta5`：beta5-5 PR-A 解释上下文 + #18）
+> 最后更新：2026-07-30（`0.1.0-beta5`：beta5-5 PR-B L2 checkpoint）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**当前里程碑 `0.1.0-beta5` / 可追问 Session + Tower 智能基线**（**架构已确认 2026-07-28；beta5-1～4 已落地；beta5-5 PR-A 进行中**）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → 现有 Orchestrator.Execute**；CLI `aruing chat` 已接。诊断是升格专长，不是默认主轴。见笔记 `plan/milestone/0.1.0-beta5.md` 与 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
+**当前里程碑 `0.1.0-beta5` / 可追问 Session + Tower 智能基线**（**架构已确认 2026-07-28；beta5-1～4 已落地；beta5-5 PR-B 进行中**）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → 现有 Orchestrator.Execute**；CLI `aruing chat` 已接。诊断是升格专长，不是默认主轴。见笔记 `plan/milestone/0.1.0-beta5.md` 与 `plan/0.1.0-beta5/2026-7-27-session-turn-architecture.md`。
 
 前置：
 
@@ -45,7 +45,8 @@
 | beta5-2 | 最小 Tower | ✅ | PR #37：`agent.TowerResponder` + `FakeTower`：`GenerateJSON` 决策 reply/escalate；`session.Escalate` 共用升格；prompt `tower.md`。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-minimal.md` |
 | beta5-3 | 基线 tool 环 | ✅ | PR #39：`Task.RunID`/`Evidence.RunID` 可空；Dispatcher 放行空 RunID；Tower `call_tool` 轮内环（默认最多 4 次，观察不落 Message）；空 RunID 不得进 Verdict。见笔记 `plan/0.1.0-beta5/2026-7-28-tower-baseline-tool.md` |
 | beta5-4 | CLI 接 Turn + Tower | ✅ | PR #40：`aruing chat` → `Session.Turn` + Tower + MemoryStore；`run` 仍直连 Execute；共用 `buildTooling` Dispatcher；无 LLM 硬失败。见笔记 `plan/0.1.0-beta5/2026-7-29-tower-cli.md` |
-| beta5-5 PR-A | 解释上下文 + 预算压缩 | 🔄 | 去掉 Tower last-N；`prior_diagnostics` + L0/L1 compact（#18）；`formatDiagnosticReply` 加厚；`tower.md` 解释默认 reply。见笔记 `plan/0.1.0-beta5/2026-7-29-tower-explain-prior.md` |
+| beta5-5 PR-A | 解释上下文 + 预算压缩 | ✅ | 去掉 Tower last-N；`prior_diagnostics` + L0/L1 compact（#18）；`formatDiagnosticReply` 加厚；`tower.md` 解释默认 reply。见笔记 `plan/0.1.0-beta5/2026-7-29-tower-explain-prior.md` |
+| beta5-5 PR-B | L2 handoff + checkpoint | 🔄 | `prepareTowerContext` L2（`compact.md`）；`ModeCheckpoint`；`RespondOutput.CheckpointContent`；Turn 先写 checkpoint 再写 assistant；Store 全量保留。见笔记 `plan/0.1.0-beta5/` |
 | beta5 | Session + Tower | 🔄 | 架构 confirmed；beta5-1～4 落地；beta5-5 解释能力拆 PR-A/B。见笔记 `plan/0.1.0-beta5/` |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLMParser + LLMResolver + LLMPlanner + LLMVerifier + LLMReporter。
@@ -54,7 +55,7 @@
 
 ## 下一步
 
-**beta5-5 PR-A（本分支）**：上下文预算 + 解释策略（无 last-N、`prior_diagnostics`、加厚诊断摘要）。**PR-B 候选**：按 `run_id` 拉完整 Report/Verdict/Evidence 深解。其余：配置文件化、辅助修复、持久化 / `waiting_user`。
+**beta5-5 PR-B（本分支）**：L2 handoff compact + `ModeCheckpoint` 落库。其余：按 run 深解、配置文件化、辅助修复、持久化 / `waiting_user`。
 
 已确认（2026-07-28 + #18）：
 
@@ -63,11 +64,11 @@
 3. 扩展能力/工具，禁止 core 意图枚举；助手回答 vs 正式诊断报告可区分
 4. **`Task.RunID` 可空**（beta5-3 ✅）：基线 tool 经同一 Dispatcher；空 RunID 观察不得当 Verdict 证据
 5. **CLI**（beta5-4 ✅）：`aruing chat` 接 Turn+Tower；`run` 保留；进程内 MemoryStore
-6. **#18**：Store 全量；注入模型预算内尽量全给，超预算 L0/L1 compact，禁止 last-N 静默截肢
+6. **#18**：Store 全量；注入模型预算内尽量全给，超预算 L0/L1/L2 compact，禁止 last-N 静默截肢
 
 候选（不预排）：
 
-1. beta5-5 PR-B：按 run 深解（Store 拉 Report/证据）
+1. 按 run 深解（Store 拉 Report/证据）
 2. 配置文件化
 3. 辅助修复（RequireApproval + 写工具）
 4. 持久化 / `waiting_user` / 同 Run 续查路径
@@ -83,6 +84,7 @@
 5. **beta4**：Verifier 拿 Query、定位证据复用、集群侦察、反思 prompt、DiagnosticPolicy
 6. **beta5-1～4**：Session/Turn；Tower reply/call_tool/escalate；空 RunID 基线观察；`aruing chat`
 7. **beta5-5 PR-A**：去掉 last-N；`prior_diagnostics` + L0/L1 预算压缩；诊断摘要加厚；解释默认 reply
+8. **beta5-5 PR-B**：L2 handoff（`compact.md`）+ `ModeCheckpoint`；Turn 先写 checkpoint
 
 ## 编排与多轮
 
@@ -116,7 +118,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
-| O-1 | ✅ 用户侧多轮 / Session：beta5-1～4 落地；`aruing chat`；beta5-5 PR-A 解释上下文 |
+| O-1 | ✅ 用户侧多轮 / Session：beta5-1～4 落地；`aruing chat`；beta5-5 PR-A/B 解释上下文 + L2 checkpoint |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。

@@ -187,3 +187,53 @@ func (s *historySpyResponder) Respond(_ context.Context, in session.RespondInput
 		Mode:    session.ModeBaseline,
 	}, nil
 }
+
+// CheckpointContent 非空时写序：user → checkpoint → assistant；user 原文不丢
+func TestTurnCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	mem := store.NewMemoryStore()
+	svc := session.NewService(mem, newTestFactory(), &checkpointResponder{})
+
+	sess, err := svc.NewSession(ctx)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	result, err := svc.Turn(ctx, sess.ID, "hello")
+	if err != nil {
+		t.Fatalf("turn: %v", err)
+	}
+	if result.AssistantMessage.Mode != session.ModeBaseline {
+		t.Fatalf("assistant mode: %q", result.AssistantMessage.Mode)
+	}
+
+	msgs, err := mem.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(msgs) != 3 {
+		t.Fatalf("want 3 messages (user/checkpoint/assistant), got %d", len(msgs))
+	}
+	if msgs[0].Role != session.RoleUser || msgs[0].Content != "hello" {
+		t.Fatalf("msg0: %+v", msgs[0])
+	}
+	if msgs[1].Mode != session.ModeCheckpoint || !strings.Contains(msgs[1].Content, "handoff") {
+		t.Fatalf("msg1 checkpoint: %+v", msgs[1])
+	}
+	if msgs[2].Role != session.RoleAssistant || msgs[2].Mode != session.ModeBaseline {
+		t.Fatalf("msg2: %+v", msgs[2])
+	}
+	// Store 全量：checkpoint 不替代 user 原文
+	if msgs[0].Content != "hello" {
+		t.Fatal("user message must remain")
+	}
+}
+
+type checkpointResponder struct{}
+
+func (checkpointResponder) Respond(_ context.Context, in session.RespondInput) (session.RespondOutput, error) {
+	return session.RespondOutput{
+		Content:           "收到：" + in.UserText,
+		Mode:              session.ModeBaseline,
+		CheckpointContent: "[checkpoint] handoff summary for tests",
+	}, nil
+}
