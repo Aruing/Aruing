@@ -30,7 +30,7 @@
 
 - 当前 `Query`（goal、nodes、edges、timeRange）
 - 本阶段已执行 `Tasks` 摘要
-- 本阶段已登记 `Evidence` 摘要（summary / error / 截断 raw；完整 raw 可能很大，勿假设全文）
+- 本阶段已登记 `Evidence`（summary / error / commandView / rawPreview；多条 raw **共享**注入预算、优先保较新证据；超预算带 `rawTruncated` 标记；完整 raw 仍在定位环内存，勿假设注入侧永远全文）
 - 当前轮次与预算（round / maxRounds）
 
 ## 输出

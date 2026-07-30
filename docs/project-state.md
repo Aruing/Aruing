@@ -45,7 +45,8 @@
 | beta5 | Session + Tower | ✅ | 六条完成标志全绿；2026-07-30 关闭 |
 | beta5-fix-1 T-obs-1 | 基线观察回喂 Raw | ✅ | 内存全量 `Evidence.Raw`；注入按预算截断并 `rawTruncated`（#18） |
 | beta5-fix-1 T-obs-2 | 多观察预算治理 | ✅ | 全部 raw 共享预算、优先保新 |
-| beta5-fix-1 T-obs-3/4 | Summary / Resolver 2000 | 候选 | 可选对齐 |
+| beta5-fix-1 T-obs-4 | Resolver raw 预算 | ⏳ | 去掉固定 2000 预览，共享预算优先保新（#18） |
+| beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -53,7 +54,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta5-fix-1` 收尾（T-obs-1/2 已合；可选 T-obs-3/4 或关里程碑）。
+**下一项**：`0.1.0-beta5-fix-1` T-obs-4（Resolver raw 预算对齐 #18）；其后可选 T-obs-3 或关里程碑。
 
 **功能向候选（不预排；fix 里程碑关后仍可从北极星析出）**：
 

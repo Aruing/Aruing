@@ -24,6 +24,10 @@ var resolverPrompt string
 // 定位驱动业务级重试次数：JSON 合法但语义违规时重新请求
 const maxResolveAttempts = 3
 
+// 定位阶段注入模型的 evidence raw 合计预算（估算 token）
+// 环内 Evidence.Raw 仍全量；禁止用固定字数当业务墙（#18）
+const defaultResolverEvidenceBudgetTokens = 8_000
+
 // 用大模型驱动定位循环的实现
 //
 // 持有不可变依赖（客户端、工具规格快照、prompt），可被多次运行复用
@@ -115,9 +119,10 @@ func buildResolverSystemPrompt(template string, specs []tools.ToolSpec) (string,
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 序列化回喂状态：证据只带摘要与截断 raw，避免撑爆上下文
+// 序列化回喂状态：证据带摘要与按预算治理的 raw 预览，避免撑爆上下文
+// 权威 state.Evidence 不修改；完整 Raw 仍在定位环内存
 func buildResolverUserPayload(state ResolveState) (string, error) {
-	// 喂给模型的证据摘要，不含完整 Raw
+	// 喂给模型的证据视图
 	type evidenceView struct {
 		// 证据系统编号
 		ID string `json:"id"`
@@ -131,8 +136,10 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 		Error string `json:"error,omitempty"`
 		// 可展示的命令视图（如 argv 拼串）
 		CommandView string `json:"commandView,omitempty"`
-		// 原始输出预览，超长已截断
+		// 原始输出预览；预算内全文，超预算截断或占位
 		RawPreview string `json:"rawPreview,omitempty"`
+		// 注入时对 raw 做了预算截断或占位时为 true
+		RawTruncated bool `json:"rawTruncated,omitempty"`
 	}
 	// 喂给模型的本轮已发起任务视图
 	type taskView struct {
@@ -161,7 +168,7 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 		MaxRounds int `json:"maxRounds"`
 	}
 
-	const maxRawPreview = 2000
+	previews := prepareResolverRawPreviews(state.Evidence, defaultResolverEvidenceBudgetTokens)
 	p := payload{
 		Query:     state.Query,
 		Tasks:     make([]taskView, 0, len(state.Tasks)),
@@ -178,21 +185,16 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 			Arguments: task.Arguments,
 		})
 	}
-	for _, item := range state.Evidence {
+	for i, item := range state.Evidence {
 		view := evidenceView{
-			ID:          item.ID,
-			TaskID:      item.TaskID,
-			ToolName:    item.ToolName,
-			Summary:     item.Summary,
-			Error:       item.Error,
-			CommandView: item.CommandView,
-		}
-		if len(item.Raw) > 0 {
-			raw := string(item.Raw)
-			if len(raw) > maxRawPreview {
-				raw = raw[:maxRawPreview] + "…(truncated)"
-			}
-			view.RawPreview = raw
+			ID:           item.ID,
+			TaskID:       item.TaskID,
+			ToolName:     item.ToolName,
+			Summary:      item.Summary,
+			Error:        item.Error,
+			CommandView:  item.CommandView,
+			RawPreview:   previews[i].Preview,
+			RawTruncated: previews[i].Truncated,
 		}
 		p.Evidence = append(p.Evidence, view)
 	}
@@ -202,6 +204,77 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// 注入模型用的单条 raw 预览结果
+type resolverRawPreview struct {
+	// 预算内全文，或截断预览 / 占位说明
+	Preview string
+	// 是否因共享预算被截断或占位
+	Truncated bool
+}
+
+// 生成注入模型的 raw 预览，不修改权威 Evidence 切片
+// 全部 raw 共享一份预算；从最新向旧分配，优先保留较新证据的全文
+// budgetTokens <= 0 时使用默认合计预算
+func prepareResolverRawPreviews(items []core.Evidence, budgetTokens int) []resolverRawPreview {
+	out := make([]resolverRawPreview, len(items))
+	if len(items) == 0 {
+		return out
+	}
+	if budgetTokens <= 0 {
+		budgetTokens = defaultResolverEvidenceBudgetTokens
+	}
+
+	// 从尾部（最新）向前扣减；够则全文，不够则截断预览，耗尽则占位
+	remaining := budgetTokens
+	for i := len(items) - 1; i >= 0; i-- {
+		if len(items[i].Raw) == 0 {
+			continue
+		}
+		raw := string(items[i].Raw)
+		cost := estimateTokens(raw)
+		if cost <= remaining {
+			out[i].Preview = raw
+			remaining -= cost
+			continue
+		}
+		if remaining > 0 {
+			out[i].Preview = truncateResolverRawPreview(raw, remaining)
+			out[i].Truncated = true
+			remaining = 0
+			continue
+		}
+		out[i].Preview = omitResolverRawPreview()
+		out[i].Truncated = true
+	}
+	return out
+}
+
+// 将超预算 raw 收成带 truncated 标记的预览文本
+// budgetTokens 按估算单位换算为预览 rune 上限（约 4 rune / token）
+func truncateResolverRawPreview(raw string, budgetTokens int) string {
+	runes := []rune(raw)
+	maxRunes := budgetTokens * 4
+	if maxRunes <= 0 {
+		maxRunes = 200
+	}
+	shown := len(runes)
+	preview := raw
+	if len(runes) > maxRunes {
+		preview = string(runes[:maxRunes])
+		shown = maxRunes
+	}
+	return fmt.Sprintf(
+		"%s…[truncated for model budget; full result retained in resolve state; shown %d/%d runes]",
+		preview, shown, len(runes),
+	)
+}
+
+// 共享预算已耗尽时的 raw 占位文案
+// summary 与 commandView 仍注入模型，完整 raw 仍在定位环内存
+func omitResolverRawPreview() string {
+	return "[omitted for shared model budget; newer evidence prioritized; full result retained in resolve state]"
 }
 
 // 模型输出中间结构，映射为 ResolveAction 前须校验

@@ -195,3 +195,88 @@ func TestLLMResolverPromptIncludesSpecs(t *testing.T) {
 		t.Error("placeholder not replaced")
 	}
 }
+
+// 多条 evidence 共享 raw 预算：优先保新；权威切片不变
+func TestPrepareResolverRawPreviewsBudget(t *testing.T) {
+	oldMark := "OLD_EVIDENCE_MARK"
+	newMark := "NEW_EVIDENCE_MARK"
+	oldRaw := json.RawMessage(`{"stdout":"` + oldMark + strings.Repeat("o", 200) + `"}`)
+	newRaw := json.RawMessage(`{"stdout":"` + newMark + strings.Repeat("n", 200) + `"}`)
+	items := []core.Evidence{
+		{ID: "e_old", Summary: "old", Raw: append(json.RawMessage(nil), oldRaw...)},
+		{ID: "e_new", Summary: "new", Raw: append(json.RawMessage(nil), newRaw...)},
+	}
+
+	// 预算仅够较新一条全文时，旧条须截断，新条全文
+	budget := estimateTokens(string(newRaw)) + 20
+	view := prepareResolverRawPreviews(items, budget)
+	if view[1].Truncated || view[1].Preview != string(newRaw) {
+		t.Fatalf("newest must stay full: trunc=%v preview=%s", view[1].Truncated, view[1].Preview)
+	}
+	if !view[0].Truncated {
+		t.Fatal("oldest must be truncated under shared budget")
+	}
+	if string(items[0].Raw) != string(oldRaw) || string(items[1].Raw) != string(newRaw) {
+		t.Fatal("authoritative evidence raw must stay full")
+	}
+
+	// 预算恰好等于新条成本时，旧条占位
+	tiny := prepareResolverRawPreviews(items, estimateTokens(string(newRaw)))
+	if tiny[1].Truncated || tiny[1].Preview != string(newRaw) {
+		t.Fatalf("newest must stay full when budget equals its cost: %s", tiny[1].Preview)
+	}
+	if !tiny[0].Truncated || !strings.Contains(tiny[0].Preview, "omitted for shared") {
+		t.Fatalf("oldest must omit when remaining is zero: %s", tiny[0].Preview)
+	}
+}
+
+// 小 raw 全文；超预算注入截断标记，权威 Raw 不变
+func TestPrepareResolverRawPreviewsTruncates(t *testing.T) {
+	raw := json.RawMessage(`{"stdout":"` + strings.Repeat("A", 500) + `"}`)
+	items := []core.Evidence{{
+		ID:      "e1",
+		Summary: "exitCode=0",
+		Raw:     append(json.RawMessage(nil), raw...),
+	}}
+	view := prepareResolverRawPreviews(items, 10)
+	if len(view) != 1 || !view[0].Truncated {
+		t.Fatalf("want truncated injection, got trunc=%v", len(view) > 0 && view[0].Truncated)
+	}
+	if !strings.Contains(view[0].Preview, "truncated") {
+		t.Fatalf("injection preview missing truncate mark: %s", view[0].Preview)
+	}
+	if string(items[0].Raw) != string(raw) {
+		t.Fatal("authoritative raw must stay full after inject view")
+	}
+
+	small := []core.Evidence{{
+		ID:  "e2",
+		Raw: json.RawMessage(`{"stdout":"hi","exitCode":0}`),
+	}}
+	full := prepareResolverRawPreviews(small, 0)
+	if full[0].Truncated || full[0].Preview != string(small[0].Raw) {
+		t.Fatalf("small raw should stay full: trunc=%v preview=%s", full[0].Truncated, full[0].Preview)
+	}
+}
+
+// payload 不得再使用固定 2000 字数墙；超预算须有 rawTruncated
+func TestBuildResolverUserPayloadBudget(t *testing.T) {
+	raw := json.RawMessage(`{"stdout":"` + strings.Repeat("B", 5000) + `"}`)
+	payload, err := buildResolverUserPayload(ResolveState{
+		Evidence: []core.Evidence{{
+			ID:      "e_big",
+			Summary: "ok",
+			Raw:     append(json.RawMessage(nil), raw...),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	// 默认合计预算足以吃下本条；全文应在 rawPreview 中
+	if !strings.Contains(payload, strings.Repeat("B", 100)) {
+		t.Fatal("payload should include raw content under default budget")
+	}
+	if strings.Contains(payload, "…(truncated)") {
+		t.Fatal("must not use old fixed-char truncate marker")
+	}
+}
