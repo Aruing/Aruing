@@ -179,6 +179,97 @@ func TestFakeTowerCallToolThenReply(t *testing.T) {
 	}
 }
 
+// call_tool 触顶后自动 escalate，不返回预算错误；question 用用户原文
+func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
+	ctx := context.Background()
+	factory := newTestFactory(t)
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	exec := &fakeRunExecutor{
+		report: core.Report{Title: "升格报告", Summary: "经正式管道"},
+	}
+
+	tower := &FakeTowerResponder{
+		Factory:               factory,
+		Executor:              exec,
+		Dispatcher:            dispatcher,
+		BaselineMaxToolRounds: 2,
+		CallTool: towerToolCall{
+			ToolName:  "fake.list_pods",
+			Arguments: json.RawMessage(`{}`),
+			Purpose:   "观察",
+		},
+		Decide: func(in session.RespondInput) (string, string, string) {
+			return towerActionCallTool, "", ""
+		},
+	}
+
+	out, err := tower.Respond(ctx, session.RespondInput{
+		SessionID: "sess_budget",
+		UserText:  "demo 为什么挂了",
+	})
+	if err != nil {
+		t.Fatalf("respond must not fail on budget: %v", err)
+	}
+	if out.Mode != session.ModeDiagnostic {
+		t.Fatalf("mode: %q want diagnostic", out.Mode)
+	}
+	if out.RunID == "" {
+		t.Fatal("expected run id after budget escalate")
+	}
+	if exec.lastRun.Question != "demo 为什么挂了" {
+		t.Fatalf("question: %q", exec.lastRun.Question)
+	}
+	if exec.lastRun.SessionID != "sess_budget" {
+		t.Fatalf("session: %q", exec.lastRun.SessionID)
+	}
+	if strings.Contains(strings.ToLower(out.Content), "budget") {
+		t.Fatalf("user-facing content must not mention budget: %q", out.Content)
+	}
+}
+
+// LLM 路径：call_tool 触顶自动 escalate，零用户可见预算错误
+func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"再查"}}`)
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	exec := &fakeRunExecutor{
+		report: core.Report{Title: "正式", Summary: "诊断完成"},
+	}
+
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, dispatcher, registry.Specs())
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+	tower.SetBaselineMaxToolRounds(1)
+
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_llm_budget",
+		UserText:  "服务访问不了",
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeDiagnostic || out.RunID == "" {
+		t.Fatalf("want diagnostic escalate, got %+v", out)
+	}
+	if exec.lastRun.Question != "服务访问不了" {
+		t.Fatalf("question: %q", exec.lastRun.Question)
+	}
+	if strings.Contains(strings.ToLower(out.Content), "budget") {
+		t.Fatalf("user-facing content must not mention budget: %q", out.Content)
+	}
+}
+
 // mock LLM 合法 reply JSON
 func TestTowerLLMReply(t *testing.T) {
 	body := `{"action":"reply","content":"这是概念解释","question":""}`
