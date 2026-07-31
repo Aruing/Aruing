@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-30（**`0.1.0-beta5-fix-1`** 已关闭并归档）
+> 最后更新：2026-07-31（**`0.1.0-beta5-fix-2`** 进行中 · T-shallow-2）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta5-fix-2` / 基线浅查与环境可见性**（进行中 · **修复型**）：证据纪律 + 基线轻量 recon（`cluster_resources`）+ tool 配额从宽与触顶自动 escalate（禁止用户见内部预算错误）。无意图枚举（#2）。plan 在笔记 `plan/0.1.0-beta5-fix-2/`。
 
 **`0.1.0-beta5-fix-1` / 基线观察回喂** ✅ 完成并归档（2026-07-30 关闭 · **修复型**）：Tower/Resolver 注入 `Evidence.Raw` + 共享预算 / `rawTruncated`（#18）；#45–#48；smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta5-fix-1/`。T-obs-3 Summary 人读仍为候选。
 
@@ -48,6 +50,10 @@
 | beta5-fix-1 T-obs-4 | Resolver raw 预算 | ✅ #47 | 去掉固定 2000 预览，共享预算优先保新（#18） |
 | beta5-fix-1 | 基线观察回喂（fix） | ✅ | 五条完成标志全绿；2026-07-30 关闭；#45–#48 |
 | beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选；关后仍可做 |
+| beta5-fix-2 T-shallow-2 | 基线轻量 recon 注入 | ⏳ 本 PR | 每 Turn ≤1 次 api-resources → `cluster_resources`；同源 parse |
+| beta5-fix-2 T-shallow-1 | Tower 证据纪律 prompt | 未开始 | 观察不足不得全局否定；无意图表 |
+| beta5-fix-2 T-shallow-3 | 配额从宽 + 触顶 escalate | 未开始 | 禁止触顶用户报错 |
+| beta5-fix-2 T-shallow-4 | 文档 + smoke 收尾 | 未开始 | 依赖 1–3 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -55,15 +61,14 @@
 
 ## 下一步
 
-**下一项**：尚未立新里程碑；从 0.1.0 北极星与下列候选现场析出（优先关注「基线浅查 vs escalate」若要做域名/访问类根因）。
+**下一项**：**`0.1.0-beta5-fix-2` T-shallow-2**（基线 `cluster_resources` 注入）→ T-shallow-1 → T-shallow-3 → 收尾。设计见笔记 `plan/0.1.0-beta5-fix-2/`。须守 #2/#15–#18；触顶不得对用户报内部配额错误。
 
 **功能向候选（不预排）**：
 
-1. **基线浅查误判 / escalate 策略**（已知洞 · 2026-07-30）：域名访问类问题常停在 `call_tool`+`reply`，只查标准 Ingress 空列表即下结论，不 escalate、不发现 Traefik IngressRoute 等 CRD；与 Raw 回喂无关。细节见笔记 `plan/archive/0.1.0-beta5-fix-1/`「关后已知洞」与历程《基线观察回喂与预算对齐》
-2. **PR-C** locate + rehydrate（压缩后保真解释旧步）
-3. T-obs-3：k8s Summary 人读增强
-4. 按 run 深解（Store / 领域侧拉 Report、证据）
-5. 配置文件化 / 辅助修复 / 持久化 / `waiting_user`
+1. **PR-C** locate + rehydrate（压缩后保真解释旧步）
+2. T-obs-3：k8s Summary 人读增强
+3. 按 run 深解（Store / 领域侧拉 Report、证据）
+4. 配置文件化 / 辅助修复 / 持久化 / `waiting_user`
 
 已确认（beta5 交付后仍有效）：
 
@@ -83,6 +88,7 @@
 3. **beta4**：Verifier 拿 Query、定位证据复用、集群侦察、反思 prompt、DiagnosticPolicy
 4. **beta5**：Session/Turn；Tower reply/call_tool/escalate；`aruing chat`；prior + L0–L2 + checkpoint
 5. **beta5-fix-1**：基线/定位观察注入 Raw + 共享预算 #18（#45–#47）；不修 escalate 策略
+6. **beta5-fix-2（进行中）**：基线 `cluster_resources`（T-shallow-2）；证据纪律 / 配额与触顶 escalate 待做
 
 ## 编排与多轮
 

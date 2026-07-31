@@ -114,6 +114,7 @@ func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
 // 看历史与当前句，在 reply / call_tool / escalate 间决策；写库由 session.Service.Turn 负责
 // call_tool 在本方法内循环执行，中间观察不落 Message
 // 入口 prepareTowerContext 一次（L0/L1/L2）；tool 环复用同一视图
+// 每个 Turn 最多一次轻量集群资源侦察（context，非 Verdict 证据）；失败降级为空
 // reply / escalate 时把 view.CheckpointContent 带回，供 Turn 落 ModeCheckpoint
 func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
@@ -141,6 +142,9 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		return session.RespondOutput{}, fmt.Errorf("tower context: %w", err)
 	}
 
+	// 每 Turn 一次；与正式管道 recon 同源解析；空 RunID，不进 Evidence 账本
+	clusterResources := t.fetchBaselineClusterResources(ctx)
+
 	var observations []towerObservation
 	toolRounds := 0
 
@@ -149,7 +153,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
 		}
 
-		decision, err := t.decide(ctx, in, view, observations)
+		decision, err := t.decide(ctx, in, view, observations, clusterResources)
 		if err != nil {
 			return session.RespondOutput{}, err
 		}
@@ -258,13 +262,15 @@ type towerToolCallJSON struct {
 }
 
 // 调用模型直至得到合法决策或业务重试耗尽
+// clusterResources 为本 Turn 轻量侦察结果（可空）；仅注入 prompt，不写入观察账本
 func (t *TowerResponder) decide(
 	ctx context.Context,
 	in session.RespondInput,
 	view towerContextView,
 	observations []towerObservation,
+	clusterResources []ClusterResource,
 ) (towerDecision, error) {
-	userPayload, err := buildTowerUserPayload(in, view, observations, t.specs)
+	userPayload, err := buildTowerUserPayload(in, view, observations, t.specs, clusterResources)
 	if err != nil {
 		return towerDecision{}, fmt.Errorf("tower payload: %w", err)
 	}
@@ -347,6 +353,43 @@ func (t *TowerResponder) mapTowerDecision(out towerLLMOutput) towerDecision {
 		}
 	}
 	return decision
+}
+
+// 轻量集群资源类型侦察：每 Turn 由 Respond 调用至多一次
+// 条件：dispatcher 非空且 specs 含 k8s；否则返回 nil（不尝试）
+// 成功：解析 api-resources 为 ClusterResource 清单；失败/空 stdout：nil，不挡基线
+// Task.RunID 空；结果仅作模型 context，不得当 Verdict 证据
+func (t *TowerResponder) fetchBaselineClusterResources(ctx context.Context) []ClusterResource {
+	if t == nil || t.dispatcher == nil || t.factory == nil {
+		return nil
+	}
+	if !towerToolNameAllowed("k8s", t.specs) {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return nil
+	}
+
+	taskID, idErr := t.factory.NewID("t")
+	if idErr != nil || taskID == "" {
+		return nil
+	}
+	task := core.Task{
+		ID:        taskID,
+		RunID:     "",
+		ToolName:  "k8s",
+		Arguments: json.RawMessage(`{"argv":["api-resources"]}`),
+		Purpose:   "侦察集群可用资源类型（基线 context）",
+	}
+	item, execErr := t.dispatcher.Execute(ctx, task)
+	if execErr != nil || item == nil {
+		return nil
+	}
+	resources := parseAPIResources(extractStdout(item.Raw))
+	if len(resources) == 0 {
+		return nil
+	}
+	return resources
 }
 
 // 经 Dispatcher 执行一次基线工具调用，成功或失败都返回 observation
@@ -514,13 +557,14 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 组装 user JSON：当前句、已 prepare 的历史视图、prior_diagnostics、本轮观察、工具列表
+// 组装 user JSON：当前句、已 prepare 的历史视图、prior_diagnostics、本轮观察、工具列表、可选集群资源类型
 // 禁止 last-N 静默截断（#18）；历史超预算见 prepareTowerContext；观察 raw 见 prepareTowerObservationsForPrompt
 func buildTowerUserPayload(
 	in session.RespondInput,
 	view towerContextView,
 	observations []towerObservation,
 	specs []tools.ToolSpec,
+	clusterResources []ClusterResource,
 ) (string, error) {
 	type toolItem struct {
 		// 工具名
@@ -539,6 +583,8 @@ func buildTowerUserPayload(
 		Observations []towerObservation `json:"observations"`
 		// 可用工具名与描述
 		Tools []toolItem `json:"tools"`
+		// 本集群实际可用资源类型（含 CRD）；基线 context，非正式 Evidence
+		ClusterResources []ClusterResource `json:"cluster_resources,omitempty"`
 	}
 
 	hist := view.Hist
@@ -559,6 +605,9 @@ func buildTowerUserPayload(
 	if hist == nil {
 		hist = []towerHistMsg{}
 	}
+	if len(clusterResources) == 0 {
+		clusterResources = nil
+	}
 
 	raw, err := json.Marshal(payload{
 		UserText:         in.UserText,
@@ -566,6 +615,7 @@ func buildTowerUserPayload(
 		PriorDiagnostics: priors,
 		Observations:     observations,
 		Tools:            toolItems,
+		ClusterResources: clusterResources,
 	})
 	if err != nil {
 		return "", err

@@ -39,6 +39,7 @@
 - `prior_diagnostics`：本会话已落库的诊断摘要列表（`run_id` + `summary`），可能为空；**无固定条数上限**
 - `observations`：本轮已执行的工具观察（taskId/toolName/purpose/summary/commandView/error/`raw`），仅本轮有效。`raw` 为工具原始 JSON（k8s 常含 stdout/stderr/exitCode）；多条共享上下文预算且优先保留较新观察，超预算时旧条可能带 `rawTruncated`/截断或省略预览。**必须基于 `raw`/stdout 回答实时事实**；不得在 `raw` 已有 stdout 时声称「未获取到输出」
 - `tools`：可用工具名与描述列表
+- `cluster_resources`（可选）：本集群实际可用资源类型清单（name、kind、namespaced、apiGroup；含 CRD）。用它判断**环境里可查什么**；`call_tool` 的资源类型优先对齐该清单，不要默认只存在标准 K8s 类型。本字段是会话 context，不是正式 Evidence
 
 ## 可用工具（名称与描述）
 
