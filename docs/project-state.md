@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-07-31（**`0.1.0-beta5-fix-2`** 进行中 · T-shallow-1/3）
+> 最后更新：2026-08-01（**`0.1.0-beta5-fix-2`** 已关闭并归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta5-fix-2` / 基线浅查与环境可见性**（进行中 · **修复型**）：证据纪律 + 基线轻量 recon（`cluster_resources`）+ tool 配额从宽与触顶自动 escalate（禁止用户见内部预算错误）。无意图枚举（#2）。plan 在笔记 `plan/0.1.0-beta5-fix-2/`。
+**`0.1.0-beta5-fix-2` / 基线浅查与环境可见性** ✅ 完成并归档（2026-08-01 关闭 · **修复型**）：证据纪律 + 基线 `cluster_resources` recon + 默认 12 轮 tool / 触顶自动 escalate（#50/#52/#53）；smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta5-fix-2/`。
 
 **`0.1.0-beta5-fix-1` / 基线观察回喂** ✅ 完成并归档（2026-07-30 关闭 · **修复型**）：Tower/Resolver 注入 `Evidence.Raw` + 共享预算 / `rawTruncated`（#18）；#45–#48；smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta5-fix-1/`。T-obs-3 Summary 人读仍为候选。
 
@@ -51,9 +51,10 @@
 | beta5-fix-1 | 基线观察回喂（fix） | ✅ | 五条完成标志全绿；2026-07-30 关闭；#45–#48 |
 | beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选；关后仍可做 |
 | beta5-fix-2 T-shallow-2 | 基线轻量 recon 注入 | ✅ #50 | 每 Turn ≤1 次 api-resources → `cluster_resources`；同源 parse |
-| beta5-fix-2 T-shallow-1 | Tower 证据纪律 prompt | ⏳ 本 PR | 观察不足不得全局否定；无意图表 |
-| beta5-fix-2 T-shallow-3 | 配额从宽 + 触顶 escalate | ⏳ 本 PR | 默认 12 轮；触顶自动 escalate，禁止用户报错 |
-| beta5-fix-2 T-shallow-4 | 文档 + smoke 收尾 | 未开始 | 依赖 1–3 合入后 |
+| beta5-fix-2 T-shallow-1 | Tower 证据纪律 prompt | ✅ #52/#53 | 观察不足不得全局否定；无意图表 |
+| beta5-fix-2 T-shallow-3 | 配额从宽 + 触顶 escalate | ✅ #52/#53 | 默认 12 轮；触顶自动 escalate，禁止用户报错 |
+| beta5-fix-2 T-shallow-4 | 文档 + smoke 收尾 | ✅ 本 PR | 关里程碑；计数回归 + 空 Ingress≠终局 smoke |
+| beta5-fix-2 | 基线浅查与环境可见性（fix） | ✅ | 六条完成标志全绿；2026-08-01 关闭；#50/#52/#53 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -61,7 +62,7 @@
 
 ## 下一步
 
-**下一项**：**`0.1.0-beta5-fix-2` T-shallow-1 + T-shallow-3**（证据纪律 prompt + 配额从宽/触顶 escalate）→ smoke 收尾（T-shallow-4）。设计见笔记 `plan/0.1.0-beta5-fix-2/`。须守 #2/#15–#18。
+**下一项**：尚未立新里程碑；从 0.1.0 北极星与下列候选现场析出。
 
 **功能向候选（不预排）**：
 
@@ -77,7 +78,7 @@
 3. 扩展能力/工具，禁止 core 意图枚举；助手回答 vs 正式诊断报告可区分
 4. **`Task.RunID` 可空**：基线 tool 经同一 Dispatcher；空 RunID 不得当 Verdict 证据
 5. **CLI**：`aruing chat` + `run`；进程内 MemoryStore
-6. **#18**：Store 全量；L0/L1/L2 compact + checkpoint；禁止 last-N 静默截肢
+6. **#18**：Store 全量；L0/L1/L2 compact + checkpoint；禁止 last-N 静默截肢；基线 tool 触顶内部 escalate，不对用户报预算用尽
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`（活跃）与 `plan/archive/`（已关）。
 
@@ -87,8 +88,8 @@
 2. **beta3**：`investigateLoop` + 工具失败容错 + 报告证据明细
 3. **beta4**：Verifier 拿 Query、定位证据复用、集群侦察、反思 prompt、DiagnosticPolicy
 4. **beta5**：Session/Turn；Tower reply/call_tool/escalate；`aruing chat`；prior + L0–L2 + checkpoint
-5. **beta5-fix-1**：基线/定位观察注入 Raw + 共享预算 #18（#45–#47）；不修 escalate 策略
-6. **beta5-fix-2（进行中）**：T-shallow-2 recon 注入已合（#50）；本步证据纪律 + 默认 12 轮/触顶 escalate
+5. **beta5-fix-1**：基线/定位观察注入 Raw + 共享预算 #18（#45–#47）
+6. **beta5-fix-2**：基线 recon + 证据纪律 + 默认 12 轮/触顶 escalate（#50/#52/#53）
 
 ## 编排与多轮
 
