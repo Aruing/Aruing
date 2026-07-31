@@ -485,6 +485,156 @@ func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	}
 }
 
+// k8s 可用时基线每 Turn 一次 api-resources，payload 含 cluster_resources（含 CRD）
+func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
+	var firstUser string
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var reqBody struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		for _, m := range reqBody.Messages {
+			if m.Role == "user" && firstUser == "" {
+				firstUser = m.Content
+			}
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"看到集群类型清单","question":""}`)
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(&fakeK8sAPIResourcesTool{
+		stdout: "NAME           SHORTNAMES   NAMESPACED   KIND\n" +
+			"pods           po           true         Pod\n" +
+			"ingressroutes  ico          true         IngressRoute\n",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, registry.Specs())
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_recon",
+		UserText:  "集群入口资源有哪些",
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeBaseline {
+		t.Fatalf("mode: %q", out.Mode)
+	}
+	if !strings.Contains(firstUser, `"cluster_resources"`) {
+		t.Fatalf("payload missing cluster_resources: %s", firstUser)
+	}
+	if !strings.Contains(firstUser, "IngressRoute") {
+		t.Fatalf("payload missing CRD kind IngressRoute: %s", firstUser)
+	}
+	// 正式 escalate 未跑；recon 不落 Run
+	if out.RunID != "" {
+		t.Fatalf("baseline recon must not create run: %q", out.RunID)
+	}
+}
+
+// 无 k8s 工具时不尝试侦察，payload 无 cluster_resources
+func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
+	var userPayload string
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var reqBody struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		for _, m := range reqBody.Messages {
+			if m.Role == "user" {
+				userPayload = m.Content
+			}
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"ok","question":""}`)
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, registry.Specs())
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	if _, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_norecon",
+		UserText:  "hi",
+	}); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if strings.Contains(userPayload, `"cluster_resources"`) {
+		t.Fatalf("without k8s, payload must omit cluster_resources: %s", userPayload)
+	}
+}
+
+// 侦察工具失败时降级空列表，仍可 reply
+func TestTowerBaselineReconFailureDegrades(t *testing.T) {
+	var userPayload string
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var reqBody struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		for _, m := range reqBody.Messages {
+			if m.Role == "user" {
+				userPayload = m.Content
+			}
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"仍可回答","question":""}`)
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(&fakeK8sAPIResourcesTool{fail: true}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, registry.Specs())
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_recon_fail",
+		UserText:  "hi",
+	})
+	if err != nil {
+		t.Fatalf("respond should not fail on recon error: %v", err)
+	}
+	if out.Content != "仍可回答" {
+		t.Fatalf("content: %q", out.Content)
+	}
+	if strings.Contains(userPayload, `"cluster_resources"`) {
+		t.Fatalf("failed recon must omit cluster_resources: %s", userPayload)
+	}
+}
+
+// fetchBaselineClusterResources 在无 dispatcher 时返回 nil
+func TestFetchBaselineClusterResourcesNoDispatcher(t *testing.T) {
+	tower := &TowerResponder{
+		factory: newTestFactory(t),
+		specs:   []tools.ToolSpec{{Name: "k8s"}},
+	}
+	if got := tower.fetchBaselineClusterResources(context.Background()); got != nil {
+		t.Fatalf("got %+v, want nil", got)
+	}
+}
+
 // 单条超预算时注入副本截断并标记；环内权威 raw 不变
 // 预算充足时保持全文，证明不是无条件截断
 func TestPrepareTowerObservationsTruncates(t *testing.T) {
