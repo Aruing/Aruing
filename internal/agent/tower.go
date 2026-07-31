@@ -30,8 +30,8 @@ var towerPromptTemplate string
 const (
 	// 单次决策业务级重试上限（非法 action / 空 content / 非法 tool 等）
 	maxTowerAttempts = 3
-	// 基线 tool 环默认最多执行次数；超出则硬错误（单轮熔断，非会话记忆上限，#18）
-	defaultBaselineMaxToolRounds = 4
+	// 基线 tool 环默认上限：防死环熔断，须够用复杂多步观察；触顶后自动 escalate，禁止对用户报预算错误（#18）
+	defaultBaselineMaxToolRounds = 12
 	// 本轮全部 observations 的 raw 注入合计预算（自上下文总预算分出）
 	// 多条共享、优先保新；轮内内存仍全量 Evidence.Raw；禁止用固定字数当业务能力墙（#18）
 	defaultTowerObservationsBudgetTokens = 8_000
@@ -57,7 +57,7 @@ type TowerResponder struct {
 	specs []tools.ToolSpec
 	// 已渲染系统提示（含工具规格摘要）
 	systemPrompt string
-	// 本轮最多 call_tool 次数，默认 4
+	// 本轮最多 call_tool 次数，默认 defaultBaselineMaxToolRounds；触顶自动 escalate
 	baselineMaxToolRounds int
 }
 
@@ -168,8 +168,13 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 
 		case towerActionCallTool:
 			if toolRounds >= t.baselineMaxToolRounds {
-				return session.RespondOutput{}, fmt.Errorf(
-					"tower: baseline tool budget exhausted (%d rounds)", t.baselineMaxToolRounds)
+				// 防死环触顶：升格正式诊断，用户仍拿结果；不暴露内部轮次错误（#18）
+				out, escErr := session.Escalate(ctx, t.factory, t.executor, in.SessionID, in.UserText)
+				if escErr != nil {
+					return session.RespondOutput{}, escErr
+				}
+				out.CheckpointContent = view.CheckpointContent
+				return out, nil
 			}
 			obs, execErr := t.executeBaselineTool(ctx, decision.ToolCall)
 			if execErr != nil {

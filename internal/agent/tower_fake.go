@@ -71,8 +71,9 @@ func (f *FakeTowerResponder) Respond(ctx context.Context, in session.RespondInpu
 				return session.RespondOutput{}, fmt.Errorf("fake tower: call_tool requires dispatcher")
 			}
 			if toolRounds >= maxRounds {
-				return session.RespondOutput{}, fmt.Errorf(
-					"fake tower: baseline tool budget exhausted (%d rounds)", maxRounds)
+				// 与真 Tower 对齐：触顶自动 escalate，禁止预算错误甩给用户
+				q := strings.TrimSpace(in.UserText)
+				return session.Escalate(ctx, f.Factory, f.Executor, in.SessionID, q)
 			}
 			if err := f.executeCallTool(ctx); err != nil {
 				return session.RespondOutput{}, err
