@@ -62,13 +62,13 @@ func TestBuildPriorRunDetailsRawBudget(t *testing.T) {
 	oldRaw := json.RawMessage(`{"stdout":"` + oldMark + strings.Repeat("o", 200) + `"}`)
 	newRaw := json.RawMessage(`{"stdout":"` + newMark + strings.Repeat("n", 200) + `"}`)
 	records := []session.DiagnosticRecord{{
-		RunID: "run_old",
+		RunID:  "run_old",
 		Report: core.Report{Summary: "old"},
 		Evidence: []core.Evidence{{
 			ID: "e_old", Summary: "old", Raw: append(json.RawMessage(nil), oldRaw...),
 		}},
 	}, {
-		RunID: "run_new",
+		RunID:  "run_new",
 		Report: core.Report{Summary: "new"},
 		Evidence: []core.Evidence{{
 			ID: "e_new", Summary: "new", Raw: append(json.RawMessage(nil), newRaw...),
