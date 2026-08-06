@@ -100,13 +100,14 @@ func TestTurnDiagnoseSessionID(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory()
 	mem := store.NewMemoryStore()
+	ledger := store.NewMemoryRunLedger()
 	exec := &fakeExecutor{
 		report: core.Report{
 			Title:   "demo 诊断报告",
 			Summary: "后端异常",
 		},
 	}
-	svc := session.NewService(mem, factory, session.NewDiagnoseResponder(factory, exec))
+	svc := session.NewService(mem, factory, session.NewDiagnoseResponder(factory, exec, ledger))
 
 	sess, err := svc.NewSession(ctx)
 	if err != nil {
@@ -140,6 +141,14 @@ func TestTurnDiagnoseSessionID(t *testing.T) {
 	}
 	if result.Report == nil || result.Report.Summary != "后端异常" {
 		t.Fatalf("report: %+v", result.Report)
+	}
+	// escalate 成功后 RunLedger 可按 RunID 读回
+	rec, err := ledger.Get(ctx, result.RunID)
+	if err != nil {
+		t.Fatalf("ledger get: %v", err)
+	}
+	if rec.SessionID != sess.ID || rec.Report.Summary != "后端异常" {
+		t.Fatalf("ledger record: %+v", rec)
 	}
 }
 

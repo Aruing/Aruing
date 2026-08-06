@@ -30,13 +30,13 @@ flowchart LR
 
 **当前编排事实**：`Orchestrator` 按上图**线性、同步**推进，一次 `Execute` 跑完到 `Report`（或失败）。阶段之间仍是直线管道；**定位阶段内部**是编排可见的小循环（`ResolveDriver.Next` → 可选 `Dispatcher.Execute` → 回喂 → `submit_targets` / `fail`），默认最多 8 轮（`SetResolveMaxRounds`）。定位回喂证据 raw 时：**环内全量**，注入模型侧多条 **共享** raw 预算、优先保新，超预算截断/占位并标记（#18，禁止固定字数墙）。定位后、调查前编排跑一次**集群侦察**（`reconCluster`，经 `executeTask` 调只读 `kubectl api-resources`）：发现集群资源类型（含 CRD）注入 Planner 的 `cluster_resources`；侦察产出的 Evidence 进报告链（透明可追溯、失败也落 error evidence），但**不进 Verifier 输入**（是 context 而非 verdict 依据）；仅当 wiring 注册了 k8s 工具时启用（`SetReconEnabled`）。这是最小单轮诊断的驱动方式，不是产品终态。
 
-**用户侧会话（Session + Tower）**：`internal/session` 提供 `Service.Turn`：确认会话 → 读历史 → 落 user 消息 → `Responder.Respond` →（可选）落 `ModeCheckpoint` 消息 → 落 assistant 消息 → 刷新 `Session.UpdatedAt`。产品路径 `agent.TowerResponder`：LLM 有限动作 **reply**（基线自然语言）/ **call_tool**（经同一 `Dispatcher`，`Task.RunID` 空，轮内回喂含 **Evidence.Raw**，默认最多 12 次防死环，观察不落 Message；注入时多观察 **共享** raw 预算、优先保新，超预算带 truncated 标记；**tool 轮次触顶则自动 escalate**，禁止对用户报内部预算用尽）/ **escalate**（`session.Escalate` → `Orchestrator.Execute`，写入 `Run.SessionID`）。**基线轻量环境可见性**：每个 Turn 入口在 k8s 已注册时最多一次只读 `api-resources`（空 `RunID`、经 Dispatcher），解析后注入决策 payload 的 `cluster_resources`（与 Planner 同源 `parseAPIResources`）；失败降级为空列表，不挡 reply；**不**作 Verdict 证据、**不**新建正式 Run。**注入模型的历史**：Store 全量保留；预算内尽量全文；超预算 `prepareTowerContext` 做 L0（长消息截断预览）→ L1（折叠旧非诊断）→ L2（LLM handoff 摘要 + 近期原文，产出 `CheckpointContent` 由 Turn 落库）。禁止 last-N 静默截肢（#18）。空 RunID 的观察不得作为 Verdict 证据。另有 `Echo` / `Diagnose` / `FakeTower` 供测。**CLI**：`aruing chat` → `Session.Turn` + Tower（须 LLM；进程内 `MemoryStore`；`--session` 续聊）；`aruing run` 仍直连 `Orchestrator.Execute`（无 LLM 走 fake）。Tower 与 Orchestrator **共用同一 Dispatcher**。对话层不持证据账本；领域实体仍按 `RunID` 扁平关联。跨阶段挂起仍可由 `internal/graph`（占位）承接。演进约定见下方硬约束 #15–#18。
+**用户侧会话（Session + Tower）**：`internal/session` 提供 `Service.Turn`：确认会话 → 读历史 → 落 user 消息 → `Responder.Respond` →（可选）落 `ModeCheckpoint` 消息 → 落 assistant 消息 → 刷新 `Session.UpdatedAt`。产品路径 `agent.TowerResponder`：LLM 有限动作 **reply**（基线自然语言）/ **call_tool**（经同一 `Dispatcher`，`Task.RunID` 空，轮内回喂含 **Evidence.Raw**，默认最多 12 次防死环，观察不落 Message；注入时多观察 **共享** raw 预算、优先保新，超预算带 truncated 标记；**tool 轮次触顶则自动 escalate**，禁止对用户报内部预算用尽）/ **escalate**（`session.Escalate` → `Orchestrator.Execute`，写入 `Run.SessionID`；**成功路径将 `Report` + `[]Evidence` 写入进程内 `RunLedger`**，权威源不是 Message 摘要）。**基线轻量环境可见性**：每个 Turn 入口在 k8s 已注册时最多一次只读 `api-resources`（空 `RunID`、经 Dispatcher），解析后注入决策 payload 的 `cluster_resources`（与 Planner 同源 `parseAPIResources`）；失败降级为空列表，不挡 reply；**不**作 Verdict 证据、**不**新建正式 Run。**注入模型的历史**：Store 全量保留；预算内尽量全文；超预算 `prepareTowerContext` 做 L0（长消息截断预览）→ L1（折叠旧非诊断）→ L2（LLM handoff 摘要 + 近期原文，产出 `CheckpointContent` 由 Turn 落库）。禁止 last-N 静默截肢（#18）。空 RunID 的观察不得作为 Verdict 证据。另有 `Echo` / `Diagnose` / `FakeTower` 供测。**CLI**：`aruing chat` → `Session.Turn` + Tower（须 LLM；进程内 `MemoryStore` + `MemoryRunLedger`；`--session` 续聊）；`aruing run` 仍直连 `Orchestrator.Execute`（无 LLM 走 fake）。Tower 与 Orchestrator **共用同一 Dispatcher**。Message 不嵌证据链；正式诊断 `Report`/`Evidence` 由 `RunLedger` 按 `RunID` 索引（进程内，退出即丢）。领域实体仍按 `RunID` 扁平关联。跨阶段挂起仍可由 `internal/graph`（占位）承接。演进约定见下方硬约束 #15–#18。
 
 ## 模块职责
 
 | 包 | 负责 | 不负责 |
 | --- | --- | --- |
-| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`：`buildTooling` 共用 Dispatcher；`newOrchestrator` / `newSessionStack`；`run` 无 LLM 全 fake；`chat` 须 LLM + Tower + MemoryStore）；`formatRunError` 对 LLM 类失败附人话提示 | 不承担推理、不查集群、不直接读业务 env |
+| `cmd/aruing` | CLI 入口、参数解析、依赖组装（`wiring.go`：`buildTooling` 共用 Dispatcher；`newOrchestrator` / `newSessionStack`；`run` 无 LLM 全 fake；`chat` 须 LLM + Tower + MemoryStore + MemoryRunLedger）；`formatRunError` 对 LLM 类失败附人话提示 | 不承担推理、不查集群、不直接读业务 env |
 | `internal/core` | 领域模型：`Run` / `Query` / `Node` / `Edge` / `Target` / `Hypothesis` / `Task` / `Evidence` / `Verdict` / `Report` / `TimeRange` / `Factory` | 不调外部依赖 |
 | `internal/agent` | 推理角色：`Parser` / `ResolveDriver`（`LLMResolver` / `FakeResolver`）/ `Planner`（`LLMPlanner` / `FakePlanner`）/ `Verifier`（`LLMVerifier` / `FakeVerifier`）/ `Reporter`（`LLMReporter` / `FakeReporter`）及 `Orchestrator` 编排；**`TowerResponder` / `FakeTowerResponder`** 实现 `session.Responder`（reply / call_tool / escalate；基线 tool 环在 `Respond` 内编排可见）；**`prepareTowerContext`**（L0/L1/L2，prompt `compact.md`）组装注入模型的历史视图；角色可接 LLM（prompt `//go:embed`）；规划、验证与报告均为单次调用，工具规格来自 `Registry.Specs` | 不直接查集群、不持久化；不写 Message（checkpoint 正文由 Tower 产出，`Turn` 落库）；不把线性 `Execute→Report` 当成永久对外契约；角色不私自多轮调 Tool（Tower 工具只经 Dispatcher） |
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
@@ -44,8 +44,8 @@ flowchart LR
 | `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；Evidence 记录 exitCode/stdout/stderr | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
-| `internal/session` | 用户侧多轮壳：`Session` / `Message`、`Store`、`Service.Turn`、`Responder`（`RespondOutput.CheckpointContent` 可选）、`Escalate`（建 Run + Execute）；脚手架 Echo / Diagnose；Turn 在 assistant 前写入 `ModeCheckpoint` | 不持证据账本、不替代 Orchestrator；不实现 LLM Tower / L2 摘要（在 agent）；CLI 经 `aruing chat` 接入 |
-| `internal/store` | 持久化实现：`MemoryStore`（进程内会话与消息）；接口由使用方定义（如 `session.Store`） | 不定义业务接口；Run / Evidence 级持久化仍可后续扩展；进程退出即丢 |
+| `internal/session` | 用户侧多轮壳：`Session` / `Message`、`Store`、`RunLedger` / `DiagnosticRecord`、`Service.Turn`、`Responder`（`RespondOutput.CheckpointContent` 可选）、`Escalate`（建 Run + Execute，成功写 `RunLedger`）；脚手架 Echo / Diagnose；Turn 在 assistant 前写入 `ModeCheckpoint` | Message 不嵌证据链、不替代 Orchestrator；不实现 LLM Tower / L2 摘要（在 agent）；CLI 经 `aruing chat` 接入 |
+| `internal/store` | 持久化实现：`MemoryStore`（会话与消息）、`MemoryRunLedger`（正式诊断 Report+Evidence）；接口由使用方定义（`session.Store` / `session.RunLedger`） | 不定义业务接口；进程退出即丢；非磁盘持久化 |
 | `internal/graph` | 流程编排状态机（占位） | 当前未用；线性诊断仍由 `Orchestrator`；跨阶段挂起时再承接 |
 | `internal/config` | 从 env（`ARUING_*`）加载进程级配置：`LLM`（BaseURL/APIKey/Model）、`Tools.KubectlPath`；`LLM.Ready` / `ToClientConfig` | 不解析配置文件、不热更新、不读 `.env` 文件本身 |
 | `internal/api` | HTTP / 网络入口（占位） | 当前仅 CLI |
@@ -59,6 +59,8 @@ flowchart LR
 | `Run` | `ID / Question / Status / CreatedAt / UpdatedAt`；`SessionID` 在 Diagnose 升格路径写入所属会话 |
 | `Session`（`session` 包） | `ID / CreatedAt / UpdatedAt`；对话容器，不嵌装消息列表 |
 | `Message`（`session` 包） | `ID / SessionID / Role / Content / CreatedAt`；助手可选 `RunID` / `Mode`（`baseline` / `diagnostic` / `checkpoint`）；`checkpoint` = L2 handoff 摘要，Store 仍保留压缩前全量历史 |
+| `DiagnosticRecord`（`session` 包） | `RunID / SessionID / Question / Report / Evidence`；一次正式诊断在进程内的可追溯记录；权威源 ≠ Message 摘要 |
+| `RunLedger`（`session` 包接口） | `Put` / `Get` / `ListBySession`；成功 escalate 后可按 `RunID` 读回；不按条数淘汰（#18）；实现见 `store.MemoryRunLedger` |
 | `Query` | `ID / RunID / Goal / Nodes / Edges / TimeRange`；用户问题的开放图结构 |
 | `Node` | `ID / Type / Text / Attrs`；类型开放（如 `resource`、`symptom`），属性用 `k8s.*` / `hint.*` 前缀 |
 | `Edge` | `ID / From / To / Type / Attrs`；有向关系，类型开放（如 `calls`、`depends_on`） |
@@ -93,16 +95,18 @@ Session ──SessionID──→ Message（可选 RunID）
                               │
 Run ←──SessionID（升格时）────┘
  │
- └──RunID──→ Query ──NodeID──→ Target
-                 │
-           ──RunID──→ Hypothesis ──Refs──→ Task ──TaskID──→ Evidence
-                           │                                          │
-                           └──HypothesisID──→ Verdict ←──EvidenceIDs───┘
-                                                    │
-                                              映射为 Conclusion → Report
+ ├──RunID──→ Query ──NodeID──→ Target
+ │               │
+ │         ──RunID──→ Hypothesis ──Refs──→ Task ──TaskID──→ Evidence
+ │                         │                                          │
+ │                         └──HypothesisID──→ Verdict ←──EvidenceIDs───┘
+ │                                                  │
+ │                                            映射为 Conclusion → Report
+ │
+ └──RunID──→ RunLedger.DiagnosticRecord（Report + Evidence 拷贝；进程内）
 ```
 
-存储层可 `WHERE run_id=?` 一次取出某次运行的全部实体；会话消息可 `WHERE session_id=?` 按序取出。
+会话消息可 `WHERE session_id=?` 按序取出；正式诊断产物可按 `RunID` 从 `RunLedger` 读回（当前内存实现）。
 
 ## 硬约束
 
