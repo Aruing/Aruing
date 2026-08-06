@@ -169,3 +169,57 @@ func TestTowerPriorRunDetailsFromLedger(t *testing.T) {
 		t.Fatalf("reply should cite evidence: %q", out.Content)
 	}
 }
+
+// 空账本：prior_run_details 为空；解释追问不调 Execute，不注入伪证据
+func TestTowerEmptyLedgerNoPriorRuns(t *testing.T) {
+	ctx := context.Background()
+	ledger := store.NewMemoryRunLedger()
+
+	var sawUser string
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		var reqBody struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		for _, m := range reqBody.Messages {
+			if m.Role == "user" {
+				sawUser = m.Content
+			}
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"本会话尚无正式诊断记录，可 escalate 后再追问依据","question":""}`)
+	})
+	exec := &fakeRunExecutor{}
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, ledger, nil, nil)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	out, err := tower.Respond(ctx, session.RespondInput{
+		SessionID: "sess_empty",
+		UserText:  "上次结论依据是什么",
+		History:   nil,
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeBaseline {
+		t.Fatalf("mode: %q", out.Mode)
+	}
+	if exec.lastRun.ID != "" {
+		t.Fatal("executor must not run when ledger empty")
+	}
+	var payload struct {
+		PriorRunDetails []struct {
+			RunID string `json:"run_id"`
+		} `json:"prior_run_details"`
+	}
+	if err := json.Unmarshal([]byte(sawUser), &payload); err != nil {
+		t.Fatalf("user payload not JSON: %v body=%s", err, sawUser)
+	}
+	if len(payload.PriorRunDetails) != 0 {
+		t.Fatalf("want empty prior_run_details, got %d: %s", len(payload.PriorRunDetails), sawUser)
+	}
+}
