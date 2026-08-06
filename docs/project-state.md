@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-06（**`0.1.0-beta6`** 进行中；步骤 1 Run 账本落地中）
+> 最后更新：2026-08-06（**`0.1.0-beta6`** 进行中；步骤 1 ✅ #55；步骤 2 方案 A 注入加深 ✅；下一步 beta6-3）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta6` / 按 run 深解**（进行中）：正式诊断结束后进程内可按 `RunID` 读回 `Report` + `Evidence`，供同会话深解追问。plan 在笔记 `plan/0.1.0-beta6/`。
+**`0.1.0-beta6` / 按 run 深解**（进行中）：正式诊断结束后进程内可按 `RunID` 读回 `Report` + `Evidence`，供同会话深解追问。步骤 1（Run 账本）已合入 #55；步骤 2（Tower 方案 A 注入）已落地：`prior_run_details` + 解释默认 reply。plan 在笔记 `plan/0.1.0-beta6/`。
 
 **`0.1.0-beta5-fix-2` / 基线浅查与环境可见性** ✅ 完成并归档（2026-08-01 关闭 · **修复型**）：证据纪律 + 基线 `cluster_resources` recon + 默认 12 轮 tool / 触顶自动 escalate（#50/#52/#53）。plan 在笔记 `plan/archive/0.1.0-beta5-fix-2/`。
 
@@ -34,8 +34,8 @@
 | beta5-fix-2 | 基线浅查与环境可见性 | ✅ | #50/#52/#53 |
 | beta5-5 PR-C | locate + rehydrate | 候选 | 不进 beta6 完成标志 |
 | beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选 |
-| beta6-1 | Run 账本 + escalate 落账 | ⏳ | `RunLedger` + `MemoryRunLedger`；Execute 证据不再丢弃 |
-| beta6-2 | Tower 方案 A 注入加深 | 未开始 | prior/user payload 结构化深材料 |
+| beta6-1 | Run 账本 + escalate 落账 | ✅ | #55；`RunLedger` + `MemoryRunLedger`；Execute 证据不再丢弃 |
+| beta6-2 | Tower 方案 A 注入加深 | ✅ | `ListBySession` → `prior_run_details`；证据 raw 共享预算；解释默认 reply |
 | beta6-3 | wiring smoke + 文档收尾 | 未开始 | 关里程碑前 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
@@ -44,14 +44,12 @@
 
 ## 下一步
 
-**下一项**：完成 **beta6-1**（本 PR）：进程内 `RunLedger`；escalate 成功 `Put` Report+Evidence；产品 wiring 注入；单测绿。
+**下一项**：**beta6-3** wiring smoke + 完成标志验收 + 关里程碑文档。
 
-**本里程碑后续候选（不预排进本 PR）**：
+**本里程碑后续候选**：
 
-1. **beta6-2**：Tower 方案 A——加深 prior / 注入结构化深材料（#18 raw 预算）
-2. **beta6-3**：smoke + 完成标志验收 + 关里程碑文档
-3. **PR-C** rehydrate（与深解互补，刻意留下一刀）
-4. T-obs-3 / 配置文件化 / 磁盘持久化 / `waiting_user`
+1. **PR-C** rehydrate（与深解互补，刻意留下一刀）
+2. T-obs-3 / 配置文件化 / 磁盘持久化 / `waiting_user`
 
 已确认（beta5 交付后仍有效，beta6 增补）：
 
@@ -72,6 +70,8 @@
 4. **beta5**：Session/Turn；Tower reply/call_tool/escalate；`aruing chat`；prior + L0–L2 + checkpoint
 5. **beta5-fix-1**：基线/定位观察注入 Raw + 共享预算 #18（#45–#47）
 6. **beta5-fix-2**：基线 recon + 证据纪律 + 默认 12 轮/触顶 escalate（#50/#52/#53）
+7. **beta6-1**：`RunLedger` / `MemoryRunLedger`；escalate 成功落 Report+Evidence（#55）
+8. **beta6-2**：Tower `prior_run_details` 从 RunLedger 注入结论+证据（#18 raw 预算）；解释路径默认 reply
 
 ## 编排与多轮
 
@@ -79,7 +79,8 @@
 | --- | --- |
 | 诊断管道 | 线性 `Orchestrator.Execute` 仍是**诊断升格路径**的实现；#15–#17 不变 |
 | 用户侧多轮 | **已落地**：`Session.Turn` + Tower + `aruing chat`（O-1） |
-| 正式诊断读回 | **beta6-1**：`RunLedger` 进程内 Put/Get/ListBySession；不固化 `Execute→Report` 为对外唯一契约 |
+| 正式诊断读回 | **已落地（beta6-1 / #55）**：`RunLedger` 进程内 Put/Get/ListBySession；不固化 `Execute→Report` 为对外唯一契约 |
+| 深解注入 | **已落地（beta6-2）**：`prior_run_details` 结构化结论+证据；Message 侧 `prior_diagnostics` 保留 |
 | 会否推倒 core/tools | **否**；Session/Tower + 编排入口，复用 Dispatcher 与扁平 Run 链 |
 | 单轮期禁止事项 | 仍适用于动编排/工具/角色时对照（见笔记 `plan/archive/0.0.1-beta2/2026-7-22.md` §4） |
 

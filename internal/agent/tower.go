@@ -149,6 +149,13 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		return session.RespondOutput{}, fmt.Errorf("tower context: %w", err)
 	}
 
+	// 本会话正式诊断深材料（Report + Evidence）；权威源 RunLedger，非 Message 摘要
+	records, listErr := t.ledger.ListBySession(ctx, in.SessionID)
+	if listErr != nil {
+		return session.RespondOutput{}, fmt.Errorf("tower list diagnostic runs: %w", listErr)
+	}
+	priorRuns := buildPriorRunDetails(records, defaultPriorEvidenceBudgetTokens)
+
 	// 每 Turn 一次；与正式管道 recon 同源解析；空 RunID，不进 Evidence 账本
 	clusterResources := t.fetchBaselineClusterResources(ctx)
 
@@ -160,7 +167,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
 		}
 
-		decision, err := t.decide(ctx, in, view, observations, clusterResources)
+		decision, err := t.decide(ctx, in, view, priorRuns, observations, clusterResources)
 		if err != nil {
 			return session.RespondOutput{}, err
 		}
@@ -274,15 +281,17 @@ type towerToolCallJSON struct {
 }
 
 // 调用模型直至得到合法决策或业务重试耗尽
-// clusterResources 为本 Turn 轻量侦察结果（可空）；仅注入 prompt，不写入观察账本
+// priorRuns 为本会话 RunLedger 深材料；clusterResources 为本 Turn 轻量侦察（可空）
+// 二者仅注入 prompt，不写入观察账本
 func (t *TowerResponder) decide(
 	ctx context.Context,
 	in session.RespondInput,
 	view towerContextView,
+	priorRuns []towerPriorRunDetail,
 	observations []towerObservation,
 	clusterResources []ClusterResource,
 ) (towerDecision, error) {
-	userPayload, err := buildTowerUserPayload(in, view, observations, t.specs, clusterResources)
+	userPayload, err := buildTowerUserPayload(in, view, priorRuns, observations, t.specs, clusterResources)
 	if err != nil {
 		return towerDecision{}, fmt.Errorf("tower payload: %w", err)
 	}
@@ -569,11 +578,13 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 组装 user JSON：当前句、已 prepare 的历史视图、prior_diagnostics、本轮观察、工具列表、可选集群资源类型
-// 禁止 last-N 静默截断（#18）；历史超预算见 prepareTowerContext；观察 raw 见 prepareTowerObservationsForPrompt
+// 组装 user JSON：当前句、历史视图、prior 摘要/深材料、本轮观察、工具列表、可选集群资源类型
+// 禁止 last-N 静默截断（#18）；历史超预算见 prepareTowerContext；
+// 观察 raw 见 prepareTowerObservationsForPrompt；prior 证据 raw 见 buildPriorRunDetails
 func buildTowerUserPayload(
 	in session.RespondInput,
 	view towerContextView,
+	priorRuns []towerPriorRunDetail,
 	observations []towerObservation,
 	specs []tools.ToolSpec,
 	clusterResources []ClusterResource,
@@ -589,8 +600,10 @@ func buildTowerUserPayload(
 		UserText string `json:"user_text"`
 		// 会话历史视图（预算内全文；超预算 L0/L1/L2 compact）
 		History []towerHistMsg `json:"history"`
-		// 本会话既有诊断摘要（无条数 cap，由预算统一治理）
+		// 本会话既有诊断摘要（Message 侧；无条数 cap，由预算统一治理）
 		PriorDiagnostics []towerPriorDiagnostic `json:"prior_diagnostics"`
+		// 本会话正式诊断深材料（RunLedger：结论 + 证据；raw 共享预算）
+		PriorRunDetails []towerPriorRunDetail `json:"prior_run_details"`
 		// 本轮 tool 观察（raw 经预算治理后的注入副本）
 		Observations []towerObservation `json:"observations"`
 		// 可用工具名与描述
@@ -614,6 +627,9 @@ func buildTowerUserPayload(
 	if priors == nil {
 		priors = []towerPriorDiagnostic{}
 	}
+	if priorRuns == nil {
+		priorRuns = []towerPriorRunDetail{}
+	}
 	if hist == nil {
 		hist = []towerHistMsg{}
 	}
@@ -625,6 +641,7 @@ func buildTowerUserPayload(
 		UserText:         in.UserText,
 		History:          hist,
 		PriorDiagnostics: priors,
+		PriorRunDetails:  priorRuns,
 		Observations:     observations,
 		Tools:            toolItems,
 		ClusterResources: clusterResources,
