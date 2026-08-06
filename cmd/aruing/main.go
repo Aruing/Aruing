@@ -156,6 +156,7 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 	fs.SetOutput(stderr)
 	sessionIDFlag := fs.String("session", "", "existing session id (omit to create a new session)")
 	format := fs.String("format", "markdown", "diagnostic report format: markdown|json (baseline is always plain text)")
+	verbose := fs.Bool("verbose", false, "print Tower debug progress to stderr (same as ARUING_DEBUG=1)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: aruing chat [flags] [question]")
 		fmt.Fprintln(stderr, "")
@@ -179,6 +180,9 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 	}
 
 	cfg := config.Load()
+	if *verbose {
+		cfg.Debug = true
+	}
 	factory := core.NewFactory()
 	svc, err := newSessionStack(factory, cfg, stderr)
 	if err != nil {

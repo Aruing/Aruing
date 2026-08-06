@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"aruing/internal/core"
+	"aruing/internal/llm"
 	"aruing/internal/session"
 	"aruing/internal/store"
 	"aruing/internal/tools"
@@ -474,6 +476,64 @@ func TestTowerLLMInvalidActionRetries(t *testing.T) {
 	}
 	if n := calls.Load(); n != maxTowerAttempts {
 		t.Fatalf("attempts: %d want %d", n, maxTowerAttempts)
+	}
+}
+
+// 非 JSON 正文应业务重试后失败（ErrLLMOutputInconsistent 链上带 ErrJSONParse）
+func TestTowerLLMBadJSONRetries(t *testing.T) {
+	var calls atomic.Int32
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		writeChatCompletion(w, "not-json-at-all")
+	})
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+	var prog bytes.Buffer
+	tower.SetProgress(&prog)
+
+	_, err = tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_z",
+		UserText:  "hi",
+	})
+	if !errors.Is(err, ErrLLMOutputInconsistent) {
+		t.Fatalf("want ErrLLMOutputInconsistent, got %v", err)
+	}
+	if !errors.Is(err, llm.ErrJSONParse) {
+		t.Fatalf("want ErrJSONParse in chain, got %v", err)
+	}
+	if n := calls.Load(); n != maxTowerAttempts {
+		t.Fatalf("attempts: %d want %d", n, maxTowerAttempts)
+	}
+	if !strings.Contains(prog.String(), "recoverable LLM error") {
+		t.Fatalf("progress missing retry log: %q", prog.String())
+	}
+}
+
+// 坏 JSON 后成功应返回 reply
+func TestTowerLLMBadJSONThenOK(t *testing.T) {
+	var calls atomic.Int32
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			writeChatCompletion(w, "garbage")
+			return
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"recovered"}`)
+	})
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_z",
+		UserText:  "hi",
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Content != "recovered" {
+		t.Fatalf("content = %q", out.Content)
 	}
 }
 

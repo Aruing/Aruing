@@ -22,6 +22,8 @@ type Config struct {
 	LLM LLM
 	// 集群工具相关路径
 	Tools Tools
+	// 是否输出 Tower / 编排调试进度到 stderr（ARUING_DEBUG=1 或 CLI --verbose）
+	Debug bool
 }
 
 // 大模型相关环境配置
@@ -71,6 +73,7 @@ func LoadFrom(getenv func(string) string) Config {
 			KubectlPath:         strings.TrimSpace(getenv("ARUING_KUBECTL_PATH")),
 			AllowDiagnosticExec: parseBoolEnv(getenv("ARUING_ALLOW_DIAGNOSTIC_EXEC")),
 		},
+		Debug: parseBoolEnv(getenv("ARUING_DEBUG")),
 	}
 }
 

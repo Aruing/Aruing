@@ -124,7 +124,7 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 // 请求一次结构化生成，把模型输出的 JSON 反序列化进 out
 //
 // out 必须是可写指针；模型输出被 ```json 围栏包裹或前后带说明文字时也会尝试提取最外层对象
-// 提取后仍无法解析为 JSON 时，返回带上下文的错误，方便定位是模型输出问题还是 prompt 问题
+// 提取后仍无法解析为 JSON 时返回 ErrJSONParse（可 errors.Is），并附预览便于定位
 func (c *client) GenerateJSON(ctx context.Context, req Request, out any) error {
 	if out == nil {
 		return errors.New("llm GenerateJSON: out must be a non-nil pointer")
@@ -142,7 +142,7 @@ func (c *client) GenerateJSON(ctx context.Context, req Request, out any) error {
 		if len(preview) > 200 {
 			preview = preview[:200] + "..."
 		}
-		return fmt.Errorf("llm parse json output (got %q): %w", preview, err)
+		return fmt.Errorf("%w: got %q (%d bytes raw): %v", ErrJSONParse, preview, len(raw), err)
 	}
 	return nil
 }
@@ -178,9 +178,29 @@ func (c *client) do(ctx context.Context, req Request, jsonMode bool) (string, er
 		resp, err := c.api.CreateChatCompletion(ctx, request)
 		if err == nil {
 			if len(resp.Choices) == 0 {
-				return "", errors.New("llm generate: response has no choices")
+				// 无 choices 与空 content 同类：可恢复时退避重试
+				lastErr = fmt.Errorf("%w: response has no choices", ErrEmptyResponse)
+				if attempt < c.maxRetries {
+					if waitErr := sleep(ctx, backoff(attempt)); waitErr != nil {
+						return "", waitErr
+					}
+					continue
+				}
+				return "", lastErr
 			}
-			return resp.Choices[0].Message.Content, nil
+			content := resp.Choices[0].Message.Content
+			if strings.TrimSpace(content) == "" {
+				// 兼容网关偶发空正文；与网络抖动同样走退避重试
+				lastErr = ErrEmptyResponse
+				if attempt < c.maxRetries {
+					if waitErr := sleep(ctx, backoff(attempt)); waitErr != nil {
+						return "", waitErr
+					}
+					continue
+				}
+				return "", ErrEmptyResponse
+			}
+			return content, nil
 		}
 
 		lastErr = err

@@ -229,14 +229,54 @@ func TestGenerateJSONFenced(t *testing.T) {
 	}
 }
 
-// 输出无法解析为 JSON 时应返回带输出预览的错误
+// 输出无法解析为 JSON 时应返回 ErrJSONParse 与预览
 func TestGenerateJSONNonJSON(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeCompletion(w, "这不是 JSON")
 	})
 
 	err := client.GenerateJSON(context.Background(), Request{}, &struct{}{})
-	requireErrorContains(t, err, "parse json output")
+	if !errors.Is(err, ErrJSONParse) {
+		t.Fatalf("want ErrJSONParse, got %v", err)
+	}
+	requireErrorContains(t, err, "这不是 JSON")
+}
+
+// 空正文应在有重试次数时自动重试，最终成功
+func TestGenerateEmptyContentRetry(t *testing.T) {
+	var attempts atomic.Int32
+	cl := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			writeCompletion(w, "   ")
+			return
+		}
+		writeCompletion(w, "ok-after-empty")
+	})
+	cl.(*client).maxRetries = 1
+
+	resp, err := cl.Generate(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if resp.Content != "ok-after-empty" {
+		t.Errorf("Content = %q", resp.Content)
+	}
+	if got := attempts.Load(); got != 2 {
+		t.Errorf("attempts = %d, want 2", got)
+	}
+}
+
+// 空正文耗尽重试应返回 ErrEmptyResponse
+func TestGenerateEmptyContentExhausted(t *testing.T) {
+	cl := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		writeCompletion(w, "")
+	})
+	cl.(*client).maxRetries = 1
+
+	_, err := cl.Generate(context.Background(), Request{})
+	if !errors.Is(err, ErrEmptyResponse) {
+		t.Fatalf("want ErrEmptyResponse, got %v", err)
+	}
 }
 
 // out 非指针或为 nil 时应直接拒绝，避免 Unmarshal 触发 panic
