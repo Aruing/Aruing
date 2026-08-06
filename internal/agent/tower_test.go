@@ -72,10 +72,12 @@ func TestFakeTowerEscalate(t *testing.T) {
 	exec := &fakeRunExecutor{
 		report: core.Report{Title: "根因报告", Summary: "Pod 未就绪"},
 	}
+	ledger := store.NewMemoryRunLedger()
 	tower := &FakeTowerResponder{
 		Factory:  factory,
 		Executor: exec,
-		Decide: func(in session.RespondInput) (string, string, string) {
+		Ledger:   ledger,
+		Decide: func(session.RespondInput) (string, string, string) {
 			return towerActionEscalate, "", "定位 demo-api 故障"
 		},
 	}
@@ -104,6 +106,13 @@ func TestFakeTowerEscalate(t *testing.T) {
 	if !strings.Contains(result.AssistantMessage.Content, "Pod 未就绪") {
 		t.Fatalf("content: %q", result.AssistantMessage.Content)
 	}
+	rec, err := ledger.Get(ctx, result.RunID)
+	if err != nil {
+		t.Fatalf("ledger get: %v", err)
+	}
+	if rec.SessionID != sess.ID || rec.Report.Summary != "Pod 未就绪" {
+		t.Fatalf("ledger: %+v", rec)
+	}
 }
 
 // escalate 且 question 空时回退 UserText
@@ -114,7 +123,8 @@ func TestFakeTowerEscalateQuestionFallback(t *testing.T) {
 	tower := &FakeTowerResponder{
 		Factory:  factory,
 		Executor: exec,
-		Decide: func(in session.RespondInput) (string, string, string) {
+		Ledger:   store.NewMemoryRunLedger(),
+		Decide: func(session.RespondInput) (string, string, string) {
 			return towerActionEscalate, "", ""
 		},
 	}
@@ -195,6 +205,7 @@ func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
 	tower := &FakeTowerResponder{
 		Factory:               factory,
 		Executor:              exec,
+		Ledger:                store.NewMemoryRunLedger(),
 		Dispatcher:            dispatcher,
 		BaselineMaxToolRounds: 2,
 		CallTool: towerToolCall{
@@ -246,7 +257,7 @@ func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 		report: core.Report{Title: "正式", Summary: "诊断完成"},
 	}
 
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, dispatcher, registry.Specs())
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -277,7 +288,7 @@ func TestTowerLLMReply(t *testing.T) {
 		writeChatCompletion(w, body)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, nil, nil)
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -320,7 +331,7 @@ func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
 		writeChatCompletion(w, `{"action":"reply","content":"上次依据 ImagePullBackOff 判定镜像问题","question":""}`)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, nil, nil)
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -362,7 +373,8 @@ func TestTowerLLMEscalate(t *testing.T) {
 		report: core.Report{Title: "T", Summary: "S"},
 	}
 	factory := newTestFactory(t)
-	tower, err := NewTowerResponder(client, factory, exec, nil, nil)
+	ledger := store.NewMemoryRunLedger()
+	tower, err := NewTowerResponder(client, factory, exec, ledger, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -382,6 +394,13 @@ func TestTowerLLMEscalate(t *testing.T) {
 	}
 	if exec.lastRun.Question != "查 demo-api 根因" {
 		t.Fatalf("question: %q", exec.lastRun.Question)
+	}
+	rec, err := ledger.Get(context.Background(), out.RunID)
+	if err != nil {
+		t.Fatalf("ledger get: %v", err)
+	}
+	if rec.Report.Summary != "S" {
+		t.Fatalf("ledger report: %+v", rec.Report)
 	}
 }
 
@@ -405,7 +424,7 @@ func TestTowerLLMCallToolThenReply(t *testing.T) {
 	specs := registry.Specs()
 
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, dispatcher, specs)
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, specs)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -438,7 +457,7 @@ func TestTowerLLMInvalidActionRetries(t *testing.T) {
 		calls.Add(1)
 		writeChatCompletion(w, `{"action":"fly","content":"x"}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, nil, nil)
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -463,7 +482,7 @@ func TestTowerLLMEmptyReplyContent(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"reply","content":"  "}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, nil, nil)
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -481,7 +500,7 @@ func TestTowerLLMCallToolWithoutDispatcher(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"x"}}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, nil, []tools.ToolSpec{{
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, []tools.ToolSpec{{
 		Name:        "fake.list_pods",
 		Description: "d",
 		InputSchema: json.RawMessage(`{"type":"object"}`),
@@ -505,14 +524,17 @@ func TestNewTowerResponderRequiresDeps(t *testing.T) {
 	factory := newTestFactory(t)
 	exec := &fakeRunExecutor{}
 
-	if _, err := NewTowerResponder(nil, factory, exec, nil, nil); err == nil {
+	if _, err := NewTowerResponder(nil, factory, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
 		t.Fatal("expected nil client error")
 	}
-	if _, err := NewTowerResponder(client, nil, exec, nil, nil); err == nil {
+	if _, err := NewTowerResponder(client, nil, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
 		t.Fatal("expected nil factory error")
 	}
-	if _, err := NewTowerResponder(client, factory, nil, nil, nil); err == nil {
+	if _, err := NewTowerResponder(client, factory, nil, store.NewMemoryRunLedger(), nil, nil); err == nil {
 		t.Fatal("expected nil executor error")
+	}
+	if _, err := NewTowerResponder(client, factory, exec, nil, nil, nil); err == nil {
+		t.Fatal("expected nil ledger error")
 	}
 }
 
@@ -549,7 +571,7 @@ func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
 	specs := registry.Specs()
 
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, specs)
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, specs)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -604,7 +626,7 @@ func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, registry.Specs())
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -655,7 +677,7 @@ func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, registry.Specs())
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -695,7 +717,7 @@ func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, dispatcher, registry.Specs())
+	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}

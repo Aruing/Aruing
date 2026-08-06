@@ -1,12 +1,12 @@
 // 会话包放用户侧多轮对话的壳：Session、Message、Turn 入口与可替换的 Responder
 //
-// 对话层不承担诊断证据账本；正式诊断仍走 core.Run 与 Orchestrator.Execute
-// 助手回复可通过 Message.RunID 引用某次 Run，不嵌套证据链
+// 对话层 Message 不嵌证据链；正式诊断仍走 core.Run 与 Orchestrator.Execute
+// 助手回复可通过 Message.RunID 引用某次 Run；Report/Evidence 权威源为 RunLedger（进程内）
 //
-// 本包只定义 Store 接口；内存实现在 internal/store，便于以后换成持久化而不改 Turn
+// 本包定义 Store / RunLedger 接口；内存实现在 internal/store
 // Responder 决定「本轮怎么答」；产品路径为 agent.TowerResponder（reply / call_tool / escalate）
 // Echo 长期可测；DiagnoseResponder 为强制每轮诊断的脚手架，非默认产品脸
-// 升格建 Run 见 Escalate，供 Tower 与 Diagnose 共用
+// 升格建 Run 见 Escalate（成功路径写 RunLedger），供 Tower 与 Diagnose 共用
 package session
 
 import "time"

@@ -8,12 +8,13 @@ import (
 	"aruing/internal/core"
 )
 
-// 建 Run 并执行正式诊断，组装 diagnostic 模式的 RespondOutput
+// 建 Run 并执行正式诊断，成功时写入 RunLedger，组装 diagnostic 模式的 RespondOutput
 // Tower escalate 与临时 DiagnoseResponder 共用，避免两套建 Run 逻辑
 func Escalate(
 	ctx context.Context,
 	factory *core.Factory,
 	executor RunExecutor,
+	ledger RunLedger,
 	sessionID, question string,
 ) (RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
@@ -24,6 +25,9 @@ func Escalate(
 	}
 	if executor == nil {
 		return RespondOutput{}, fmt.Errorf("escalate: executor is nil")
+	}
+	if ledger == nil {
+		return RespondOutput{}, fmt.Errorf("escalate: ledger is nil")
 	}
 	if strings.TrimSpace(sessionID) == "" {
 		return RespondOutput{}, fmt.Errorf("escalate: session id is required")
@@ -46,9 +50,19 @@ func Escalate(
 		UpdatedAt: now,
 	}
 
-	report, _, err := executor.Execute(ctx, run)
+	report, evidence, err := executor.Execute(ctx, run)
 	if err != nil {
 		return RespondOutput{}, fmt.Errorf("execute run: %w", err)
+	}
+
+	if err := ledger.Put(ctx, DiagnosticRecord{
+		RunID:     run.ID,
+		SessionID: sessionID,
+		Question:  question,
+		Report:    report,
+		Evidence:  evidence,
+	}); err != nil {
+		return RespondOutput{}, fmt.Errorf("put run ledger: %w", err)
 	}
 
 	return RespondOutput{

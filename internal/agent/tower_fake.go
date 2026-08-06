@@ -14,11 +14,14 @@ import (
 // 测试用 Tower：用 Decide 选动作，不调 LLM
 // Decide 为 nil 时默认 reply，内容为「基线：」+ 用户原文
 // 支持 call_tool：需 Dispatcher；CallTool 提供工具提议；Decide 可按调用次数切换动作
+// escalate 与触顶自动升格经 session.Escalate，须提供 Executor 与 Ledger
 type FakeTowerResponder struct {
 	// 为 escalate / call_tool 发编号
 	Factory *core.Factory
 	// 正式诊断入口；仅 escalate 时使用
 	Executor session.RunExecutor
+	// 正式诊断结果账本；escalate 时必填
+	Ledger session.RunLedger
 	// 基线 tool 环；nil 时 call_tool 返回错误
 	Dispatcher *tools.Dispatcher
 	// 可选；返回 action（reply|call_tool|escalate）、content、question
@@ -73,7 +76,7 @@ func (f *FakeTowerResponder) Respond(ctx context.Context, in session.RespondInpu
 			if toolRounds >= maxRounds {
 				// 与真 Tower 对齐：触顶自动 escalate，禁止预算错误甩给用户
 				q := strings.TrimSpace(in.UserText)
-				return session.Escalate(ctx, f.Factory, f.Executor, in.SessionID, q)
+				return session.Escalate(ctx, f.Factory, f.Executor, f.Ledger, in.SessionID, q)
 			}
 			if err := f.executeCallTool(ctx); err != nil {
 				return session.RespondOutput{}, err
@@ -85,7 +88,7 @@ func (f *FakeTowerResponder) Respond(ctx context.Context, in session.RespondInpu
 			if q == "" {
 				q = in.UserText
 			}
-			return session.Escalate(ctx, f.Factory, f.Executor, in.SessionID, q)
+			return session.Escalate(ctx, f.Factory, f.Executor, f.Ledger, in.SessionID, q)
 
 		default:
 			return session.RespondOutput{}, fmt.Errorf("fake tower: unknown action %q", action)

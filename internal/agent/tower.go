@@ -3,7 +3,7 @@
 // 支持 reply / call_tool / escalate：
 // - reply：直接自然语言，Mode=baseline，无 Run
 // - call_tool：经 Dispatcher 取观察（Task.RunID 空），回喂后再决策，不落 Message
-// - escalate：Factory 建 Run，经 RunExecutor 走诊断管道
+// - escalate：Factory 建 Run，经 RunExecutor 走诊断管道，成功后写入 RunLedger
 //
 // 轮内 tool 中间态仅在本轮内存；call_tool 依赖可选 Dispatcher，nil 时禁止该动作
 // 业务级重试：单次决策最多 3 次；工具失败不计入业务重试，观察回喂后再决策
@@ -51,6 +51,8 @@ type TowerResponder struct {
 	factory *core.Factory
 	// 正式诊断执行器，escalate 时调用
 	executor session.RunExecutor
+	// 正式诊断结果账本；escalate 成功路径写入
+	ledger session.RunLedger
 	// 基线 tool 环调度器；nil 时不允许 call_tool
 	dispatcher *tools.Dispatcher
 	// 注入 prompt 的工具规格快照（可空切片）
@@ -61,13 +63,14 @@ type TowerResponder struct {
 	baselineMaxToolRounds int
 }
 
-// 组装总控；dispatcher 与 specs 可选
+// 组装总控；client / factory / executor / ledger 必填，dispatcher 与 specs 可选
 // dispatcher == nil 时校验拒绝 call_tool，便于无工具单测
 // specs 为 nil 时按空列表处理；构造时复制切片，调用方后续修改不影响本实例
 func NewTowerResponder(
 	client llm.Client,
 	factory *core.Factory,
 	executor session.RunExecutor,
+	ledger session.RunLedger,
 	dispatcher *tools.Dispatcher,
 	specs []tools.ToolSpec,
 ) (*TowerResponder, error) {
@@ -79,6 +82,9 @@ func NewTowerResponder(
 	}
 	if executor == nil {
 		return nil, errors.New("tower requires a run executor")
+	}
+	if ledger == nil {
+		return nil, errors.New("tower requires a run ledger")
 	}
 	copied := make([]tools.ToolSpec, len(specs))
 	copy(copied, specs)
@@ -95,6 +101,7 @@ func NewTowerResponder(
 		client:                client,
 		factory:               factory,
 		executor:              executor,
+		ledger:                ledger,
 		dispatcher:            dispatcher,
 		specs:                 copied,
 		systemPrompt:          systemPrompt,
@@ -169,7 +176,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		case towerActionCallTool:
 			if toolRounds >= t.baselineMaxToolRounds {
 				// 防死环触顶：升格正式诊断，用户仍拿结果；不暴露内部轮次错误（#18）
-				out, escErr := session.Escalate(ctx, t.factory, t.executor, in.SessionID, in.UserText)
+				out, escErr := session.Escalate(ctx, t.factory, t.executor, t.ledger, in.SessionID, in.UserText)
 				if escErr != nil {
 					return session.RespondOutput{}, escErr
 				}
@@ -188,7 +195,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			if question == "" {
 				question = in.UserText
 			}
-			out, escErr := session.Escalate(ctx, t.factory, t.executor, in.SessionID, question)
+			out, escErr := session.Escalate(ctx, t.factory, t.executor, t.ledger, in.SessionID, question)
 			if escErr != nil {
 				return session.RespondOutput{}, escErr
 			}

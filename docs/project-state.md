@@ -1,60 +1,42 @@
 # 项目当前状态
 
-> 最后更新：2026-08-01（**`0.1.0-beta5-fix-2`** 已关闭并归档）
+> 最后更新：2026-08-06（**`0.1.0-beta6`** 进行中；步骤 1 Run 账本落地中）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta5-fix-2` / 基线浅查与环境可见性** ✅ 完成并归档（2026-08-01 关闭 · **修复型**）：证据纪律 + 基线 `cluster_resources` recon + 默认 12 轮 tool / 触顶自动 escalate（#50/#52/#53）；smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta5-fix-2/`。
+**`0.1.0-beta6` / 按 run 深解**（进行中）：正式诊断结束后进程内可按 `RunID` 读回 `Report` + `Evidence`，供同会话深解追问。plan 在笔记 `plan/0.1.0-beta6/`。
 
-**`0.1.0-beta5-fix-1` / 基线观察回喂** ✅ 完成并归档（2026-07-30 关闭 · **修复型**）：Tower/Resolver 注入 `Evidence.Raw` + 共享预算 / `rawTruncated`（#18）；#45–#48；smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta5-fix-1/`。T-obs-3 Summary 人读仍为候选。
+**`0.1.0-beta5-fix-2` / 基线浅查与环境可见性** ✅ 完成并归档（2026-08-01 关闭 · **修复型**）：证据纪律 + 基线 `cluster_resources` recon + 默认 12 轮 tool / 触顶自动 escalate（#50/#52/#53）。plan 在笔记 `plan/archive/0.1.0-beta5-fix-2/`。
 
-**`0.1.0-beta5` / Session + Tower 智能基线** ✅ 完成并归档（2026-07-30 关闭）：入口 `Session.Turn` → **Tower（默认总控）**；需要根因时 **escalate → Orchestrator.Execute**；CLI `aruing chat`；L0/L1/L2 compact + `ModeCheckpoint`（#18）。plan 在笔记 `plan/archive/0.1.0-beta5/`。
+**`0.1.0-beta5-fix-1` / 基线观察回喂** ✅ 完成并归档（2026-07-30 关闭 · **修复型**）：Tower/Resolver 注入 `Evidence.Raw` + 共享预算 / `rawTruncated`（#18）；#45–#48。plan 在笔记 `plan/archive/0.1.0-beta5-fix-1/`。T-obs-3 Summary 人读仍为候选。
 
-前置：
+**`0.1.0-beta5` / Session + Tower 智能基线** ✅ 完成并归档（2026-07-30 关闭）：入口 `Session.Turn` → **Tower**；escalate → Orchestrator；`aruing chat`；L0/L1/L2 + `ModeCheckpoint`（#18）。plan 在笔记 `plan/archive/0.1.0-beta5/`。
 
-- `0.1.0-beta4` 诊断信息全景 ✅ 完成并归档（2026-07-28 关闭）
-- `0.0.1-beta3` 调查循环 ✅
-- `0.0.1-beta2` 真实闭环 ✅
-- `0.0.1-beta1` 最小假闭环 ✅
+前置：`0.1.0-beta4` / `0.0.1-beta3` / `0.0.1-beta2` / `0.0.1-beta1` 均已关闭。
 
 ## 工作单元
 
 | # | 模块 | 状态 | 备注 |
 | - | --- | --- | --- |
-| 1 | LLM 客户端 | ✅ | PR #3 `internal/llm`，OpenAI 兼容客户端 + JSON 输出 + 重试 |
-| - | PR-Agent 自动评审基建 | ✅ | PR #4 计划外插入，每个 PR 自动评审 |
-| 3 | Parser | ✅ | PR #5 `dc09495` 接 LLM；PR #6 `8fad9ea` 补 ref 校验 + 业务重试 |
-| - | 仓库文档规范 skill | ✅ | PR #7 `aruing-docs` skill |
-| - | PR 描述规范 skill | ✅ | PR #9 `aruing-pr-description` skill |
-| 2 | Kubernetes 工具 | ✅ | `ToolSpec` + `Registry.Specs` + 单一 shell-less `k8s` Tool（argv 直调 kubectl）；#4a 起 wiring 可按需注册 |
-| 4 | Resolver | ✅ #4a+#4b | 方案 A：编排可见定位循环 + `ResolveDriver`；`LLMResolver`；`FakeResolver`；Policy + 可选 k8s 注册 |
-| 5 | Planner | ✅ | `LLMPlanner`：单次 `Plan` + `Registry.Specs`；业务重试 |
-| 6 | Verifier | ✅ | `LLMVerifier`：单次 `Verify`；只引用已登记 Evidence |
-| 7 | Reporter | ✅ | `LLMReporter`：单次 `Report`；结论对齐 Verdict |
-| 8 | 配置层 | ✅ | `internal/config`：`Load`/`LoadFrom` 收敛 env；CLI `formatRunError` 最小 L-8 |
-| R-1 | CLI Markdown 渲染 | ✅ | PR #19 `renderMarkdown`；默认 Markdown，`--format json` 保留 |
-| 多轮-1～4b | 调查循环 | ✅ | `PlanState` + `investigateLoop` + 容错 + 证据明细 |
-| 全景-1～5 | 诊断信息全景 | ✅ | Query/复用/侦察/反思 prompt/DiagnosticPolicy（beta4） |
-| beta5-1 | Session / Message / Turn | ✅ | PR #36：`internal/session`；`MemoryStore`；`Run.SessionID` |
-| beta5-2 | 最小 Tower | ✅ | PR #37：`TowerResponder`；reply/escalate；`tower.md` |
-| beta5-3 | 基线 tool 环 | ✅ | PR #39：空 RunID + `call_tool` 轮内环 |
-| beta5-4 | CLI 接 Turn + Tower | ✅ | PR #40：`aruing chat`；`run` 仍直连 Execute |
-| beta5-5 PR-A | 解释上下文 + 预算压缩 | ✅ | PR #42：prior + L0/L1；去掉 last-N |
-| beta5-5 PR-B | L2 handoff + checkpoint | ✅ | PR #43：`compact.md` + `ModeCheckpoint` |
-| beta5-5 PR-C | locate + rehydrate | 候选 | 压缩后 Store 范围回灌；关 beta5 时未做 |
-| beta5 | Session + Tower | ✅ | 六条完成标志全绿；2026-07-30 关闭 |
-| beta5-fix-1 T-obs-1 | 基线观察回喂 Raw | ✅ #45 | 内存全量 `Evidence.Raw`；注入按预算截断并 `rawTruncated`（#18） |
-| beta5-fix-1 T-obs-2 | 多观察预算治理 | ✅ #46 | 全部 raw 共享预算、优先保新 |
-| beta5-fix-1 T-obs-4 | Resolver raw 预算 | ✅ #47 | 去掉固定 2000 预览，共享预算优先保新（#18） |
-| beta5-fix-1 | 基线观察回喂（fix） | ✅ | 五条完成标志全绿；2026-07-30 关闭；#45–#48 |
-| beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选；关后仍可做 |
-| beta5-fix-2 T-shallow-2 | 基线轻量 recon 注入 | ✅ #50 | 每 Turn ≤1 次 api-resources → `cluster_resources`；同源 parse |
-| beta5-fix-2 T-shallow-1 | Tower 证据纪律 prompt | ✅ #52/#53 | 观察不足不得全局否定；无意图表 |
-| beta5-fix-2 T-shallow-3 | 配额从宽 + 触顶 escalate | ✅ #52/#53 | 默认 12 轮；触顶自动 escalate，禁止用户报错 |
-| beta5-fix-2 T-shallow-4 | 文档 + smoke 收尾 | ✅ 本 PR | 关里程碑；计数回归 + 空 Ingress≠终局 smoke |
-| beta5-fix-2 | 基线浅查与环境可见性（fix） | ✅ | 六条完成标志全绿；2026-08-01 关闭；#50/#52/#53 |
+| 1 | LLM 客户端 | ✅ | PR #3 `internal/llm` |
+| 3 | Parser | ✅ | PR #5 / #6 |
+| 2 | Kubernetes 工具 | ✅ | 单一 shell-less `k8s` Tool |
+| 4 | Resolver | ✅ #4a+#4b | 编排可见定位循环 |
+| 5–7 | Planner / Verifier / Reporter | ✅ | 单次 LLM 调用 |
+| 8 | 配置层 | ✅ | `internal/config` |
+| R-1 | CLI Markdown 渲染 | ✅ | PR #19 |
+| 多轮-1～4b | 调查循环 | ✅ | beta3 |
+| 全景-1～5 | 诊断信息全景 | ✅ | beta4 |
+| beta5 | Session + Tower | ✅ | 2026-07-30 关闭；#36–#40/#42/#43 |
+| beta5-fix-1 | 基线观察回喂 | ✅ | #45–#48 |
+| beta5-fix-2 | 基线浅查与环境可见性 | ✅ | #50/#52/#53 |
+| beta5-5 PR-C | locate + rehydrate | 候选 | 不进 beta6 完成标志 |
+| beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选 |
+| beta6-1 | Run 账本 + escalate 落账 | ⏳ | `RunLedger` + `MemoryRunLedger`；Execute 证据不再丢弃 |
+| beta6-2 | Tower 方案 A 注入加深 | 未开始 | prior/user payload 结构化深材料 |
+| beta6-3 | wiring smoke + 文档收尾 | 未开始 | 关里程碑前 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -62,23 +44,23 @@
 
 ## 下一步
 
-**下一项**：尚未立新里程碑；从 0.1.0 北极星与下列候选现场析出。
+**下一项**：完成 **beta6-1**（本 PR）：进程内 `RunLedger`；escalate 成功 `Put` Report+Evidence；产品 wiring 注入；单测绿。
 
-**功能向候选（不预排）**：
+**本里程碑后续候选（不预排进本 PR）**：
 
-1. **PR-C** locate + rehydrate（压缩后保真解释旧步）
-2. T-obs-3：k8s Summary 人读增强
-3. 按 run 深解（Store / 领域侧拉 Report、证据）
-4. 配置文件化 / 辅助修复 / 持久化 / `waiting_user`
+1. **beta6-2**：Tower 方案 A——加深 prior / 注入结构化深材料（#18 raw 预算）
+2. **beta6-3**：smoke + 完成标志验收 + 关里程碑文档
+3. **PR-C** rehydrate（与深解互补，刻意留下一刀）
+4. T-obs-3 / 配置文件化 / 磁盘持久化 / `waiting_user`
 
-已确认（beta5 交付后仍有效）：
+已确认（beta5 交付后仍有效，beta6 增补）：
 
 1. 入口 `Session.Turn`；**Tower** 每轮必经；诊断 = escalate → Orchestrator
-2. Run = 正式证据账本；非每句必有 Run
-3. 扩展能力/工具，禁止 core 意图枚举；助手回答 vs 正式诊断报告可区分
-4. **`Task.RunID` 可空**：基线 tool 经同一 Dispatcher；空 RunID 不得当 Verdict 证据
-5. **CLI**：`aruing chat` + `run`；进程内 MemoryStore
-6. **#18**：Store 全量；L0/L1/L2 compact + checkpoint；禁止 last-N 静默截肢；基线 tool 触顶内部 escalate，不对用户报预算用尽
+2. Run = 正式证据链；**进程内 `RunLedger` 为 Report/Evidence 读回权威源**（非 Message 字符串）
+3. 扩展能力/工具，禁止 core 意图枚举
+4. **`Task.RunID` 可空**：基线 tool 经同一 Dispatcher；空 RunID 不得当 Verdict 证据、不进 `RunLedger`
+5. **CLI**：`aruing chat` + `run`；进程内 MemoryStore + MemoryRunLedger
+6. **#18**：Store / Ledger 进程内可全量；注入触顶用压缩，禁止 last-N / 只留最近 N 次诊断当能力墙
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`（活跃）与 `plan/archive/`（已关）。
 
@@ -97,6 +79,7 @@
 | --- | --- |
 | 诊断管道 | 线性 `Orchestrator.Execute` 仍是**诊断升格路径**的实现；#15–#17 不变 |
 | 用户侧多轮 | **已落地**：`Session.Turn` + Tower + `aruing chat`（O-1） |
+| 正式诊断读回 | **beta6-1**：`RunLedger` 进程内 Put/Get/ListBySession；不固化 `Execute→Report` 为对外唯一契约 |
 | 会否推倒 core/tools | **否**；Session/Tower + 编排入口，复用 Dispatcher 与扁平 Run 链 |
 | 单轮期禁止事项 | 仍适用于动编排/工具/角色时对照（见笔记 `plan/archive/0.0.1-beta2/2026-7-22.md` §4） |
 

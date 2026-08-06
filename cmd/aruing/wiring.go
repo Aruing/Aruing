@@ -249,7 +249,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 	return orch, nil
 }
 
-// 组装 chat 用的 Session 栈：MemoryStore + TowerResponder + Orchestrator 共用 Dispatcher
+// 组装 chat 用的 Session 栈：MemoryStore + MemoryRunLedger + TowerResponder；Orchestrator 共用 Dispatcher
 // 无 LLM 时硬失败，不用 FakeTower 冒充产品路径
 func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Writer) (*session.Service, error) {
 	if !cfg.LLM.Ready() {
@@ -284,10 +284,12 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 	)
 	configureOrchestrator(orch, toolsGraph.reconEnabled, progress)
 
+	ledger := store.NewMemoryRunLedger()
 	tower, err := agent.NewTowerResponder(
 		client,
 		factory,
 		orch,
+		ledger,
 		toolsGraph.dispatcher,
 		toolsGraph.registry.Specs(),
 	)
