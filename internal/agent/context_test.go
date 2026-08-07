@@ -26,7 +26,7 @@ func TestTowerPayloadHistory(t *testing.T) {
 	raw, err := buildTowerUserPayload(session.RespondInput{
 		UserText: "hi",
 		History:  history,
-	}, view, nil, nil, nil, nil)
+	}, view, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
@@ -49,14 +49,14 @@ func TestTowerPayloadClusterResources(t *testing.T) {
 	}
 	with, err := buildTowerUserPayload(session.RespondInput{UserText: "hi"}, view, nil, nil, nil, []ClusterResource{
 		{Name: "ingressroutes", Kind: "IngressRoute", Namespaced: true, APIGroup: "traefik.io"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}
 	if !strings.Contains(with, "IngressRoute") || !strings.Contains(with, `"cluster_resources"`) {
 		t.Fatalf("want cluster_resources with IngressRoute: %s", with)
 	}
-	without, err := buildTowerUserPayload(session.RespondInput{UserText: "hi"}, view, nil, nil, nil, nil)
+	without, err := buildTowerUserPayload(session.RespondInput{UserText: "hi"}, view, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("payload empty: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestTowerPayloadPrior(t *testing.T) {
 	raw, err := buildTowerUserPayload(session.RespondInput{
 		UserText: "为什么上次那么判断",
 		History:  history,
-	}, view, nil, nil, nil, nil)
+	}, view, nil, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("payload: %v", err)
 	}

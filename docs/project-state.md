@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-06（**`0.1.0-beta6`** ✅ 完成并归档；下一步：0.1.0 候选 / 未排期）
+> 最后更新：2026-08-07（**`0.1.0-beta7`** 压缩后按范围回灌 进行中；步骤 1 已实现待 smoke）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta7` / 压缩后按范围回灌（PR-C）** ⏳ 进行中：全局 compact 丢细节后按用户问题从 Store 定位区间、回灌原文、必要时只压该窗，注入 `rehydrated_messages`。步骤 1（locate/rehydrate/compactRange + Tower 接线）已实现，单测全绿，待真集群 LLM smoke。plan 在笔记 `plan/0.1.0-beta7/`。
 
 **`0.1.0-beta6` / 按 run 深解** ✅ 完成并归档（2026-08-06 关闭）：进程内 `RunLedger` 落账；Tower `prior_run_details` 注入结论+证据（#18 raw 预算）；解释默认 reply；wiring smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta6/`。
 
@@ -37,6 +39,8 @@
 | beta6-1 | Run 账本 + escalate 落账 | ✅ | #55；`RunLedger` + `MemoryRunLedger` |
 | beta6-2 | Tower 方案 A 注入加深 | ✅ | `prior_run_details`；证据 raw 共享预算；解释默认 reply |
 | beta6-3 | wiring smoke + 文档收尾 | ✅ | 空账本单测；chat 诊断→续聊依据 smoke；关里程碑 |
+| beta7-1 | locate + rehydrate + compactRange + Tower 接线 | ⏳ | 已实现单测绿；规则优先+LLM 兜底；待 smoke |
+| beta7-2 | smoke + 文档收尾 | 未开始 | 真 LLM+k8s：长聊压缩后追问能回灌命中 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
@@ -44,9 +48,9 @@
 
 ## 下一步
 
-**下一项**：从 0.1.0 候选中现场析出下一里程碑（未强制排序）。
+**下一项**：beta7 步骤 2——真集群 LLM smoke（长聊压缩后追问「之前某步为什么」能回灌命中原文要点、不 re-escalate），通过后关里程碑。
 
-**0.1.0 候选**（beta6 关闭后仍有效）：
+**0.1.0 候选**（beta7 关闭后仍有效）：
 
 1. **PR-C** rehydrate（与深解互补，刻意留下一刀）
 2. T-obs-3 / 配置文件化 / 磁盘持久化 / `waiting_user`
@@ -107,7 +111,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
-| O-1 | ✅ 用户侧多轮 / Session：beta5 已关；深解 beta6 已关；`aruing chat`；L0–L2 + checkpoint；PR-C rehydrate 候选 |
+| O-1 | ✅ 用户侧多轮 / Session：beta5 已关；深解 beta6 已关；`aruing chat`；L0–L2 + checkpoint；PR-C rehydrate 进行中（beta7，步骤 1 已实现待 smoke） |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。
