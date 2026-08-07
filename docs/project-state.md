@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-07（**`0.1.0-beta7`** 压缩后按范围回灌 进行中；步骤 1 已实现待 smoke）
+> 最后更新：2026-08-07（**`0.1.0-beta7`** 压缩后按范围回灌 进行中；步骤 1 已实现单测绿，smoke 留待步骤 2）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta7` / 压缩后按范围回灌（PR-C）** ⏳ 进行中：全局 compact 丢细节后按用户问题从 Store 定位区间、回灌原文、必要时只压该窗，注入 `rehydrated_messages`。步骤 1（locate/rehydrate/compactRange + Tower 接线）已实现，单测全绿，待真集群 LLM smoke。plan 在笔记 `plan/0.1.0-beta7/`。
+**`0.1.0-beta7` / 压缩后按范围回灌（PR-C）** ⏳ 进行中：全局 compact 丢细节后按用户问题从 Store 定位区间、回灌原文、必要时只压该窗，注入 `rehydrated_messages`。步骤 1（locate/rehydrate/compactRange + Tower 接线）已实现单测绿（PR #59）；真集群 LLM smoke 留待步骤 2。plan 在笔记 `plan/0.1.0-beta7/`。
 
 **`0.1.0-beta6` / 按 run 深解** ✅ 完成并归档（2026-08-06 关闭）：进程内 `RunLedger` 落账；Tower `prior_run_details` 注入结论+证据（#18 raw 预算）；解释默认 reply；wiring smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta6/`。
 
@@ -39,8 +39,8 @@
 | beta6-1 | Run 账本 + escalate 落账 | ✅ | #55；`RunLedger` + `MemoryRunLedger` |
 | beta6-2 | Tower 方案 A 注入加深 | ✅ | `prior_run_details`；证据 raw 共享预算；解释默认 reply |
 | beta6-3 | wiring smoke + 文档收尾 | ✅ | 空账本单测；chat 诊断→续聊依据 smoke；关里程碑 |
-| beta7-1 | locate + rehydrate + compactRange + Tower 接线 | ⏳ | 已实现单测绿；规则优先+LLM 兜底；待 smoke |
-| beta7-2 | smoke + 文档收尾 | 未开始 | 真 LLM+k8s：长聊压缩后追问能回灌命中 |
+| beta7-1 | locate + rehydrate + compactRange + Tower 接线 | ⏳ | 已实现单测绿；规则优先+LLM 兜底；PR #59 待 review |
+| beta7-2 | smoke + 文档收尾 | 未开始 | 真 LLM+k8s：长聊压缩后追问能回灌命中；过则关里程碑 |
 
 替换原则：一次只换一个角色，其他环节继续用假实现，假闭环始终可跑、可测（`make test` 默认无 LLM env，走 fake）。LLM 配置齐全时 wiring 同时启用 LLM 角色链。
 
