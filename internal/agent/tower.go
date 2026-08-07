@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"aruing/internal/core"
@@ -61,6 +62,8 @@ type TowerResponder struct {
 	systemPrompt string
 	// 本轮最多 call_tool 次数，默认 defaultBaselineMaxToolRounds；触顶自动 escalate
 	baselineMaxToolRounds int
+	// 可选进度/调试输出（默认 Discard）；verbose 时 CLI 传入 stderr
+	progress io.Writer
 }
 
 // 组装总控；client / factory / executor / ledger 必填，dispatcher 与 specs 可选
@@ -106,6 +109,7 @@ func NewTowerResponder(
 		specs:                 copied,
 		systemPrompt:          systemPrompt,
 		baselineMaxToolRounds: defaultBaselineMaxToolRounds,
+		progress:              io.Discard,
 	}, nil
 }
 
@@ -116,6 +120,26 @@ func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
 		return
 	}
 	t.baselineMaxToolRounds = n
+}
+
+// 设置进度/调试输出；nil 时回退 Discard
+func (t *TowerResponder) SetProgress(w io.Writer) {
+	if t == nil {
+		return
+	}
+	if w == nil {
+		t.progress = io.Discard
+		return
+	}
+	t.progress = w
+}
+
+// 写一行进度；默认无输出
+func (t *TowerResponder) progressf(format string, args ...any) {
+	if t == nil || t.progress == nil {
+		return
+	}
+	fmt.Fprintf(t.progress, format+"\n", args...)
 }
 
 // 看历史与当前句，在 reply / call_tool / escalate 间决策；写库由 session.Service.Turn 负责
@@ -137,6 +161,8 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		return session.RespondOutput{}, errors.New("tower requires user text")
 	}
 
+	t.progressf("tower: session=%s history=%d user_chars=%d", in.SessionID, len(in.History), len(in.UserText))
+
 	view, err := prepareTowerContext(
 		ctx,
 		t.client,
@@ -148,6 +174,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	if err != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower context: %w", err)
 	}
+	t.progressf("tower: context_ready hist=%d checkpoint=%v", len(view.Hist), view.CheckpointContent != "")
 
 	// 本会话正式诊断深材料（Report + Evidence）；权威源 RunLedger，非 Message 摘要
 	records, listErr := t.ledger.ListBySession(ctx, in.SessionID)
@@ -155,9 +182,11 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		return session.RespondOutput{}, fmt.Errorf("tower list diagnostic runs: %w", listErr)
 	}
 	priorRuns := buildPriorRunDetails(records, defaultPriorEvidenceBudgetTokens)
+	t.progressf("tower: prior_run_details=%d", len(priorRuns))
 
 	// 每 Turn 一次；与正式管道 recon 同源解析；空 RunID，不进 Evidence 账本
 	clusterResources := t.fetchBaselineClusterResources(ctx)
+	t.progressf("tower: cluster_resources=%d", len(clusterResources))
 
 	var observations []towerObservation
 	toolRounds := 0
@@ -167,10 +196,12 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
 		}
 
+		t.progressf("tower: decide obs=%d tool_rounds=%d", len(observations), toolRounds)
 		decision, err := t.decide(ctx, in, view, priorRuns, observations, clusterResources)
 		if err != nil {
 			return session.RespondOutput{}, err
 		}
+		t.progressf("tower: action=%s", decision.Action)
 
 		switch decision.Action {
 		case towerActionReply:
@@ -183,6 +214,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		case towerActionCallTool:
 			if toolRounds >= t.baselineMaxToolRounds {
 				// 防死环触顶：升格正式诊断，用户仍拿结果；不暴露内部轮次错误（#18）
+				t.progressf("tower: tool budget exhausted, escalate")
 				out, escErr := session.Escalate(ctx, t.factory, t.executor, t.ledger, in.SessionID, in.UserText)
 				if escErr != nil {
 					return session.RespondOutput{}, escErr
@@ -190,6 +222,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 				out.CheckpointContent = view.CheckpointContent
 				return out, nil
 			}
+			t.progressf("tower: call_tool %s", decision.ToolCall.ToolName)
 			obs, execErr := t.executeBaselineTool(ctx, decision.ToolCall)
 			if execErr != nil {
 				return session.RespondOutput{}, execErr
@@ -202,6 +235,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			if question == "" {
 				question = in.UserText
 			}
+			t.progressf("tower: escalate question_chars=%d", len(question))
 			out, escErr := session.Escalate(ctx, t.factory, t.executor, t.ledger, in.SessionID, question)
 			if escErr != nil {
 				return session.RespondOutput{}, escErr
@@ -308,17 +342,30 @@ func (t *TowerResponder) decide(
 		}
 		var out towerLLMOutput
 		if gErr := t.client.GenerateJSON(ctx, req, &out); gErr != nil {
+			// 空正文与 JSON 解析失败可业务重试（兼容网关偶发坏包）；其它错误直接失败
+			if errors.Is(gErr, llm.ErrJSONParse) || errors.Is(gErr, llm.ErrEmptyResponse) {
+				lastValidateErr = gErr
+				t.progressf("tower: decide attempt %d/%d: recoverable LLM error: %v",
+					attempt+1, maxTowerAttempts, gErr)
+				continue
+			}
 			return towerDecision{}, fmt.Errorf("tower decide with LLM: %w", gErr)
 		}
 		if vErr := t.validateTowerDecision(out); vErr != nil {
 			lastOut = out
 			lastValidateErr = vErr
+			t.progressf("tower: decide attempt %d/%d: invalid decision: %v",
+				attempt+1, maxTowerAttempts, vErr)
 			continue
 		}
 		return t.mapTowerDecision(out), nil
 	}
-	return towerDecision{}, fmt.Errorf("%w: last error: %v, last output: %+v",
-		ErrLLMOutputInconsistent, lastValidateErr, lastOut)
+	if lastValidateErr != nil {
+		// 双 %w：上层可 Is(ErrLLMOutputInconsistent) 与 Is(ErrJSONParse/ErrEmptyResponse)
+		return towerDecision{}, fmt.Errorf("%w: last error: %w, last output: %+v",
+			ErrLLMOutputInconsistent, lastValidateErr, lastOut)
+	}
+	return towerDecision{}, fmt.Errorf("%w: last output: %+v", ErrLLMOutputInconsistent, lastOut)
 }
 
 // 校验决策：依赖本实例的 dispatcher / specs

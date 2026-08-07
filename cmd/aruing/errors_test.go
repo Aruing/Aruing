@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"aruing/internal/agent"
+	"aruing/internal/llm"
 )
 
 // ErrLLMOutputInconsistent 应附带模型/prompt 处置提示
@@ -24,6 +25,30 @@ func TestFormatRunErrorInconsistent(t *testing.T) {
 		t.Fatalf("missing hint: %v", err)
 	}
 	if !strings.Contains(err.Error(), "模型输出") {
+		t.Fatalf("unexpected hint: %v", err)
+	}
+}
+
+func TestFormatRunErrorEmptyResponse(t *testing.T) {
+	t.Parallel()
+
+	err := formatRunError(fmt.Errorf("tower decide with LLM: %w", llm.ErrEmptyResponse))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if !strings.Contains(err.Error(), "空正文") {
+		t.Fatalf("unexpected hint: %v", err)
+	}
+}
+
+func TestFormatRunErrorJSONParse(t *testing.T) {
+	t.Parallel()
+
+	err := formatRunError(fmt.Errorf("tower: %w", llm.ErrJSONParse))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if !strings.Contains(err.Error(), "JSON") {
 		t.Fatalf("unexpected hint: %v", err)
 	}
 }

@@ -16,6 +16,14 @@ import (
 	"time"
 )
 
+// 空正文：供应商返回 200 但 choices 内容为空（兼容网关 / 截断常见）
+// 调用方可 errors.Is 识别；客户端 do 在仍有重试次数时会自动重试
+var ErrEmptyResponse = errors.New("llm empty response")
+
+// 模型正文无法解析为 JSON（含 extract 后仍非法）
+// GenerateJSON 包装此 sentinel，便于 Tower 等业务层对可恢复解析失败做重试
+var ErrJSONParse = errors.New("llm json parse")
+
 // 一次生成请求，承载组装好的 prompt
 //
 // System 放角色约束、输出格式说明等稳定指令；User 放待处理的用户输入或证据数据

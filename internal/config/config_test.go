@@ -14,6 +14,7 @@ func TestLoadFrom(t *testing.T) {
 		"ARUING_LLM_MODEL":             " gpt-test ",
 		"ARUING_KUBECTL_PATH":          " /usr/bin/kubectl ",
 		"ARUING_ALLOW_DIAGNOSTIC_EXEC": " true ",
+		"ARUING_DEBUG":                 " 1 ",
 		"IGNORED":                      "x",
 	}
 	cfg := LoadFrom(func(k string) string { return env[k] })
@@ -32,6 +33,9 @@ func TestLoadFrom(t *testing.T) {
 	}
 	if !cfg.Tools.AllowDiagnosticExec {
 		t.Error("AllowDiagnosticExec = false, want true")
+	}
+	if !cfg.Debug {
+		t.Error("Debug = false, want true")
 	}
 	if !cfg.LLM.Ready() {
 		t.Error("Ready = false, want true")

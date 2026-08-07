@@ -296,6 +296,10 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 	if err != nil {
 		return nil, fmt.Errorf("build tower: %w", err)
 	}
+	// 调试进度：ARUING_DEBUG 或 CLI --verbose 时 progress 已是 stderr；否则 Discard
+	if cfg.Debug {
+		tower.SetProgress(progress)
+	}
 
 	return session.NewService(store.NewMemoryStore(), factory, tower), nil
 }
