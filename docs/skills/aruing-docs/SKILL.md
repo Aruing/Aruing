@@ -19,7 +19,8 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 
 | 路径 | 受众 | 内容 | 不放什么 |
 | --- | --- | --- | --- |
-| `README.md` | 所有人 | 项目定位、目标、核心数据流一行图、快速开始、文档入口链接 | 架构细节、阶段状态（链接到对应 docs） |
+| `README.md` | 所有人（默认英文） | 项目定位（突出 agent + 工具取证）、核心数据流、快速开始、文档入口；顶部语言切换 | 架构细节、阶段状态（链接到对应 docs） |
+| `README.zh-CN.md` | 中文读者 | 与英文 README 同结构的中文版 | 同上 |
 | `docs/README.md` | 人 | docs/ 与笔记仓的简短分工说明 | 完整规范（在 aruing-docs skill 内） |
 | `docs/architecture.md` | 开发者 + AI | 架构事实快照：诊断流程图、模块职责表、核心数据结构字段一览、信任边界、数据关联、硬约束清单 | 设计推理、备选方案、历史变迁 |
 | `docs/project-state.md` | AI + 维护者 | 当前阶段、工作单元状态表、已完成 PR、下一步、当前硬约束摘要、预留问题入口 | 详细预留问题表（在笔记仓） |
@@ -27,18 +28,21 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 
 ## 各文档内容约束
 
-### `README.md`
+### `README.md` / `README.zh-CN.md`
+
+- 默认展示 **英文** `README.md`；顶部 `[English](README.md) | [中文](README.zh-CN.md)`，中文正文在 `README.zh-CN.md`
+- 两语结构对齐；对外叙事突出 **agent + tool-driven evidence**（不是普通 chatbot）
 
 固定部分（按顺序）：
 
-1. 项目一句话定位
-2. 当前阶段（如 `0.0.1-beta2 / 真实闭环`）
+1. 项目一句话定位（agent / 工具 / 证据）
+2. 当前阶段
 3. 核心数据流一行图（Run → Query → Target → Hypothesis → Task → Evidence → Verdict → Report）
 4. 快速开始（`make build` / `make test` / `aruing run ...`）
 5. 关键约束摘要（3~5 条，链接到 `docs/architecture.md`）
 6. 文档入口（链接到 `docs/` 和 `arui-note`）
 
-长度：50~80 行。不放架构细节、不放阶段计划
+长度：约 50~100 行。不放架构细节、不放阶段计划
 
 ### `docs/architecture.md`
 
@@ -97,7 +101,7 @@ description: Use when <触发条件>. Triggered by <示例任务>.
 
 ## 写法要求
 
-- 仓库文档以中文为主，关键术语保留英文（如 `Run`、`Query`、`Evidence`）
+- 仓库文档以中文为主（`docs/architecture.md`、`project-state.md` 等），关键术语保留英文（如 `Run`、`Query`、`Evidence`）；**对外 README 默认英文**，中文见 `README.zh-CN.md`
 - 只放当前事实，不放设计推理、讨论过程、备选方案
 - AI 看的文档前 20 行必须能让工具抓住本质：项目是什么、当前阶段、下一步
 - 表格 / 列表优先，避免长段落
@@ -119,7 +123,7 @@ description: Use when <触发条件>. Triggered by <示例任务>.
 | 新增 / 修改 / 删除硬约束 | `architecture.md` 硬约束段；若是关键的 3~5 条，同步 `README.md` 关键约束摘要 + `project-state.md` 当前硬约束摘要段 | 三处联动 |
 | 改信任边界（如新增证据来源类型） | `architecture.md` 信任边界段 | 同步 |
 | 完成工作单元 | `project-state.md` 工作单元表 + 已完成 PR 列表 + 下一步 | 三处同步 |
-| 阶段切换（如 beta2 → beta3） | `project-state.md`（重写）+ `README.md` 当前阶段段 | 两处联动 |
+| 阶段切换（如 beta2 → beta3） | `project-state.md`（重写）+ `README.md` / `README.zh-CN.md` 当前阶段段 | 三处联动 |
 | 创建 / 修改 skill | 本 skill 的 §Skill 自身规范；若改的是文档规范本身，同步本 skill | 遵守元规范 |
 
 不确定某项改动是否影响文档时，**先在 PR 描述里说明**（"本 PR 不影响架构文档，因为 ..."），让 reviewer 显式确认，而不是默认漏改。
