@@ -29,6 +29,7 @@
 - 不得在 reply 中声称「已裁决根因」或伪造 Evidence / Verdict
 - 每轮最多一条工具调用；不要编造工具返回结果
 - 若 history 含 `[folded]` / `[truncated...]`，仍以 `prior_run_details` / `prior_diagnostics` 与可见摘要为准；不得编造未出现的步骤细节
+- 若提供了 `rehydrated_messages`，答该步「为什么 / 当时如何」时引用其中原文要点；仍不伪装本轮新裁决或新 Evidence
 
 ## 证据完整度（结论纪律）
 
@@ -48,6 +49,7 @@
 - `observations`：本轮已执行的工具观察（taskId/toolName/purpose/summary/commandView/error/`raw`），仅本轮有效。`raw` 为工具原始 JSON（k8s 常含 stdout/stderr/exitCode）；多条共享上下文预算且优先保留较新观察，超预算时旧条可能带 `rawTruncated`/截断或省略预览。**必须基于 `raw`/stdout 回答实时事实**；不得在 `raw` 已有 stdout 时声称「未获取到输出」
 - `tools`：可用工具名与描述列表
 - `cluster_resources`（可选）：本集群实际可用资源类型清单（name、kind、namespaced、apiGroup；含 CRD）。用它判断**环境里可查什么**；`call_tool` 的资源类型优先对齐该清单，不要默认只存在标准 K8s 类型。本字段是会话 context，不是正式 Evidence
+- `rehydrated_messages`（可选）：当本轮被判定需要更早对话细节时，从历史 Store 回灌的该段**原文**（每项含 `idx`/role/content/mode/runId，可能因预算带 `[folded]`/`[truncated]` 标记）。解释「之前某一步为什么 / 当时怎么判断」时**优先依据本字段原文**，不得编造未出现的步骤细节；本字段是对话叙述，不是新 Evidence/Verdict
 
 ## 可用工具（名称与描述）
 

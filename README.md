@@ -18,7 +18,7 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-Version **`0.1.0`** — *askable diagnostic assistant* (in progress). Milestone **`0.1.0-beta6`** (deep follow-up by run) **closed**.
+Version **`0.1.0`** — *askable diagnostic assistant* (in progress). Milestone **`0.1.0-beta7`** (post-compaction range rehydrate) **in progress**; `0.1.0-beta6` (deep follow-up by run) closed.
 
 - `aruing run` — single-shot diagnosis via linear Orchestrator  
 - `aruing chat` — multi-turn Session + Tower (LLM required); escalate when root cause is needed; successful escalate writes `RunLedger`; follow-ups inject `prior_run_details` (explain via reply by default)  

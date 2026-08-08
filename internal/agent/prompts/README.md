@@ -11,5 +11,6 @@
 - `reporter.md`：生成不编造证据的诊断报告
 - `tower.md`：会话总控 reply / call_tool / escalate
 - `compact.md`：会话 L2 handoff 压缩（装不进窗口的旧段 → checkpoint 摘要）
+- `locate.md`：压缩后按范围回灌时，从消息大纲语义选出相关区间
 
 提示词不要散落在源码中，除非后续有明确的工程理由

@@ -176,6 +176,16 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}
 	t.progressf("tower: context_ready hist=%d checkpoint=%v", len(view.Hist), view.CheckpointContent != "")
 
+	// 压缩后按范围回灌：视图丢失旧文时，定位相关区间从权威 Store 取原文注入（PR-C，#18）
+	// locate 规则优先、LLM 兜底；命中后 compactRange 压进子预算，作为 rehydrated_messages 注入
+	var rehydrated []rehydratedMsg
+	if viewCompactedAwayDetail(view) {
+		if lo, hi, ok := locateRange(ctx, t.client, in.UserText, in.History); ok {
+			rehydrated = compactRange(rehydrateRange(in.History, lo, hi), defaultRehydrateBudgetTokens)
+			t.progressf("tower: rehydrated=%d range=[%d,%d]", len(rehydrated), lo, hi)
+		}
+	}
+
 	// 本会话正式诊断深材料（Report + Evidence）；权威源 RunLedger，非 Message 摘要
 	records, listErr := t.ledger.ListBySession(ctx, in.SessionID)
 	if listErr != nil {
@@ -197,7 +207,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		}
 
 		t.progressf("tower: decide obs=%d tool_rounds=%d", len(observations), toolRounds)
-		decision, err := t.decide(ctx, in, view, priorRuns, observations, clusterResources)
+		decision, err := t.decide(ctx, in, view, priorRuns, observations, clusterResources, rehydrated)
 		if err != nil {
 			return session.RespondOutput{}, err
 		}
@@ -316,7 +326,7 @@ type towerToolCallJSON struct {
 
 // 调用模型直至得到合法决策或业务重试耗尽
 // priorRuns 为本会话 RunLedger 深材料；clusterResources 为本 Turn 轻量侦察（可空）
-// 二者仅注入 prompt，不写入观察账本
+// rehydrated 为压缩后按范围回灌的原文窗（可空）；三者仅注入 prompt，不写入观察账本
 func (t *TowerResponder) decide(
 	ctx context.Context,
 	in session.RespondInput,
@@ -324,8 +334,9 @@ func (t *TowerResponder) decide(
 	priorRuns []towerPriorRunDetail,
 	observations []towerObservation,
 	clusterResources []ClusterResource,
+	rehydrated []rehydratedMsg,
 ) (towerDecision, error) {
-	userPayload, err := buildTowerUserPayload(in, view, priorRuns, observations, t.specs, clusterResources)
+	userPayload, err := buildTowerUserPayload(in, view, priorRuns, observations, t.specs, clusterResources, rehydrated)
 	if err != nil {
 		return towerDecision{}, fmt.Errorf("tower payload: %w", err)
 	}
@@ -625,9 +636,10 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 组装 user JSON：当前句、历史视图、prior 摘要/深材料、本轮观察、工具列表、可选集群资源类型
+// 组装 user JSON：当前句、历史视图、prior 摘要/深材料、本轮观察、工具列表、可选集群资源类型、可选回灌窗
 // 禁止 last-N 静默截断（#18）；历史超预算见 prepareTowerContext；
-// 观察 raw 见 prepareTowerObservationsForPrompt；prior 证据 raw 见 buildPriorRunDetails
+// 观察 raw 见 prepareTowerObservationsForPrompt；prior 证据 raw 见 buildPriorRunDetails；
+// 回灌窗见 locateRange/rehydrateRange/compactRange（仅 compact 丢细节时注入）
 func buildTowerUserPayload(
 	in session.RespondInput,
 	view towerContextView,
@@ -635,6 +647,7 @@ func buildTowerUserPayload(
 	observations []towerObservation,
 	specs []tools.ToolSpec,
 	clusterResources []ClusterResource,
+	rehydrated []rehydratedMsg,
 ) (string, error) {
 	type toolItem struct {
 		// 工具名
@@ -657,6 +670,9 @@ func buildTowerUserPayload(
 		Tools []toolItem `json:"tools"`
 		// 本集群实际可用资源类型（含 CRD）；基线 context，非正式 Evidence
 		ClusterResources []ClusterResource `json:"cluster_resources,omitempty"`
+		// 压缩后按范围回灌的原文窗（仅当默认视图丢失旧文且定位命中时存在）
+		// 步骤级细节优先依据本字段，不得编造未出现的步骤
+		RehydratedMessages []rehydratedMsg `json:"rehydrated_messages,omitempty"`
 	}
 
 	hist := view.Hist
@@ -683,15 +699,19 @@ func buildTowerUserPayload(
 	if len(clusterResources) == 0 {
 		clusterResources = nil
 	}
+	if len(rehydrated) == 0 {
+		rehydrated = nil
+	}
 
 	raw, err := json.Marshal(payload{
-		UserText:         in.UserText,
-		History:          hist,
-		PriorDiagnostics: priors,
-		PriorRunDetails:  priorRuns,
-		Observations:     observations,
-		Tools:            toolItems,
-		ClusterResources: clusterResources,
+		UserText:           in.UserText,
+		History:            hist,
+		PriorDiagnostics:   priors,
+		PriorRunDetails:    priorRuns,
+		Observations:       observations,
+		Tools:              toolItems,
+		ClusterResources:   clusterResources,
+		RehydratedMessages: rehydrated,
 	})
 	if err != nil {
 		return "", err
