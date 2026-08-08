@@ -18,10 +18,10 @@
 
 ## 当前阶段
 
-版本 **`0.1.0`** / 可追问的诊断助手（进行中）。里程碑 **`0.1.0-beta7`（压缩后按范围回灌）进行中**；`0.1.0-beta6`（按 run 深解）已关闭。
+版本 **`0.1.0`** / 可追问的诊断助手（进行中）。里程碑 **`0.1.0-beta7`（压缩后按范围回灌）已关闭**；`0.1.0-beta6`（按 run 深解）已关闭。
 
 - `aruing run` — 单轮诊断（线性 Orchestrator）  
-- `aruing chat` — 多轮 Session + Tower（须 LLM；需根因时 escalate；成功落 `RunLedger`；同会话追问注入 `prior_run_details`，解释默认 reply）  
+- `aruing chat` — 多轮 Session + Tower（须 LLM；需根因时 escalate；成功落 `RunLedger`；同会话追问注入 `prior_run_details`，解释默认 reply；compact 后按范围回灌 `rehydrated_messages`）  
 
 详见 [`docs/project-state.md`](docs/project-state.md)。
 
