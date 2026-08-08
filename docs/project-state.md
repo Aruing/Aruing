@@ -34,7 +34,7 @@
 | beta5 | Session + Tower | ✅ | 2026-07-30 关闭；#36–#40/#42/#43 |
 | beta5-fix-1 | 基线观察回喂 | ✅ | #45–#48 |
 | beta5-fix-2 | 基线浅查与环境可见性 | ✅ | #50/#52/#53 |
-| beta5-5 PR-C | locate + rehydrate | 候选 | 消息窗回灌；与深解互补 |
+| beta5-5 PR-C | locate + rehydrate | → beta7 | 消息窗回灌；与深解互补（已转 beta7 推进） |
 | beta5-fix-1 T-obs-3 | k8s Summary 人读 | 候选 | 可选 |
 | beta6-1 | Run 账本 + escalate 落账 | ✅ | #55；`RunLedger` + `MemoryRunLedger` |
 | beta6-2 | Tower 方案 A 注入加深 | ✅ | `prior_run_details`；证据 raw 共享预算；解释默认 reply |
@@ -52,8 +52,7 @@
 
 **0.1.0 候选**（beta7 关闭后仍有效）：
 
-1. **PR-C** rehydrate（与深解互补，刻意留下一刀）
-2. T-obs-3 / 配置文件化 / 磁盘持久化 / `waiting_user`
+1. T-obs-3 / 配置文件化 / 磁盘持久化 / `waiting_user`
 
 已确认（beta5–6 交付后仍有效）：
 
@@ -111,7 +110,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ 已收敛到 `internal/config`（#8） |
-| O-1 | ✅ 用户侧多轮 / Session：beta5 已关；深解 beta6 已关；`aruing chat`；L0–L2 + checkpoint；PR-C rehydrate 进行中（beta7，步骤 1 已实现待 smoke） |
+| O-1 | ✅ 用户侧多轮 / Session：beta5 已关；深解 beta6 已关；`aruing chat`；L0–L2 + checkpoint；PR-C rehydrate 进行中（beta7，步骤 1 已实现 PR #59，smoke 留待步骤 2） |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。
