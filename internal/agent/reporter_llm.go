@@ -1,8 +1,8 @@
-// 真实报告器把运行、已完成判断与已登记证据交给大模型，回填系统编号后产出 Report
+// 真实报告器把运行、已完成判断与已登记证据交给大模型，回填系统编号后产出报告
 //
-// 与 FakeReporter 共享同一 Report 边界：一次调用返回完整报告，不在角色内取证或改写判断结果
-// 结论必须覆盖每条 Verdict；result 与 Verdict 一致；evidence_ids 为对应 Verdict 引用的子集
-// Report 的系统编号与创建时间由本模块经 Factory 发放（对齐 LLMParser / LLMPlanner / LLMVerifier）
+// 与假报告器共享同一报告边界：一次调用返回完整报告，不在角色内取证或改写判断结果
+// 结论必须覆盖每条判决；判定结果与判决一致；证据编号为对应判决引用的子集
+// 报告的系统编号与创建时间由本模块经工厂发放（对齐解析、规划、验证等大模型角色）
 package agent
 
 import (
@@ -20,23 +20,23 @@ import (
 //go:embed prompts/reporter.md
 var reporterPrompt string
 
-// 报告业务级重试次数：JSON 合法但语义违规时重新请求
+// 报告业务级重试次数：结构合法但语义违规时重新请求
 const maxReportAttempts = 3
 
 // 用大模型整理诊断报告的报告器
 //
-// 持有不可变依赖（客户端、工厂、prompt），可被多次运行复用
-// 不持有跨运行可变状态；每次 Report 独立发 GenerateJSON
+// 持有不可变依赖（客户端、工厂、提示词），可被多次运行复用
+// 不持有跨运行可变状态；每次报告独立发结构化生成
 type LLMReporter struct {
-	// 大模型客户端，每次 Report 发一次 GenerateJSON
+	// 大模型客户端，每次报告发一次结构化生成
 	client llm.Client
-	// 领域编号与创建时间工厂，回填 Report 时使用
+	// 领域编号与创建时间工厂，回填报告时使用
 	factory *core.Factory
 	// 嵌入的系统提示词全文，构造后只读
 	prompt string
 }
 
-// 创建基于大模型的报告器，prompt 从包内嵌入文件加载
+// 创建基于大模型的报告器，提示词从包内嵌入文件加载
 // 任一依赖缺失直接返回错误，避免运行期才暴露初始化问题
 func NewLLMReporter(client llm.Client, factory *core.Factory) (*LLMReporter, error) {
 	if client == nil {
@@ -50,8 +50,8 @@ func NewLLMReporter(client llm.Client, factory *core.Factory) (*LLMReporter, err
 
 // 请求模型整理报告，校验后回填系统编号与运行绑定
 //
-// 模型若返回结构合法但语义违规的输出（漏结论、改 result、非法证据等），在业务级重试内重新请求；
-// 重试 maxReportAttempts 次仍不合规则返回 ErrLLMOutputInconsistent
+// 模型若返回结构合法但语义违规的输出（漏结论、改判定结果、非法证据等），在业务级重试内重新请求；
+// 重试上限次仍不合规则返回模型输出不一致错误
 func (r *LLMReporter) Report(
 	ctx context.Context,
 	run core.Run,
@@ -84,7 +84,7 @@ func (r *LLMReporter) Report(
 		if strings.TrimSpace(verdict.HypothesisID) == "" {
 			return core.Report{}, fmt.Errorf("verdict[%d] hypothesis id is required", i)
 		}
-		// 与 Verifier / FakeReporter 一致：Verdict 必须带证据；空集无法构造合法结论子集
+		// 与验证器与假报告器一致：判决必须带证据；空集无法构造合法结论子集
 		if len(verdict.EvidenceIDs) == 0 {
 			return core.Report{}, fmt.Errorf("verdict %q requires evidence", verdict.ID)
 		}
@@ -134,13 +134,13 @@ func (r *LLMReporter) Report(
 }
 
 // 序列化报告输入：原始问题、判断与已登记证据摘要
-// 不塞 Evidence.Raw，避免 prompt 过大；判断所需字段以 Verdict 为准
+// 不塞证据原始输出，避免提示词过大；判断所需字段以判决为准
 func buildReporterUserPayload(
 	run core.Run,
 	verdicts []core.Verdict,
 	evidence []core.Evidence,
 ) (string, error) {
-	// 已完成判断的精简视图，约束结论 result 与证据子集
+	// 已完成判断的精简视图，约束结论判定结果与证据子集
 	type verdictView struct {
 		// 判断系统编号
 		ID string `json:"id"`
@@ -153,7 +153,7 @@ func buildReporterUserPayload(
 		// 该判断已引用的证据编号集合
 		EvidenceIDs []string `json:"evidenceIds"`
 	}
-	// 证据摘要视图，不含 Raw 以免撑爆 prompt
+	// 证据摘要视图，不含原始输出以免撑爆提示词
 	type evidenceView struct {
 		// 证据系统编号
 		ID string `json:"id"`
@@ -168,7 +168,7 @@ func buildReporterUserPayload(
 		// 失败错误，成功时可空
 		Error string `json:"error,omitempty"`
 	}
-	// 报告角色完整 user payload
+	// 报告角色完整用户载荷
 	type payload struct {
 		// 用户原始问题
 		Question string `json:"question"`
@@ -189,7 +189,7 @@ func buildReporterUserPayload(
 			HypothesisID: v.HypothesisID,
 			Result:       string(v.Result),
 			Reason:       v.Reason,
-			// 用非 nil 空切片起步，避免 EvidenceIDs 为 nil 时 JSON 编成 null
+			// 用非空指针空切片起步，避免证据编号为空时被编成空值
 			EvidenceIDs: append([]string{}, v.EvidenceIDs...),
 		})
 	}
@@ -223,27 +223,27 @@ type reporterLLMOutput struct {
 	Suggestions []string `json:"suggestions"`
 }
 
-// 模型侧一条结论，须对齐对应 Verdict 的 result 与证据子集
+// 模型侧一条结论，须对齐对应判决的判定结果与证据子集
 type reporterConclusion struct {
 	// 对应猜想系统编号
 	HypothesisID string `json:"hypothesis_id"`
-	// 须与对应 Verdict.Result 一致
+	// 须与对应判决结果一致
 	Result string `json:"result"`
 	// 面向读者的结论理由
 	Reason string `json:"reason"`
-	// 引用的证据编号，须为对应 Verdict.EvidenceIDs 的非空子集
+	// 引用的证据编号，须为对应判决证据编号的非空子集
 	EvidenceIDs []string `json:"evidence_ids"`
 }
 
 // 校验模型输出满足报告契约与信任边界
 //
 // 校验项：
-//   - title / summary 非空
-//   - 每条输入 Verdict 恰好一条 Conclusion，hypothesis 集合一致
-//   - result 与对应 Verdict 一致
-//   - reason 非空
-//   - evidence_ids 非空，且属于对应 Verdict.EvidenceIDs（并存在于输入 Evidence）
-//   - suggestions 各项非空（允许空列表）
+//   - 标题与摘要非空
+//   - 每条输入判决恰好一条结论，猜想集合一致
+//   - 判定结果与对应判决一致
+//   - 理由非空
+//   - 证据编号非空，且属于对应判决证据编号（并存在于输入证据）
+//   - 建议各项非空（允许空列表）
 func validateReporterOutput(
 	out reporterLLMOutput,
 	verdicts []core.Verdict,
@@ -296,7 +296,7 @@ func validateReporterOutput(
 		if strings.TrimSpace(c.Reason) == "" {
 			return fmt.Errorf("conclusion[%d] reason is required", i)
 		}
-		// Verdict 无证据时 fail-fast（正常路径由 Report 入口已拦）；不放宽为空结论
+		// 判决无证据时快速失败（正常路径由报告入口已拦）；不放宽为空结论
 		if len(verdict.EvidenceIDs) == 0 {
 			return fmt.Errorf("verdict for hypothesis %q has no evidence", hypID)
 		}
@@ -340,7 +340,7 @@ func validateReporterOutput(
 	return nil
 }
 
-// 将校验通过的模型输出回填为绑定当前运行的 Report
+// 将校验通过的模型输出回填为绑定当前运行的报告
 func (r *LLMReporter) fillReport(runID string, out reporterLLMOutput) (core.Report, error) {
 	id, err := r.factory.NewID("rep")
 	if err != nil {

@@ -1,16 +1,16 @@
-// 智能体包放诊断过程中的推理角色，以及会话总控 Tower
+// 智能体包放诊断过程中的推理角色，以及会话总控基线塔
 //
 // 这里的智能体先只是进程内的角色边界，不代表独立服务
 // 解析器负责理解问题；定位器通过编排可见循环确认目标；规划器生成猜想和取证任务；
 // 验证器只基于证据判断；报告器把过程整理成人能读的报告
-// Tower 实现 session.Responder：本轮 reply 或 escalate（正式诊断），不在本包写 Message
+// 基线塔实现会话应答器：本轮直接回复或升格正式诊断，不在本包写会话消息
 //
-// Parser / Resolver / Planner / Verifier / Reporter / Tower 已可接 LLM（prompt 经 //go:embed）
-// 定位阶段遵守 architecture #16：角色只提议意图，工具经 Dispatcher 统一执行，ID 由编排发放
-// 规划阶段为单次 Plan 调用，不在角色内多轮调 Tool；Hypothesis/Task 编号经 Factory 在规划器内回填
-// 验证阶段为单次 Verify 调用；Verdict 只能引用已登记 Evidence，编号经 Factory 回填
-// 报告阶段为单次 Report 调用；结论对齐 Verdict，证据引用不得越界，Report 编号经 Factory 回填
-// Tower 本步无基线 tool 环；escalate 经 session.Escalate 建 Run 并调 Execute
+// 解析、定位、规划、验证、报告与基线塔均可接大模型（提示词经嵌入）
+// 定位阶段：角色只提议意图，工具经调度器统一执行，编号由编排发放
+// 规划阶段为单次规划调用，不在角色内多轮调工具；猜想与任务编号经工厂在规划器内回填
+// 验证阶段为单次验证调用；判决只能引用已登记证据，编号经工厂回填
+// 报告阶段为单次报告调用；结论对齐判决，证据引用不得越界，报告编号经工厂回填
+// 升格经会话层建运行并调编排执行
 //
 // 编排器只依赖各角色对调用方暴露的最小能力，不读取角色内部状态；
 // 任务与证据编号由编排边界统一生成，工具与角色不能决定领域实体身份
@@ -36,34 +36,34 @@ type parser interface {
 	Parse(context.Context, core.Run) (core.Query, error)
 }
 
-// 规划阶段的累积状态，类比 ResolveState
+// 规划阶段的累积状态，类比定位状态
 //
-// 进程内传输结构，不作为持久化实体（与 ResolveState 同）
-// 首轮调用时 Evidence/Verdicts 为 nil，行为等价于 beta2 的盲猜单次规划
-// 后续调查循环需要 Round/MaxRounds 时在此结构加字段，不改 Plan 签名
+// 进程内传输结构，不作为持久化实体（与定位状态同）
+// 首轮调用时证据与判决为空，行为等价于早期盲猜单次规划
+// 后续调查循环需要轮次字段时在此结构加字段，不改计划签名
 type PlanState struct {
 	// 当前运行的问题结构，含已回填系统编号的节点
 	Query core.Query
 	// 定位阶段已确认的目标
 	Targets []core.Target
-	// 历次取证累积的证据；首轮为 nil 或定位阶段复用的 seed
+	// 历次取证累积的证据；首轮为空或定位阶段复用的种子
 	Evidence []core.Evidence
-	// 上一次验证结果；首轮为 nil
+	// 上一次验证结果；首轮为空
 	Verdicts []core.Verdict
-	// 集群侦察发现的可用资源类型（含 CRD）；让 Planner 知道集群装了什么可查，而非盲猜标准资源
+	// 集群侦察发现的可用资源类型（含自定义资源）；让规划器知道集群装了什么可查，而非盲猜标准资源
 	ClusterResources []ClusterResource
 }
 
-// 集群侦察发现的资源类型条目（解析自 kubectl api-resources）
-// 精简形态，仅含 Planner 判断「可查什么」所需的字段
+// 集群侦察发现的资源类型条目（解析自集群资源列表命令）
+// 精简形态，仅含规划器判断「可查什么」所需的字段
 type ClusterResource struct {
-	// 资源复数名，如 ingressroutes、services、pods
+	// 资源复数名，如路由入口复数、服务复数、容器组复数
 	Name string `json:"name"`
-	// 资源 Kind，如 IngressRoute、Service、Pod
+	// 资源种类名，如路由入口、服务、容器组
 	Kind string `json:"kind"`
-	// 是否命名空间级（false 表示集群级）
+	// 是否命名空间级（假表示集群级）
 	Namespaced bool `json:"namespaced"`
-	// 所属 API 组（空表示核心组），如 traefik.io、networking.k8s.io
+	// 所属接口组（空表示核心组），如反向代理域、网络接口域
 	APIGroup string `json:"apiGroup,omitempty"`
 }
 
@@ -80,7 +80,7 @@ type taskExecutor interface {
 }
 
 // 描述编排器根据证据形成判断所需的最小能力
-// Query 作为用户原始问题的上下文喂给判断角色，使其能比对证据与用户实际提问
+// 问题结构作为用户原始问题的上下文喂给判断角色，使其能比对证据与用户实际提问
 type verifier interface {
 	// 根据用户问题、猜想、任务和实际证据返回判断列表
 	Verify(context.Context, core.Query, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
@@ -117,15 +117,15 @@ type Orchestrator struct {
 	reporter reporter
 	// 负责为任务、证据和目标分配领域编号和创建时间
 	factory entityFactory
-	// 定位阶段工具调用预算，零值表示使用 defaultResolveMaxRounds
+	// 定位阶段工具调用预算，零值表示使用默认定位轮次上限
 	resolveMaxRounds int
-	// 调查阶段规划轮数预算，零值表示使用 defaultInvestigateMaxRounds
-	// 默认 1 表示只跑一轮，与 beta2 单轮行为等价；多轮-3 调高并改 prompt 后才真正迭代
+	// 调查阶段规划轮数预算，零值表示使用默认调查轮次上限
+	// 默认一轮，与早期单轮行为等价；调高并改多轮提示词后才真正迭代
 	investigateMaxRounds int
-	// 是否启用集群侦察；wiring 在 k8s 工具注册后开启，避免无集群环境（fake/CI）产生噪音
-	// 关闭时 reconCluster 直接返回 nil，不进入证据链、不打印失败
+	// 是否启用集群侦察；装配层在集群工具注册后开启，避免无集群环境（假实现或持续集成）产生噪音
+	// 关闭时侦察直接返回空，不进入证据链、不打印失败
 	reconEnabled bool
-	// 运行过程进度输出；默认丢弃，CLI 接 stderr 让用户实时看到诊断流程
+	// 运行过程进度输出；默认丢弃，命令行接标准错误让用户实时看到诊断流程
 	progress io.Writer
 }
 
@@ -152,8 +152,8 @@ func NewOrchestrator(
 	}
 }
 
-// 覆盖定位阶段工具调用预算，maxRounds 小于等于 0 时恢复默认值
-// 仅供 wiring 或测试在创建后调整，不影响已在进行的 Execute
+// 覆盖定位阶段工具调用预算，轮数小于等于零时恢复默认值
+// 仅供装配层或测试在创建后调整，不影响已在进行的执行
 func (o *Orchestrator) SetResolveMaxRounds(maxRounds int) {
 	if o == nil {
 		return
@@ -161,8 +161,8 @@ func (o *Orchestrator) SetResolveMaxRounds(maxRounds int) {
 	o.resolveMaxRounds = maxRounds
 }
 
-// 覆盖调查阶段规划轮数预算，maxRounds 小于等于 0 时恢复默认值
-// 仅供 wiring 或测试调整；默认 1 保持单轮行为，调高后配合多轮 prompt 才产生迭代
+// 覆盖调查阶段规划轮数预算，轮数小于等于零时恢复默认值
+// 仅供装配层或测试调整；默认一轮保持单轮行为，调高后配合多轮提示词才产生迭代
 func (o *Orchestrator) SetInvestigateMaxRounds(maxRounds int) {
 	if o == nil {
 		return
@@ -170,8 +170,8 @@ func (o *Orchestrator) SetInvestigateMaxRounds(maxRounds int) {
 	o.investigateMaxRounds = maxRounds
 }
 
-// 设置进度输出目标（通常为 stderr），nil 或不调用则静默
-// 进度只写该 sink，不污染 stdout 报告；写失败被忽略，不影响诊断
+// 设置进度输出目标（通常为标准错误），空或不调用则静默
+// 进度只写该输出，不污染标准输出报告；写失败被忽略，不影响诊断
 func (o *Orchestrator) SetProgress(w io.Writer) {
 	if o == nil {
 		return
@@ -179,8 +179,8 @@ func (o *Orchestrator) SetProgress(w io.Writer) {
 	o.progress = w
 }
 
-// 开关集群侦察；wiring 在 k8s 工具注册后调用 true，无集群环境保持 false
-// 关闭时侦察不尝试、不进证据链、不打印失败，避免无 kubectl 的 fake/CI 环境产生噪音
+// 开关集群侦察；装配层在集群工具注册后开启，无集群环境保持关闭
+// 关闭时侦察不尝试、不进证据链、不打印失败，避免无集群命令的假实现或持续集成环境产生噪音
 func (o *Orchestrator) SetReconEnabled(enabled bool) {
 	if o == nil {
 		return
@@ -188,7 +188,7 @@ func (o *Orchestrator) SetReconEnabled(enabled bool) {
 	o.reconEnabled = enabled
 }
 
-// 向进度 sink 写一行；sink 为 nil 时跳过
+// 向进度输出写一行；输出为空时跳过
 func (o *Orchestrator) progressf(format string, args ...any) {
 	if o == nil || o.progress == nil {
 		return
@@ -196,13 +196,12 @@ func (o *Orchestrator) progressf(format string, args ...any) {
 	fmt.Fprintf(o.progress, format+"\n", args...)
 }
 
-// 工具执行失败的哨兵错误，与合成的 error evidence 一同返回
-// 调用方据此区分「可容忍的工具失败」与「致命错误」；编排层决定容忍/暂停/重试
+// 工具执行失败的哨兵错误，与合成的失败证据一同返回
+// 调用方据此区分「可容忍的工具失败」与「致命错误」；编排层决定容忍、暂停或重试
 var errToolFailed = errors.New("tool execution failed")
 
-// 从一次运行开始依次推进全部角色，成功时返回最终报告
 // 从一次运行开始依次推进全部角色，成功时返回最终报告与调查阶段的全部证据
-// 证据透出供 CLI 渲染调查链；线性 Execute→Report 是最小单轮驱动方式，不是对外长期契约（architecture #15）
+// 证据透出供命令行渲染调查链；线性执行到报告是最小单轮驱动方式，不是对外长期契约
 func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, []core.Evidence, error) {
 	if err := ctx.Err(); err != nil {
 		return core.Report{}, nil, fmt.Errorf("execute run: %w", err)
@@ -220,21 +219,21 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	if err != nil {
 		return core.Report{}, nil, fmt.Errorf("resolve targets: %w", err)
 	}
-	// 集群侦察：发现集群实际可用资源类型（含 CRD），让 Planner 知道集群装了什么
-	// 侦察 Evidence 单独存放，不进 investigateLoop 种子（不漏到 Verifier）；由本方法合并进返回链
+	// 集群侦察：发现集群实际可用资源类型（含自定义资源），让规划器知道集群装了什么
+	// 侦察证据单独存放，不进调查循环种子（不漏到验证器）；由本方法合并进返回链
 	reconEvidence, clusterResources := o.reconCluster(ctx, run.ID)
 	if clusterResources != nil {
 		o.progressf("侦察到 %d 种资源类型", len(clusterResources))
 	}
-	// 调查阶段为编排可见循环：Plan→Execute→Verify，证据不足时带历史证据再 Plan
-	// 默认只跑一轮与 beta2 等价；预算调高后配合 prompt 才真正迭代（architecture #15-#16）
-	// 定位阶段已取的作为首轮 seed 复用，不白查已取信息；侦察证据不在此列
+	// 调查阶段为编排可见循环：计划、执行、验证，证据不足时带历史证据再计划
+	// 默认只跑一轮与早期单轮等价；预算调高后配合提示词才真正迭代
+	// 定位阶段已取的作为首轮种子复用，不白查已取信息；侦察证据不在此列
 	evidence, verdicts, err := o.investigateLoop(ctx, query, targets, resolveEvidence, clusterResources)
 	if err != nil {
 		return core.Report{}, nil, err
 	}
 	// 按时间序组装完整证据链：定位 → 侦察 → 调查，全部对用户透明可追溯
-	// Reporter 只看定位+调查证据（侦察是 context，不是结论依据）；返回链含侦察供 CLI 渲染
+	// 报告器只看定位与调查证据（侦察是上下文，不是结论依据）；返回链含侦察供命令行渲染
 	chain := appendEvidence(evidence, reconEvidence, len(resolveEvidence))
 	o.progressf("生成报告…")
 	report, err := o.reporter.Report(ctx, run, verdicts, evidence)
@@ -245,7 +244,7 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 }
 
 // 把侦察证据插入到证据链的定位块之后、调查块之前（按发生时间顺序）
-// resolveCount 为定位阶段证据数量（即 evidence 的前缀长度）；recon 为 nil 时原样返回
+// 定位计数为定位阶段证据数量（即证据切片的前缀长度）；侦察为空时原样返回
 func appendEvidence(evidence []core.Evidence, recon *core.Evidence, resolveCount int) []core.Evidence {
 	if recon == nil {
 		return evidence
@@ -260,17 +259,17 @@ func appendEvidence(evidence []core.Evidence, recon *core.Evidence, resolveCount
 	return chain
 }
 
-// 调查阶段默认规划轮数：1 表示只跑一轮，与 beta2 单轮行为等价
-// 多轮-3 调高 wiring 默认值并改 prompt 后才真正迭代取证
+// 调查阶段默认规划轮数：一轮，与早期单轮行为等价
+// 调高装配默认值并改多轮提示词后才真正迭代取证
 const defaultInvestigateMaxRounds = 1
 
-// 调查阶段循环：Plan→Execute→Verify，证据不足时带历史证据再 Plan
+// 调查阶段循环：计划、执行、验证，证据不足时带历史证据再计划
 //
-// 镜像 resolveLoop 的编排可见模式：累积状态在编排层，角色只返回本轮计划
-// 工具仍经 executeTask/Dispatcher，角色不私自调工具（#16）
-// 三个出口：找到 supported / 预算耗尽 / 后续轮规划器返回空任务
-// seedEvidence 为定位阶段已登证据，作为首轮上下文复用（调查首轮 Planner 能看到）
-// clusterResources 为集群侦察发现，每次 Plan 调用都带入 PlanState
+// 镜像定位循环的编排可见模式：累积状态在编排层，角色只返回本轮计划
+// 工具仍经任务执行与调度器，角色不私自调工具
+// 三个出口：找到被支持的猜想、预算耗尽、后续轮规划器返回空任务
+// 种子证据为定位阶段已登证据，作为首轮上下文复用（调查首轮规划器能看到）
+// 集群资源为侦察发现，每次计划调用都带入规划状态
 func (o *Orchestrator) investigateLoop(
 	ctx context.Context,
 	query core.Query,
@@ -313,14 +312,14 @@ func (o *Orchestrator) investigateLoop(
 		}
 		o.progressf("  规划 %d 个取证任务", len(plan.Tasks))
 
-		// 猜想跨轮累积，Verifier 每轮拿全量重判
+		// 猜想跨轮累积，验证器每轮拿全量重判
 		hypotheses = append(hypotheses, plan.Hypotheses...)
 		for _, task := range plan.Tasks {
 			item, executeErr := o.executeTask(ctx, task)
 			if executeErr != nil && (!errors.Is(executeErr, errToolFailed) || item == nil) {
 				return nil, nil, fmt.Errorf("execute task %q: %w", task.ID, executeErr)
 			}
-			// errToolFailed 时 item 为合成的 error evidence，容忍继续（未来此处可改暂停问用户）
+			// 工具失败时条目为合成的失败证据，容忍继续（未来此处可改暂停问用户）
 			tasks = append(tasks, task)
 			evidence = append(evidence, *item)
 		}
@@ -341,7 +340,7 @@ func (o *Orchestrator) investigateLoop(
 }
 
 // 判断是否存在被证据支持的猜想，存在即已找到根因、循环应结束
-// 全部被排除（refuted）不算完成——应继续生成新猜想，由预算兜底
+// 全部被排除不算完成——应继续生成新猜想，由预算兜底
 func hasSupportedVerdict(verdicts []core.Verdict) bool {
 	for _, v := range verdicts {
 		if v.Result == core.VerdictSupported {
@@ -367,17 +366,17 @@ func summarizeVerdicts(verdicts []core.Verdict) string {
 	return fmt.Sprintf("%d 支持 / %d 排除 / %d 证据不足", supported, refuted, insufficient)
 }
 
-// 集群侦察：经编排的统一执行通道跑一次只读 `kubectl api-resources`，发现集群实际可用资源类型（含 CRD）
+// 集群侦察：经编排的统一执行通道跑一次只读集群资源列表，发现实际可用资源类型（含自定义资源）
 //
-// 与定位/调查同源信任模型：走 executeTask → Dispatcher，Task ID 由 Factory 发放（不硬编码），
-// 产出的 Evidence 进报告链供用户追溯；api-resources 在只读白名单（#12/#16）
+// 与定位、调查同源信任模型：走任务执行与调度器，任务编号由工厂发放（不硬编码），
+// 产出的证据进报告链供用户追溯；资源列表命令在只读白名单内
 // 返回侦察证据与解析后的精简资源清单：
-//   - 成功：Evidence.Summary 为发现摘要，Evidence.Raw 含原始 stdout；resources 为解析结果
-//   - 工具失败：executeTask 合成 error evidence（errToolFailed），透传进链（透明），resources 为 nil
-//   - 无 k8s 工具注册 / Task ID 生成失败：返回 (nil, nil)，根本未尝试，无可展示
+//   - 成功：摘要为发现说明，原始输出含标准输出；资源列表为解析结果
+//   - 工具失败：合成失败证据并透传进链（透明），资源列表为空
+//   - 无集群工具注册或任务编号生成失败：返回空，根本未尝试，无可展示
 //
-// 侦察 Evidence 不进 investigateLoop 的种子切片，因此不漏到 Verifier（侦察是 Planner 的 context，
-// 不是支持或排除猜想的依据）；由 Execute 单独合并进最终返回链
+// 侦察证据不进调查循环的种子切片，因此不漏到验证器（侦察是规划器的上下文，
+// 不是支持或排除猜想的依据）；由执行入口单独合并进最终返回链
 func (o *Orchestrator) reconCluster(ctx context.Context, runID string) (*core.Evidence, []ClusterResource) {
 	if !o.reconEnabled || o.executor == nil || o.factory == nil {
 		return nil, nil
@@ -387,36 +386,36 @@ func (o *Orchestrator) reconCluster(ctx context.Context, runID string) (*core.Ev
 		// 无法发号则放弃侦察，不阻断诊断
 		return nil, nil
 	}
-	// api-resources 为集群级发现，不关联具体 node/target，Refs 为空
+	// 资源列表为集群级发现，不关联具体节点或目标，引用为空
 	task := core.Task{
 		ID:        taskID,
 		RunID:     runID,
 		ToolName:  "k8s",
 		Arguments: json.RawMessage(`{"argv":["api-resources"]}`),
-		Purpose:   "侦察集群可用资源类型（含 CRD）",
+		Purpose:   "侦察集群可用资源类型（含自定义资源）",
 	}
 	item, execErr := o.executeTask(ctx, task)
-	// 仅 ctx 取消等致命错误才放弃；errToolFailed 已带合成 error evidence，透传以保持透明
+	// 仅上下文取消等致命错误才放弃；工具失败已带合成失败证据，透传以保持透明
 	if execErr != nil && (!errors.Is(execErr, errToolFailed) || item == nil) {
 		return nil, nil
 	}
 	if item == nil {
 		return nil, nil
 	}
-	// 解析原始 stdout 得精简清单；失败（含 error evidence 无可用 Raw）时 resources 为 nil
+	// 解析原始标准输出得精简清单；失败（含失败证据无可用原始输出）时资源列表为空
 	resources := parseAPIResources(extractStdout(item.Raw))
 	if execErr != nil {
-		// 工具失败：保留 executeTask 合成的 error evidence，覆写 Summary 标注侦察目的
+		// 工具失败：保留任务执行合成的失败证据，覆写摘要标注侦察目的
 		item.Summary = "侦察集群可用资源类型失败"
 		return item, nil
 	}
 	if len(resources) > 0 {
-		item.Summary = fmt.Sprintf("侦察集群可用资源类型：发现 %d 种（含 CRD）", len(resources))
+		item.Summary = fmt.Sprintf("侦察集群可用资源类型：发现 %d 种（含自定义资源）", len(resources))
 	}
 	return item, resources
 }
 
-// 从 k8s 工具 Evidence.Raw 中取出 stdout 文本；非预期结构返回空串
+// 从集群工具证据原始输出中取出标准输出文本；非预期结构返回空串
 func extractStdout(raw json.RawMessage) string {
 	var parsed struct {
 		Stdout string `json:"stdout"`
@@ -427,19 +426,19 @@ func extractStdout(raw json.RawMessage) string {
 	return parsed.Stdout
 }
 
-// 解析 `kubectl api-resources` 的 stdout（空格/制表分隔的列：NAME SHORTNAMES NAMESPACED KIND [APIVERSION]）
-// 锚定 NAMESPACED 列（恒为 true/false）定位 KIND，规避 SHORTNAMES 为空导致的列错位
-// 精简为 4 字段清单全量送 Planner；仅留 maxKeep 安全帽防病态集群，截断不挑类别（避免硬编码偏见）
+// 解析集群资源列表命令的标准输出（空格或制表分隔的列：名称、短名、是否命名空间级、种类、可选接口版本）
+// 锚定是否命名空间级列（恒为真或假）定位种类，规避短名为空导致的列错位
+// 精简为四字段清单全量送规划器；仅留安全上限防病态集群，截断不挑类别（避免硬编码偏见）
 func parseAPIResources(stdout string) []ClusterResource {
 	const maxKeep = 300
 	var out []ClusterResource
 	for _, line := range strings.Split(stdout, "\n") {
 		fields := strings.Fields(line)
-		// 至少 NAME + NAMESPACED + KIND 三列；跳过表头
+		// 至少名称、是否命名空间级、种类三列；跳过表头
 		if len(fields) < 3 || fields[0] == "NAME" {
 			continue
 		}
-		// 找到 NAMESPACED 列（首个 true/false）；其右一列为 KIND，再右若含 / 即 APIVERSION
+		// 找到是否命名空间级列（首个真或假）；其右一列为种类，再右若含斜杠即接口版本
 		nsIdx := -1
 		for i, f := range fields {
 			if f == "true" || f == "false" {
@@ -467,7 +466,7 @@ func parseAPIResources(stdout string) []ClusterResource {
 }
 
 // 定位阶段循环：驱动提议 → 统一执行工具并发号 → 回喂 → 提交目标
-// 角色不得在此循环外私自调工具；预算耗尽或 fail 动作时返回错误
+// 角色不得在此循环外私自调工具；预算耗尽或失败动作时返回错误
 // 返回定位阶段已登记的证据，供调查阶段复用（不白查已取信息）
 func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]core.Target, []core.Evidence, error) {
 	maxRounds := o.resolveMaxRounds
@@ -555,7 +554,7 @@ func (o *Orchestrator) applyToolCall(ctx context.Context, state *ResolveState, c
 	if err != nil && (!errors.Is(err, errToolFailed) || item == nil) {
 		return fmt.Errorf("execute resolve tool %q: %w", call.ToolName, err)
 	}
-	// errToolFailed 时 item 为合成的 error evidence，容忍继续
+	// 工具失败时条目为合成的失败证据，容忍继续
 
 	state.Tasks = append(state.Tasks, task)
 	state.Evidence = append(state.Evidence, *item)
@@ -566,7 +565,7 @@ func (o *Orchestrator) applyToolCall(ctx context.Context, state *ResolveState, c
 // 执行任务并为证据发放编号与创建时间，定位与调查阶段共用
 //
 // 进度分两段：执行前打印工具与目的（实时反馈，长任务不静默）；
-// 执行后补一行工具返回的命令视图（如 kubectl argv），便于排查模型生成的命令是否合理
+// 执行后补一行工具返回的命令视图（如参数列表），便于排查模型生成的命令是否合理
 func (o *Orchestrator) executeTask(ctx context.Context, task core.Task) (*core.Evidence, error) {
 	if task.Purpose != "" {
 		o.progressf("  执行 %s：%s", task.ToolName, task.Purpose)
@@ -582,7 +581,7 @@ func (o *Orchestrator) executeTask(ctx context.Context, task core.Task) (*core.E
 	}
 	item, executeErr := o.executor.Execute(ctx, task)
 	if executeErr != nil {
-		// 整次 run 被取消才传播；其余工具失败透传给调用方决策
+		// 整次运行被取消才传播；其余工具失败透传给调用方决策
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("execute task %q: %w", task.ID, ctx.Err())
 		}
@@ -608,8 +607,8 @@ func (o *Orchestrator) executeTask(ctx context.Context, task core.Task) (*core.E
 	return item, nil
 }
 
-// 校验并物化提交的目标：NodeID 必须在 Query 内，EvidenceIDs 必须是本阶段已登记编号
-// Target ID 与 CreatedAt 由工厂在编排边界生成
+// 校验并物化提交的目标：节点编号必须在问题内，证据编号必须是本阶段已登记编号
+// 目标编号与创建时间由工厂在编排边界生成
 func (o *Orchestrator) materializeTargets(query core.Query, action ResolveAction, state ResolveState) ([]core.Target, error) {
 	if len(action.Targets) == 0 {
 		return nil, errors.New("submit_targets requires at least one target")

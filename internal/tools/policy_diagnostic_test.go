@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// exec 应被诊断策略放行（不论容器内跑什么二进制）
+// 执行应被诊断策略放行（不论容器内跑什么二进制）
 func TestDiagnosticPolicyExecAllowed(t *testing.T) {
 	t.Parallel()
 	policy := NewDiagnosticPolicy()
@@ -22,7 +22,7 @@ func TestDiagnosticPolicyExecAllowed(t *testing.T) {
 	}
 }
 
-// 非 exec 的读类命令仍走 readonly 放行
+// 非执行的读类命令仍走只读放行
 func TestDiagnosticPolicyReadonlyStillAllowed(t *testing.T) {
 	t.Parallel()
 	policy := NewDiagnosticPolicy()
@@ -32,7 +32,7 @@ func TestDiagnosticPolicyReadonlyStillAllowed(t *testing.T) {
 	}
 }
 
-// 非 exec 的写类命令仍被 readonly 拒绝（exec 放行不波及 apply/delete）
+// 非执行的写类命令仍被只读拒绝（执行放行不波及应用与删除）
 func TestDiagnosticPolicyWriteStillDenied(t *testing.T) {
 	t.Parallel()
 	policy := NewDiagnosticPolicy()
@@ -47,7 +47,7 @@ func TestDiagnosticPolicyWriteStillDenied(t *testing.T) {
 	}
 }
 
-// 非 k8s 工具（fake.* 等）按 readonly 既有宽松放行
+// 非集群工具（伪装工具等）按只读既有宽松放行
 func TestDiagnosticPolicyNonK8sAllowed(t *testing.T) {
 	t.Parallel()
 	policy := NewDiagnosticPolicy()
@@ -57,7 +57,7 @@ func TestDiagnosticPolicyNonK8sAllowed(t *testing.T) {
 	}
 }
 
-// 损坏的 k8s 参数仍由 readonly 兜底拒绝，exec 分支只在可解析时生效
+// 损坏的集群参数仍由只读兜底拒绝，执行分支只在可解析时生效
 func TestDiagnosticPolicyMalformedArgs(t *testing.T) {
 	t.Parallel()
 	policy := NewDiagnosticPolicy()

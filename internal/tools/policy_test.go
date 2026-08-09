@@ -11,7 +11,7 @@ import (
 	"aruing/internal/tools/toolstest"
 )
 
-// 只读策略必须放行常见只读 kubectl 子命令
+// 只读策略必须放行常见只读集群子命令
 func TestReadonlyPolicyAllowK8s(t *testing.T) {
 	policy := tools.NewReadonlyPolicy()
 	cases := [][]string{
@@ -80,13 +80,13 @@ func TestReadonlyPolicyAllowFakeTool(t *testing.T) {
 	}
 }
 
-// 调度器在 Deny 时不得调用工具
+// 调度器在拒绝时不得调用工具
 func TestDispatcherPolicyDeny(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	// 用只读策略 + 伪装成 k8s 的任务名会先 Deny；这里注册一个会 panic 的工具验证未执行
+	// 用只读策略加伪装成集群的任务名会先拒绝；这里注册一个会崩溃的工具验证未执行
 	if err := registry.Register(panicTool{}); err != nil {
 		t.Fatalf("register panic tool: %v", err)
 	}
@@ -101,7 +101,7 @@ func TestDispatcherPolicyDeny(t *testing.T) {
 	requireErrorContains(t, err, "denied by policy")
 }
 
-// 调度器在 Allow 时仍走原有执行路径
+// 调度器在允许时仍走原有执行路径
 func TestDispatcherPolicyAllow(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
@@ -121,7 +121,7 @@ func TestDispatcherPolicyAllow(t *testing.T) {
 	}
 }
 
-// nil policy 退化为全部允许
+// 策略为空时退化为全部允许
 func TestDispatcherNilPolicyAllowAll(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
@@ -146,7 +146,7 @@ func mustJSONArgs(t *testing.T, argv []string) json.RawMessage {
 	return raw
 }
 
-// 若被误调用则失败测试，用于证明 Deny 短路
+// 若被误调用则失败测试，用于证明拒绝短路
 type panicTool struct{}
 
 func (panicTool) Spec() tools.ToolSpec {

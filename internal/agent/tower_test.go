@@ -50,10 +50,10 @@ func newTestFactory(t *testing.T) *core.Factory {
 	return core.NewFactory()
 }
 
-// 与 agent.maxTowerAttempts 对齐（未导出，黑盒测试用字面量）
+// 与基线塔最大尝试次数对齐（未导出，黑盒测试用字面量）
 const maxTowerAttempts = 3
 
-// 假诊断管道：记录收到的 Run，并返回固定报告
+// 假诊断管道：记录收到的运行，并返回固定报告
 type fakeRunExecutor struct {
 	lastRun core.Run
 	report  core.Report
@@ -70,7 +70,7 @@ func (f *fakeRunExecutor) Execute(_ context.Context, run core.Run) (core.Report,
 	return rep, nil, nil
 }
 
-// Fake reply：基线 Mode，无 Run
+// 假塔直接回复：基线模式且无诊断运行
 func TestFakeTowerReply(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
@@ -102,7 +102,7 @@ func TestFakeTowerReply(t *testing.T) {
 	}
 }
 
-// Fake escalate：Run.SessionID 写入，Mode=diagnostic
+// 假塔升格：诊断运行绑定会话编号，模式为诊断
 func TestFakeTowerEscalate(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
@@ -153,7 +153,7 @@ func TestFakeTowerEscalate(t *testing.T) {
 	}
 }
 
-// escalate 且 question 空时回退 UserText
+// 升格且问题字段空时回退用户原文
 func TestFakeTowerEscalateQuestionFallback(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
@@ -182,7 +182,7 @@ func TestFakeTowerEscalateQuestionFallback(t *testing.T) {
 	}
 }
 
-// Fake call_tool 后 reply：经 Dispatcher，RunID 空，最终 baseline 无 Run
+// 假塔先调工具再回复：经调度器取证，最终基线且无诊断运行
 func TestFakeTowerCallToolThenReply(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
@@ -227,7 +227,7 @@ func TestFakeTowerCallToolThenReply(t *testing.T) {
 	}
 }
 
-// call_tool 触顶后自动 escalate，不返回预算错误；question 用用户原文
+// 调用工具触顶后自动升格，不返回预算错误；问题字段用用户原文
 func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
@@ -280,7 +280,7 @@ func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
 	}
 }
 
-// LLM 路径：call_tool 触顶自动 escalate，零用户可见预算错误
+// 大模型路径：工具轮次触顶后自动升格，用户可见内容不含预算错误
 func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"再查"}}`)
@@ -319,7 +319,7 @@ func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 	}
 }
 
-// mock LLM 合法 reply JSON
+// 模拟大模型返回合法回复动作
 func TestTowerLLMReply(t *testing.T) {
 	body := `{"action":"reply","content":"这是概念解释","question":""}`
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -349,11 +349,11 @@ func TestTowerLLMReply(t *testing.T) {
 	}
 }
 
-// 有 prior 诊断时解释追问 → reply，不调用诊断管道
+// 有历史诊断时解释追问应直接回复，不调用诊断管道
 func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
 	var sawUser string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		// 捕获 user 载荷，确认含 prior_diagnostics
+		// 捕获用户载荷，确认含既往诊断
 		var reqBody struct {
 			Messages []struct {
 				Role    string `json:"role"`
@@ -401,7 +401,7 @@ func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
 	}
 }
 
-// mock LLM escalate
+// 模拟大模型返回升格动作
 func TestTowerLLMEscalate(t *testing.T) {
 	body := `{"action":"escalate","content":"","question":"查 demo-api 根因"}`
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -442,7 +442,7 @@ func TestTowerLLMEscalate(t *testing.T) {
 	}
 }
 
-// mock LLM：先 call_tool 再 reply；空 RunID 观察不落 Message
+// 模拟大模型先调工具再回复；空运行编号的观察不落会话消息
 func TestTowerLLMCallToolThenReply(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -488,7 +488,7 @@ func TestTowerLLMCallToolThenReply(t *testing.T) {
 	}
 }
 
-// 非法 action 持续不合规 → ErrLLMOutputInconsistent
+// 非法动作持续不合规应返回模型输出不一致错误
 func TestTowerLLMInvalidActionRetries(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -515,7 +515,7 @@ func TestTowerLLMInvalidActionRetries(t *testing.T) {
 	}
 }
 
-// 非 JSON 正文应业务重试后失败（ErrLLMOutputInconsistent 链上带 ErrJSONParse）
+// 非结构化正文应业务重试后失败，错误链含解析失败
 func TestTowerLLMBadJSONRetries(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -547,7 +547,7 @@ func TestTowerLLMBadJSONRetries(t *testing.T) {
 	}
 }
 
-// 坏 JSON 后成功应返回 reply
+// 坏结构后恢复成功应返回回复内容
 func TestTowerLLMBadJSONThenOK(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -573,7 +573,7 @@ func TestTowerLLMBadJSONThenOK(t *testing.T) {
 	}
 }
 
-// reply 空 content 应业务重试后失败
+// 回复动作为空正文应业务重试后失败
 func TestTowerLLMEmptyReplyContent(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"reply","content":"  "}`)
@@ -591,7 +591,7 @@ func TestTowerLLMEmptyReplyContent(t *testing.T) {
 	}
 }
 
-// 无 dispatcher 时 call_tool 应业务重试失败
+// 无调度器时调用工具应业务重试失败
 func TestTowerLLMCallToolWithoutDispatcher(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"x"}}`)
@@ -634,7 +634,7 @@ func TestNewTowerResponderRequiresDeps(t *testing.T) {
 	}
 }
 
-// Summary 无业务标记、Raw 含唯一串时，第二轮 user JSON 必须回喂该串
+// 摘要无业务标记而原始输出含唯一串时，第二轮用户载荷必须回喂该串
 func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	const mark = "NS_MARK_raw_feed_42"
 	var secondUser string
@@ -688,13 +688,13 @@ func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	if !strings.Contains(secondUser, `"raw"`) {
 		t.Fatalf("payload should include raw field: %s", secondUser)
 	}
-	// Summary 故意无 mark，确保不是从 summary 漏进
+	// 摘要故意无标记，确保不是从摘要漏进
 	if strings.Contains(secondUser, `"summary":"NS_MARK`) {
 		t.Fatal("mark must not appear only via summary")
 	}
 }
 
-// k8s 可用时基线每 Turn 一次 api-resources，payload 含 cluster_resources（含 CRD）
+// 集群工具可用时基线每轮一次资源清单侦察，载荷含集群资源（含自定义资源）
 func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
 	var firstUser string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -743,13 +743,13 @@ func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
 	if !strings.Contains(firstUser, "IngressRoute") {
 		t.Fatalf("payload missing CRD kind IngressRoute: %s", firstUser)
 	}
-	// 正式 escalate 未跑；recon 不落 Run
+	// 正式升格未跑；侦察不落运行
 	if out.RunID != "" {
 		t.Fatalf("baseline recon must not create run: %q", out.RunID)
 	}
 }
 
-// 无 k8s 工具时不尝试侦察，payload 无 cluster_resources
+// 无集群工具时不尝试侦察，载荷无集群资源
 func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 	var userPayload string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -789,7 +789,7 @@ func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 	}
 }
 
-// 侦察工具失败时降级空列表，仍可 reply
+// 侦察工具失败时降级空列表，仍可直接回复
 func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 	var userPayload string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -833,7 +833,7 @@ func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 	}
 }
 
-// Summary 无业务标记；业务事实只在 Raw
+// 摘要无业务标记；业务事实只在原文
 type rawOnlyFakeTool struct {
 	mark string
 }

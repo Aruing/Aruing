@@ -1,8 +1,8 @@
-// 真实规划器把 Query 与已确认 Target 交给大模型，回填系统编号后产出 Plan
+// 真实规划器把问题结构与已确认目标交给大模型，回填系统编号后产出计划
 //
-// 与 FakePlanner 共享同一 Plan 边界：一次调用返回完整猜想与任务，不在角色内多轮调工具
-// 工具规格来自 Registry.Specs 注入，禁止在 prompt 手写第二份工具清单
-// Hypothesis / Task 的系统编号与创建时间由本模块经 Factory 发放（对齐 LLMParser）
+// 与假规划器共享同一计划边界：一次调用返回完整猜想与任务，不在角色内多轮调工具
+// 工具规格来自注册表规格列表注入，禁止在提示词手写第二份工具清单
+// 猜想与任务的系统编号与创建时间由本模块经工厂发放（对齐解析器）
 package agent
 
 import (
@@ -21,26 +21,26 @@ import (
 //go:embed prompts/planner.md
 var plannerPrompt string
 
-// 规划业务级重试次数：JSON 合法但语义违规时重新请求
+// 规划业务级重试次数：结构合法但语义违规时重新请求
 const maxPlanAttempts = 3
 
 // 用大模型生成猜想与取证任务的规划器
 //
-// 持有不可变依赖（客户端、工厂、工具规格快照、prompt），可被多次运行复用
-// 不持有跨运行可变状态；每次 Plan 独立发 GenerateJSON
+// 持有不可变依赖（客户端、工厂、工具规格快照、提示词），可被多次运行复用
+// 不持有跨运行可变状态；每次计划独立发结构化生成
 type LLMPlanner struct {
-	// 大模型客户端，每次 Plan 发一次 GenerateJSON
+	// 大模型客户端，每次计划发一次结构化生成
 	client llm.Client
-	// 领域编号与创建时间工厂，回填 Hypothesis/Task 时使用
+	// 领域编号与创建时间工厂，回填猜想与任务时使用
 	factory *core.Factory
-	// 注册表工具规格快照，用于拼 system prompt 与校验 tool_name
+	// 注册表工具规格快照，用于拼系统提示词与校验工具名
 	specs []tools.ToolSpec
 	// 已注入工具规格的系统提示词全文，构造后只读
 	prompt string
 }
 
 // 创建基于大模型的规划器
-// specs 应为 Registry.Specs() 快照；空列表时仍可构造，但任务 tool_name 将无法通过校验
+// 规格应为注册表规格列表快照；空列表时仍可构造，但任务工具名将无法通过校验
 func NewLLMPlanner(client llm.Client, factory *core.Factory, specs []tools.ToolSpec) (*LLMPlanner, error) {
 	if client == nil {
 		return nil, errors.New("LLM planner requires an llm client")
@@ -62,9 +62,9 @@ func NewLLMPlanner(client llm.Client, factory *core.Factory, specs []tools.ToolS
 
 // 请求模型生成计划，校验后回填系统编号与运行绑定
 //
-// 模型若返回结构合法但语义违规的输出（未知工具、坏 ref 等），在业务级重试内重新请求；
-// 重试 maxPlanAttempts 次仍不合规则返回 ErrLLMOutputInconsistent
-// 首轮 state.Evidence/Verdicts 为 nil，payload 不含这两段，模型输入与 beta2 逐字一致
+// 模型若返回结构合法但语义违规的输出（未知工具、坏引用等），在业务级重试内重新请求；
+// 重试上限次仍不合规则返回模型输出不一致错误
+// 首轮状态中证据与判决为空时，载荷不含这两段，模型输入与早期单轮路径一致
 func (p *LLMPlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
 	if ctx == nil {
 		return Plan{}, errors.New("planner requires a context")
@@ -123,7 +123,7 @@ func (p *LLMPlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
 		ErrLLMOutputInconsistent, lastValidateErr, lastOut)
 }
 
-// 将嵌入 prompt 中的工具规格占位符替换为 JSON 文本
+// 将嵌入提示词中的工具规格占位符替换为结构化文本
 func buildPlannerSystemPrompt(template string, specs []tools.ToolSpec) (string, error) {
 	raw, err := json.MarshalIndent(specs, "", "  ")
 	if err != nil {
@@ -135,20 +135,20 @@ func buildPlannerSystemPrompt(template string, specs []tools.ToolSpec) (string, 
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 序列化规划输入：Query、Targets，以及非空时的历史 Evidence/Verdicts/cluster_resources
-// 用 omitempty，对应为 nil 时不出现，保证首轮无侦察/无历史时模型输入最小
+// 序列化规划输入：问题、目标，以及非空时的历史证据、判决与集群资源
+// 用省略空值，对应为空时不出现，保证首轮无侦察、无历史时模型输入最小
 func buildPlannerUserPayload(state PlanState) (string, error) {
-	// 与 PlanState 字段对齐的 JSON 载荷
+	// 与规划状态字段对齐的用户载荷
 	type payload struct {
 		// 当前问题的开放线索图
 		Query core.Query `json:"query"`
 		// 定位阶段已确认的目标
 		Targets []core.Target `json:"targets"`
-		// 历史证据，首轮常为 nil（omitempty 省略）
+		// 历史证据，首轮常为空（省略空值时省略）
 		Evidence []core.Evidence `json:"evidence,omitempty"`
-		// 历史判断，后续轮用于补查 insufficient
+		// 历史判断，后续轮用于补查证据不足
 		Verdicts []core.Verdict `json:"verdicts,omitempty"`
-		// 集群侦察得到的资源类型列表，无 k8s 工具时为空
+		// 集群侦察得到的资源类型列表，无集群工具时为空
 		ClusterResources []ClusterResource `json:"cluster_resources,omitempty"`
 	}
 	raw, err := json.MarshalIndent(payload(state), "", "  ")
@@ -158,7 +158,7 @@ func buildPlannerUserPayload(state PlanState) (string, error) {
 	return string(raw), nil
 }
 
-// 模型输出的中间结构，只含内容与局部 ref，不含系统编号或时间
+// 模型输出的中间结构，只含内容与局部引用，不含系统编号或时间
 type plannerLLMOutput struct {
 	// 本轮候选猜想列表
 	Hypotheses []plannerHypothesisOut `json:"hypotheses"`
@@ -166,9 +166,9 @@ type plannerLLMOutput struct {
 	Tasks []plannerTaskOut `json:"tasks"`
 }
 
-// 模型侧一条猜想，Ref 仅在本输出内用于任务引用
+// 模型侧一条猜想，引用仅在本输出内用于任务引用
 type plannerHypothesisOut struct {
-	// 局部引用名，任务 refs 可指向它
+	// 局部引用名，任务引用可指向它
 	Ref string `json:"ref"`
 	// 猜想陈述句
 	Statement string `json:"statement"`
@@ -178,28 +178,28 @@ type plannerHypothesisOut struct {
 	ExpectedSignals []string `json:"expected_signals"`
 }
 
-// 模型侧一条工具任务，Ref 仅在本输出内用于 depends_on
+// 模型侧一条工具任务，引用仅在本输出内用于依赖列表
 type plannerTaskOut struct {
 	// 局部任务引用名
 	Ref string `json:"ref"`
 	// 注册表中的工具名
 	ToolName string `json:"tool_name"`
-	// 符合 ToolSpec 的参数 JSON
+	// 符合工具规格的参数
 	Arguments json.RawMessage `json:"arguments"`
 	// 取证目的说明
 	Purpose string `json:"purpose"`
-	// 关联 Node/Target/Hypothesis 的引用（局部 hyp ref 或系统 ID）
+	// 关联节点、目标、猜想的引用（局部猜想引用或系统编号）
 	Refs []string `json:"refs"`
-	// 依赖的其它任务局部 ref，回填时换成系统 Task.ID
+	// 依赖的其它任务局部引用，回填时换成系统任务编号
 	DependsOn []string `json:"depends_on"`
 }
 
 // 校验模型输出满足编排与取证的最小契约
 // 首轮与后续轮的校验规则不同：
-//   - 首轮（followUp=false）：猜想与任务均至少 1 个
-//   - 后续轮（followUp=true）：任务可为空（=规划器宣布查完），猜想可选
+//   - 首轮（非后续）：猜想与任务均至少一项
+//   - 后续轮：任务可为空（等于规划器宣布查完），猜想可选
 //
-// priorHypothesisIDs 为前几轮已登记的猜想系统编号，允许后续轮任务引用现有猜想
+// 既往猜想编号为前几轮已登记的猜想系统编号，允许后续轮任务引用现有猜想
 func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []core.Target, specs []tools.ToolSpec, followUp bool, priorHypothesisIDs []string) error {
 	if !followUp {
 		if len(out.Hypotheses) == 0 {
@@ -243,8 +243,8 @@ func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []cor
 		knownTools[spec.Name] = struct{}{}
 	}
 
-	// 任务 refs 可引用：query / node / edge / target 系统编号 + 本轮 hypothesis 局部 ref
-	// 后续轮还可引用前几轮已登记的猜想系统编号（priorHypothesisIDs）
+	// 任务引用可指向：问题、节点、边、目标系统编号，以及本轮猜想局部引用
+	// 后续轮还可引用前几轮已登记的猜想系统编号
 	knownData := make(map[string]struct{}, 1+len(query.Nodes)+len(query.Edges)+len(targets)+len(hypRefs)+len(priorHypothesisIDs))
 	if query.ID != "" {
 		knownData[query.ID] = struct{}{}
@@ -315,7 +315,7 @@ func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []cor
 	return nil
 }
 
-// 将模型输出回填为绑定当前运行的 Plan
+// 将模型输出回填为绑定当前运行的计划
 func (p *LLMPlanner) fillPlan(runID string, out plannerLLMOutput) (Plan, error) {
 	now := p.factory.Now()
 	hypIDByRef := make(map[string]string, len(out.Hypotheses))
@@ -343,14 +343,14 @@ func (p *LLMPlanner) fillPlan(runID string, out plannerLLMOutput) (Plan, error) 
 	}
 
 	taskIDByRef := make(map[string]string, len(out.Tasks))
-	// 先分配 task 系统编号，再映射 depends_on
-	// 两阶段缓冲：已发号但尚未写入 Plan 的任务
+	// 先分配任务系统编号，再映射依赖列表
+	// 两阶段缓冲：已发号但尚未写入计划的任务
 	type pendingTask struct {
 		// 模型原始任务字段
 		out plannerTaskOut
 		// 已发放的系统任务编号
 		id string
-		// 已把 hyp 局部 ref 映射为系统 ID 后的 Refs
+		// 已把猜想局部引用映射为系统编号后的引用列表
 		refs []string
 	}
 	pending := make([]pendingTask, 0, len(out.Tasks))

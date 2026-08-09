@@ -1,12 +1,12 @@
-// 按范围回灌：全局 compact 丢失旧文后，按用户问题从权威 Store 定位相关区间、
-// 回灌该段原文、必要时只压该窗，作为独立字段注入模型 payload
+// 按范围回灌：全局压缩丢失旧文后，按用户问题从权威存储定位相关区间、
+// 回灌该段原文、必要时只压该窗，作为独立字段注入模型载荷
 //
-// 触发门只看物理事实（视图是否因 compact 丢细节），不猜用户意图，避免漏指代式追问（#18）
-// locate 规则优先（runId 锚定 / 关键词+诊断重叠），规则不中且 client 可用时 LLM 兜底
-// locate / rehydrateRange / compactRange 均为纯函数，不写库、不持状态：
-// 未来换磁盘 Store 或向量检索只换函数内部，外部接线不动（零升级债）
+// 触发门只看物理事实（视图是否因压缩丢细节），不猜用户意图，避免漏指代式追问
+// 定位规则优先（运行编号锚定、关键词与诊断重叠），规则不中且客户端可用时大模型兜底
+// 定位、回灌与窗内压缩均为纯函数，不写库、不持状态：
+// 未来换磁盘存储或向量检索只换函数内部，外部接线不动
 //
-// 回灌的 Message 原文是对话叙述（不可信），不得当新 Evidence/Verdict；权威诊断事实仍在 RunLedger
+// 回灌的消息原文是对话叙述（不可信），不得当新证据或判决；权威诊断事实仍在诊断账本
 package agent
 
 import (
@@ -24,33 +24,33 @@ import (
 var locatePromptTemplate string
 
 const (
-	// 回灌窗注入模型的独立子预算（与 observations / prior evidence 同量级）
-	// 窗内原文超此预算时由 compactRange 折叠/截断到 ≤ 预算，不静默丢段（#18）
+	// 回灌窗注入模型的独立子预算（与观察、先前证据同量级）
+	// 窗内原文超此预算时由区间压缩折叠或截断到预算内，不静默丢段
 	defaultRehydrateBudgetTokens = 8_000
-	// timeline 大纲里每条消息预览的 rune 上限，控制 LLM locate 请求体积
+	// 时间线大纲里每条消息预览的字符上限，控制大模型定位请求体积
 	defaultTimelinePreviewRunes = 80
 )
 
-// 匹配文本里可能的诊断 Run 编号；锚定时再核对是否真实存在于历史
+// 匹配文本里可能的诊断运行编号；锚定时再核对是否真实存在于历史
 var runIDRe = regexp.MustCompile(`run_[0-9a-z]+`)
 
-// 回灌窗内的单条消息，带时间线 idx 便于模型定位是哪一步
+// 回灌窗内的单条消息，带时间线下标便于模型定位是哪一步
 type rehydratedMsg struct {
-	// 在会话历史中的下标（从 0 开始），仅用于模型指代，不作业务编号
+	// 在会话历史中的下标（从零开始），仅用于模型指代，不作业务编号
 	Idx int `json:"idx"`
-	// 消息角色（user / assistant）
+	// 消息角色（用户或助手）
 	Role string `json:"role"`
-	// 消息正文（可能经 compactRange 折叠/截断）
+	// 消息正文（可能经区间压缩折叠或截断）
 	Content string `json:"content"`
-	// 可选展示模式（baseline / diagnostic / checkpoint）
+	// 可选展示模式（基线、诊断或检查点）
 	Mode string `json:"mode,omitempty"`
-	// 可选关联诊断 Run 编号
+	// 可选关联诊断运行编号
 	RunID string `json:"runId,omitempty"`
 }
 
-// 判断默认视图是否因 compact 丢失了旧文细节
-// 命中即说明存在「可能需要回灌」的物理条件；是否真回灌由 locate 决定
-// 只看事实不看意图，避免漏掉指代式追问（「那个结论再展开」）（#18）
+// 判断默认视图是否因压缩丢失了旧文细节
+// 命中即说明存在「可能需要回灌」的物理条件；是否真回灌由定位决定
+// 只看事实不看意图，避免漏掉指代式追问
 func viewCompactedAwayDetail(view towerContextView) bool {
 	if strings.TrimSpace(view.CheckpointContent) != "" {
 		return true
@@ -63,9 +63,9 @@ func viewCompactedAwayDetail(view towerContextView) bool {
 	return false
 }
 
-// 定位回灌区间 [lo, hi]（history 下标，闭区间），未命中返回 ok=false
-// 规则优先（runId 锚定 / 关键词+诊断标题重叠），规则不中且 client 可用时 LLM 兜底
-// client 为 nil（无 LLM 路径/单测）且规则未中时返回未命中，调用方据此不注入
+// 定位回灌区间（历史下标，闭区间），未命中返回否
+// 规则优先（运行编号锚定、关键词与诊断标题重叠），规则不中且客户端可用时大模型兜底
+// 客户端为空且规则未中时返回未命中，调用方据此不注入
 func locateRange(
 	ctx context.Context,
 	client llm.Client,
@@ -84,9 +84,9 @@ func locateRange(
 	return llmLocateRange(ctx, client, userText, history)
 }
 
-// 规则定位：runId 锚定优先，其次关键词+诊断标题重叠，均不调 LLM
+// 规则定位：运行编号锚定优先，其次关键词与诊断标题重叠，均不调大模型
 func ruleLocateRange(userText string, history []session.Message) (int, int, bool) {
-	// runId 锚定：用户提到的 run 编号真实存在时，直接定位该诊断块
+	// 运行编号锚定：用户提到的运行编号真实存在时，直接定位该诊断块
 	if rid := runIDInText(userText, history); rid != "" {
 		for i, m := range history {
 			if m.RunID == rid {
@@ -117,7 +117,7 @@ func ruleLocateRange(userText string, history []session.Message) (int, int, bool
 	return lo, hi, true
 }
 
-// 返回文本里第一个真实存在于历史中的 run 编号，避免误锚定无关字面量
+// 返回文本里第一个真实存在于历史中的运行编号，避免误锚定无关字面量
 func runIDInText(userText string, history []session.Message) string {
 	known := make(map[string]struct{})
 	for _, m := range history {
@@ -149,7 +149,7 @@ func referencesPastStep(userText string) bool {
 	return false
 }
 
-// 判断是否为正式诊断助手消息（ModeDiagnostic 或带 RunID），checkpoint 不算
+// 判断是否为正式诊断助手消息（诊断模式或带运行编号），检查点不算
 func isDiagnosticMessage(m session.Message) bool {
 	if m.Mode == session.ModeCheckpoint {
 		return false
@@ -158,7 +158,7 @@ func isDiagnosticMessage(m session.Message) bool {
 		(m.Mode == session.ModeDiagnostic || strings.TrimSpace(m.RunID) != "")
 }
 
-// 在锚点周围扩一圈邻接消息，保证因果链完整：前一轮 user + 本条 + 后一轮
+// 在锚点周围扩一圈邻接消息，保证因果链完整：前一轮用户、本条、后一轮
 func expandAround(histLen, i int) (int, int) {
 	lo := i - 1
 	if lo < 0 {
@@ -174,8 +174,8 @@ func expandAround(histLen, i int) (int, int) {
 	return lo, hi
 }
 
-// LLM 兜底定位：给模型便宜的 timeline 大纲，语义选出相关区间
-// 越界/反转/解析失败一律视为未命中；不编造、不报错（优雅降级）
+// 大模型兜底定位：给模型便宜的时间线大纲，语义选出相关区间
+// 越界、反转或解析失败一律视为未命中；不编造、不报错（优雅降级）
 func llmLocateRange(
 	ctx context.Context,
 	client llm.Client,
@@ -220,7 +220,7 @@ func llmLocateRange(
 	return lo, hi, true
 }
 
-// timeline 大纲的单条预览项，控制 LLM locate 请求体积
+// 时间线大纲的单条预览项，控制大模型定位请求体积
 type timelineEntry struct {
 	// 历史下标，对应回灌区间端点
 	Idx int `json:"idx"`
@@ -228,13 +228,13 @@ type timelineEntry struct {
 	Role string `json:"role"`
 	// 可选展示模式
 	Mode string `json:"mode,omitempty"`
-	// 可选关联诊断 Run 编号
+	// 可选关联诊断运行编号
 	RunID string `json:"runId,omitempty"`
 	// 消息正文首句预览
 	Preview string `json:"preview"`
 }
 
-// 组装 timeline 大纲：每条消息一行预览，保留 idx/role/mode/runId 供模型定位
+// 组装时间线大纲：每条消息一行预览，保留下标、角色、模式与运行编号供模型定位
 func buildTimelineOutline(history []session.Message) []timelineEntry {
 	out := make([]timelineEntry, 0, len(history))
 	for i, m := range history {
@@ -249,7 +249,7 @@ func buildTimelineOutline(history []session.Message) []timelineEntry {
 	return out
 }
 
-// 取正文首句/首段预览，按 rune 上限截断，保证大纲便宜可扫读
+// 取正文首句/首段预览，按字符上限截断，保证大纲便宜可扫读
 func firstSentence(content string, maxRunes int) string {
 	s := strings.TrimSpace(content)
 	if s == "" {
@@ -265,8 +265,8 @@ func firstSentence(content string, maxRunes int) string {
 	return s
 }
 
-// 从权威 Store 全量 history 取 [lo, hi] 原文，含 idx；越界自动收敛
-// 不取已折叠预览——回灌的就是被 compact 丢掉的原文
+// 从权威存储全量历史取区间原文，含下标；越界自动收敛
+// 不取已折叠预览——回灌的就是被压缩丢掉的原文
 func rehydrateRange(history []session.Message, lo, hi int) []rehydratedMsg {
 	if len(history) == 0 {
 		return nil
@@ -294,9 +294,9 @@ func rehydrateRange(history []session.Message, lo, hi int) []rehydratedMsg {
 	return out
 }
 
-// 对回灌窗做区间压缩以塞进子预算，复用全局 compact 的 L0/L1
-// L0 截单条超长预览，L1 折叠到 ≤ 预算（forceCompactMark 兜底），故窗恒可塞入
-// 带折叠/截断标记，不静默丢段；切片长度不变，idx 原样保留
+// 对回灌窗做区间压缩以塞进子预算，复用全局浅层与中层压缩
+// 浅层截单条超长预览，中层折叠到预算内，故窗恒可塞入
+// 带折叠或截断标记，不静默丢段；切片长度不变，下标原样保留
 func compactRange(window []rehydratedMsg, budgetTokens int) []rehydratedMsg {
 	if len(window) == 0 {
 		return window
@@ -310,7 +310,7 @@ func compactRange(window []rehydratedMsg, budgetTokens int) []rehydratedMsg {
 	return histToRehydrated(hist, window)
 }
 
-// 把回灌窗转为 compact 可消费的 hist 视图（丢 idx，压缩后再回填）
+// 把回灌窗转为压缩可消费的历史视图（丢下标，压缩后再回填）
 func rehydratedToHist(window []rehydratedMsg) []towerHistMsg {
 	out := make([]towerHistMsg, len(window))
 	for i, m := range window {
@@ -324,7 +324,7 @@ func rehydratedToHist(window []rehydratedMsg) []towerHistMsg {
 	return out
 }
 
-// 把压缩后的 hist 映射回回灌窗，idx 取自原窗（压缩不改切片长度）
+// 把压缩后的历史映射回回灌窗，下标取自原窗（压缩不改切片长度）
 func histToRehydrated(hist []towerHistMsg, window []rehydratedMsg) []rehydratedMsg {
 	out := make([]rehydratedMsg, len(hist))
 	for i := range hist {
@@ -343,7 +343,7 @@ func histToRehydrated(hist []towerHistMsg, window []rehydratedMsg) []rehydratedM
 	return out
 }
 
-// 便宜的相关度评分：查询与内容的 rune 二元组重叠数，中英文皆适用
+// 便宜的相关度评分：查询与内容的字符二元组重叠数，中英文皆适用
 // 仅用于关键词分支在多条诊断间择优，非精确检索
 func relevanceScore(query, content string) int {
 	q := strings.ToLower(query)

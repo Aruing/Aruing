@@ -1,7 +1,7 @@
-// aruing 命令行入口：解析参数、组装依赖、输出诊断结果
+// 命令行入口：解析参数、组装依赖、输出诊断结果
 //
-// 配置：YAML 文件（见 config.ResolveConfigPath）+ 环境变量覆盖；产品路径要求 LLM 齐全
-// 依赖在 wiring 中组装；本文件只负责 CLI 边界与输出
+// 配置为配置文件加环境变量覆盖；产品路径要求大模型配置齐全
+// 依赖在装配文件中组装；本文件只负责命令行边界与输出
 package main
 
 import (
@@ -100,7 +100,7 @@ func runVersion(args []string, stdout io.Writer) error {
 
 // 解析运行子命令的用户问题，执行诊断编排并按指定格式输出报告
 // 所有非标志参数拼接为问题文本，因此用户不需要用引号包裹带空格的问题
-// 默认输出 Markdown 报告；--format json 输出结构化 JSON 供机器消费
+// 默认输出标记文本报告；结构化格式输出结构化结果供机器消费
 // 标准错误用于参数错误和局部帮助，标准输出只承载正常命令结果
 func runRun(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
@@ -166,13 +166,13 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	return writeReport(stdout, *format, report, evidence)
 }
 
-// 多轮入口：Session.Turn + Tower；无位置参数则从 stdin 交互读行
-// 必须配置 LLM；进度与 session id 写 stderr，助手内容与诊断报告写 stdout
+// 多轮入口：会话轮次加基线塔；无位置参数则从标准输入交互读行
+// 必须配置大模型；进度与会话编号写标准错误，助手内容与诊断报告写标准输出
 func runChat(args []string, stdout, stderr io.Writer) error {
 	return runChatWith(args, stdout, stderr, os.Stdin)
 }
 
-// runChatWith 与 runChat 相同，stdin 可注入便于测试
+// 与多轮入口相同，标准输入可注入便于测试
 func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error {
 	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -226,14 +226,14 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 		fmt.Fprintf(stderr, "session: %s\n", sessionID)
 	}
 
-	// 单句模式：一次 Turn 后退出
+	// 单句模式：一次会话后退出
 	if question != "" {
 		return chatTurn(ctx, svc, sessionID, question, formatVal, stdout)
 	}
 
-	// 交互：空行跳过；exit / quit / EOF 结束
+	// 交互：空行跳过；退出指令或文件结束时退出
 	scanner := bufio.NewScanner(stdin)
-	// 允许较长输入行（默认 64K 通常够用；略放大防极端粘贴）
+	// 允许较长输入行（默认缓冲通常够用；略放大防极端粘贴）
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for {
 		if !scanner.Scan() {
@@ -255,7 +255,7 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 	}
 }
 
-// 执行一轮 Turn 并按约定写 stdout
+// 执行一轮会话并按约定写标准输出
 func chatTurn(ctx context.Context, svc *session.Service, sessionID, userText, format string, stdout io.Writer) error {
 	result, err := svc.Turn(ctx, sessionID, userText)
 	if err != nil {
@@ -264,7 +264,7 @@ func chatTurn(ctx context.Context, svc *session.Service, sessionID, userText, fo
 	return writeTurnResult(stdout, format, result)
 }
 
-// baseline：只写 Content；diagnostic：Content 后可选分隔线 + 报告（evidence 切片本步不透传）
+// 基线模式只写助手正文；诊断模式在正文后可选分隔线与报告（证据本步不透传）
 func writeTurnResult(stdout io.Writer, format string, result session.TurnResult) error {
 	content := result.AssistantMessage.Content
 	if content != "" {
@@ -276,7 +276,7 @@ func writeTurnResult(stdout io.Writer, format string, result session.TurnResult)
 	if result.Report == nil {
 		return nil
 	}
-	// 仅 diagnostic 附加报告块；无 Mode 时若有 Report 仍打印（防御）
+	// 仅诊断模式附加报告块；无模式标记但已有报告时仍打印（防御）
 	if result.AssistantMessage.Mode != "" && result.AssistantMessage.Mode != session.ModeDiagnostic {
 		return nil
 	}
@@ -285,11 +285,11 @@ func writeTurnResult(stdout io.Writer, format string, result session.TurnResult)
 			return fmt.Errorf("write separator: %w", err)
 		}
 	}
-	// 本步 TurnResult 无 evidence 切片，明细表以 aruing run 为准
+	// 本步回合结果无证据切片，明细表以运行子命令为准
 	return writeReport(stdout, format, *result.Report, nil)
 }
 
-// 按指定格式把报告写入 stdout
+// 按指定格式把报告写入标准输出
 func writeReport(stdout io.Writer, format string, report core.Report, evidence []core.Evidence) error {
 	switch format {
 	case "markdown":

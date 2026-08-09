@@ -11,7 +11,7 @@ import (
 	"aruing/internal/core"
 )
 
-// 假定位器应按 Query 节点生成目标，NodeID 来自输入而非模板固定值
+// 假定位器应按问题节点生成目标，节点编号来自输入而非模板固定值
 func TestFakeResolverNext(t *testing.T) {
 	resolver := agenttest.NewFakeResolver([]core.Target{{
 		ID:     "stale_target",
@@ -70,7 +70,7 @@ func TestFakeResolverNext(t *testing.T) {
 	}
 }
 
-// 多节点应各自生成目标，NodeID 与输入顺序一一对应
+// 多节点应各自生成目标，节点编号与输入顺序一一对应
 func TestFakeResolverMultiNode(t *testing.T) {
 	resolver := agenttest.NewFakeResolver([]core.Target{
 		{Type: "k8s.resource", Attrs: map[string]string{"k8s.name": "a"}},
@@ -98,7 +98,7 @@ func TestFakeResolverMultiNode(t *testing.T) {
 	}
 }
 
-// 无节点时应 fail，而不是提交空目标列表
+// 无节点时应失败，而不是提交空目标列表
 func TestFakeResolverEmptyNodes(t *testing.T) {
 	resolver := agenttest.NewFakeResolver(nil)
 	action, err := resolver.Next(context.Background(), agent.ResolveState{

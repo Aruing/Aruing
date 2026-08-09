@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// LoadFrom 应按键填充字段并 trim；缺失键为空串
+// 按环境变量键填充配置并去掉首尾空白；缺失键为空串
 func TestLoadFrom(t *testing.T) {
 	t.Parallel()
 
@@ -47,7 +47,7 @@ func TestLoadFrom(t *testing.T) {
 	}
 }
 
-// 任一 LLM 字段缺失时 Ready 为 false
+// 任一大模型字段缺失时就绪为否
 func TestLLMReady(t *testing.T) {
 	t.Parallel()
 
@@ -67,7 +67,7 @@ func TestLLMReady(t *testing.T) {
 	}
 }
 
-// ToClientConfig 只映射三字段，不臆造超时
+// 映射客户端时只带出三字段，不臆造超时与重试
 func TestToClientConfig(t *testing.T) {
 	t.Parallel()
 
@@ -80,7 +80,7 @@ func TestToClientConfig(t *testing.T) {
 	}
 }
 
-// nil getenv 不得 panic，得到空配置；exec 开关默认关
+// 注入空的环境读取函数不得崩溃，得到空配置且诊断执行默认关闭
 func TestLoadFromNil(t *testing.T) {
 	t.Parallel()
 
@@ -93,7 +93,7 @@ func TestLoadFromNil(t *testing.T) {
 	}
 }
 
-// 非布尔或空值的 exec 开关应解析为 false，避免误开高自由度动作
+// 非布尔或空值的执行开关应解析为否，避免误开高自由度动作
 func TestAllowDiagnosticExecParsing(t *testing.T) {
 	t.Parallel()
 
@@ -113,7 +113,7 @@ func TestAllowDiagnosticExecParsing(t *testing.T) {
 	}
 }
 
-// ValidateLLM：全齐 OK；缺项列出
+// 三件套齐全通过；缺项时错误文案列出缺失键
 func TestValidateLLM(t *testing.T) {
 	t.Parallel()
 
@@ -133,7 +133,7 @@ func TestValidateLLM(t *testing.T) {
 	}
 }
 
-// LoadFile + 省略字段
+// 完整配置文件与仅含部分字段的文件均可解析
 func TestLoadFile(t *testing.T) {
 	t.Parallel()
 
@@ -173,7 +173,7 @@ debug: true
 	}
 }
 
-// env 覆盖文件；bool 键存在即生效
+// 环境变量覆盖文件值；布尔键只要存在即覆盖，含显式假
 func TestMergeEnvLookup(t *testing.T) {
 	t.Parallel()
 
@@ -208,7 +208,7 @@ func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (f fakeFileInfo) IsDir() bool        { return false }
 func (f fakeFileInfo) Sys() any           { return nil }
 
-// Resolve：playground 优先；全无 ok=false；显式缺失 error；ARUING_CONFIG 优先于自动链
+// 自动搜索优先演练目录；全无时未命中；显式路径缺失报错；配置环境变量优先于自动链
 func TestResolveConfigPath(t *testing.T) {
 	t.Parallel()
 
@@ -262,7 +262,7 @@ func TestResolveConfigPath(t *testing.T) {
 	}
 }
 
-// LoadResolved：文件+env 合并后校验
+// 文件与环境合并后通过校验；无大模型配置时返回校验错误
 func TestLoadResolvedWith(t *testing.T) {
 	t.Parallel()
 

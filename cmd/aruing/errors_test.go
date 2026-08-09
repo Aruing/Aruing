@@ -10,7 +10,7 @@ import (
 	"aruing/internal/llm"
 )
 
-// ErrLLMOutputInconsistent 应附带模型/prompt 处置提示
+// 模型输出不一致错误应附带处置提示
 func TestFormatRunErrorInconsistent(t *testing.T) {
 	t.Parallel()
 
@@ -53,7 +53,7 @@ func TestFormatRunErrorJSONParse(t *testing.T) {
 	}
 }
 
-// 配置类错误应提示检查 ARUING_LLM_*
+// 配置类错误应提示检查大模型环境变量
 func TestFormatRunErrorLLMConfig(t *testing.T) {
 	t.Parallel()
 

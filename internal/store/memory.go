@@ -1,7 +1,7 @@
-// 存储包负责持久化实现：会话消息与正式诊断 Run 账本
+// 存储包负责持久化实现：会话消息与正式诊断运行账本
 //
-// 接口定义在使用方（session.Store / session.RunLedger），本包只提供实现
-// 当前为进程内内存实现，进程退出即丢失；装配层可换成文件或嵌入式数据库而不改 Turn
+// 接口定义在使用方（会话存储与诊断账本），本包只提供实现
+// 当前为进程内内存实现，进程退出即丢失；装配层可换成文件或嵌入式数据库而不改会话轮次
 // 证据和验证结果必须能通过编号追溯，方便报告引用
 package store
 
@@ -13,10 +13,10 @@ import (
 	"aruing/internal/session"
 )
 
-// 进程内会话与消息存储，实现 session.Store
-// 临时方案：不写文件、不写数据库；并发安全，但同一会话业务上仍约定串行 Turn
+// 进程内会话与消息存储，实现会话存储接口
+// 临时方案：不写文件、不写数据库；并发安全，但同一会话业务上仍约定串行轮次
 type MemoryStore struct {
-	// 保护 sessions 与 messages 的互斥锁
+	// 保护会话与消息映射的互斥锁
 	mu sync.Mutex
 	// 会话编号到会话实体的映射
 	sessions map[string]session.Session
@@ -50,13 +50,13 @@ func (s *MemoryStore) CreateSession(ctx context.Context, sess *session.Session) 
 	if _, ok := s.sessions[sess.ID]; ok {
 		return fmt.Errorf("session already exists: %s", sess.ID)
 	}
-	// 存值拷贝，避免调用方后续改动共享 map 内数据
+	// 存值拷贝，避免调用方后续改动共享映射内数据
 	s.sessions[sess.ID] = *sess
 	s.messages[sess.ID] = nil
 	return nil
 }
 
-// 按编号返回会话拷贝；不存在时返回 session.ErrSessionNotFound
+// 按编号返回会话拷贝；不存在时返回会话未找到错误
 func (s *MemoryStore) GetSession(ctx context.Context, id string) (*session.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func (s *MemoryStore) GetSession(ctx context.Context, id string) (*session.Sessi
 	return &out, nil
 }
 
-// 覆盖更新已有会话；不存在时返回 session.ErrSessionNotFound
+// 覆盖更新已有会话；不存在时返回会话未找到错误
 func (s *MemoryStore) UpdateSession(ctx context.Context, sess *session.Session) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -95,7 +95,7 @@ func (s *MemoryStore) UpdateSession(ctx context.Context, sess *session.Session) 
 	return nil
 }
 
-// 按追加顺序写入消息；所属会话不存在时返回 session.ErrSessionNotFound
+// 按追加顺序写入消息；所属会话不存在时返回会话未找到错误
 func (s *MemoryStore) AppendMessage(ctx context.Context, message *session.Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -120,7 +120,7 @@ func (s *MemoryStore) AppendMessage(ctx context.Context, message *session.Messag
 	return nil
 }
 
-// 按追加顺序返回消息拷贝；会话不存在时返回 session.ErrSessionNotFound
+// 按追加顺序返回消息拷贝；会话不存在时返回会话未找到错误
 func (s *MemoryStore) ListMessages(ctx context.Context, sessionID string) ([]session.Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -17,7 +17,7 @@ import (
 
 // -------------------------- 测试工具函数 --------------------------
 
-// 把指定正文按 OpenAI chat completion 协议写回，供 mock 服务端复用
+// 把指定正文按对话补全协议写回，供模拟服务端复用
 func writeCompletion(w http.ResponseWriter, content string) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -41,7 +41,7 @@ func decodeBody(t *testing.T, body io.Reader) map[string]any {
 	return m
 }
 
-// 创建指向 mock 服务端的客户端，服务端随测试结束自动关闭
+// 创建指向模拟服务端的客户端，服务端随测试结束自动关闭
 func newTestClient(t *testing.T, handler http.HandlerFunc) Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -100,7 +100,7 @@ func TestConfigNormalizeDefaults(t *testing.T) {
 	}
 }
 
-// 负的 MaxRetries 视为 0，避免构造会无限退避的客户端
+// 负的最大重试视为零，避免构造会无限退避的客户端
 func TestConfigNormalizeNegativeRetries(t *testing.T) {
 	normalized, err := Config{BaseURL: "http://x", Model: "m", MaxRetries: -3}.normalize()
 	if err != nil {
@@ -111,9 +111,9 @@ func TestConfigNormalizeNegativeRetries(t *testing.T) {
 	}
 }
 
-// -------------------------- JSON 提取 --------------------------
+// -------------------------- 结构提取 --------------------------
 
-// extractJSON 应能处理围栏包裹和带说明文字的输出
+// 提取结构化片段应能处理围栏包裹和带说明文字的输出
 func TestExtractJSON(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -137,7 +137,7 @@ func TestExtractJSON(t *testing.T) {
 
 // -------------------------- 生成主路径 --------------------------
 
-// GenerateJSON 应填充结构化结果，且请求要求供应商返回 JSON 对象
+// 生成结构化结果应填充目标，且请求要求供应商返回结构对象
 func TestGenerateJSON(t *testing.T) {
 	var got map[string]any
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -160,18 +160,18 @@ func TestGenerateJSON(t *testing.T) {
 		t.Errorf("Confidence = %v", out.Confidence)
 	}
 
-	// 验证确实向供应商声明了 JSON 输出格式
+	// 验证确实向供应商声明了结构化输出格式
 	format, ok := got["response_format"].(map[string]any)
 	if !ok || format["type"] != "json_object" {
 		t.Errorf("response_format = %v, want type=json_object", got["response_format"])
 	}
-	// go-openai 默认省略 stream=false；我们强制写入，兼容「缺省即流式」的网关
+	// 上游客户端默认省略非流式标记；我们强制写入，兼容缺省即流式的网关
 	if got["stream"] != false {
 		t.Errorf("stream = %v, want false", got["stream"])
 	}
 }
 
-// ensureStreamFalse 只在缺省时补 false，已有 stream 字段时不覆盖
+// 确保非流式只在缺省时补假，已有流式字段时不覆盖
 func TestEnsureStreamFalse(t *testing.T) {
 	t.Parallel()
 	got := ensureStreamFalse([]byte(`{"model":"m","messages":[]}`))
@@ -192,12 +192,12 @@ func TestEnsureStreamFalse(t *testing.T) {
 	}
 }
 
-// 大整数字段（如 seed）经 ensureStreamFalse 注入 stream 后不得丢精度
-// 验证用 RawMessage 承载其余字段，避免 float64 往返造成的精度损失
+// 大整数字段（如随机种子）经确保非流式注入流式字段后不得丢精度
+// 验证用原始消息承载其余字段，避免浮点往返造成的精度损失
 func TestEnsureStreamFalseNumbers(t *testing.T) {
 	t.Parallel()
 
-	const bigSeed = 9007199254740993 // 2^53 + 1，float64 无法精确表示
+	const bigSeed = 9007199254740993 // 二的五十三次方加一，浮点无法精确表示
 	in := []byte(`{"model":"m","seed":9007199254740993,"messages":[]}`)
 	got := ensureStreamFalse(in)
 
@@ -212,7 +212,7 @@ func TestEnsureStreamFalseNumbers(t *testing.T) {
 	}
 }
 
-// GenerateJSON 应处理被围栏包裹的 JSON 输出
+// 生成结构化结果应处理被围栏包裹的输出
 func TestGenerateJSONFenced(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeCompletion(w, "```json\n{\"name\":\"demo\"}\n```")
@@ -229,7 +229,7 @@ func TestGenerateJSONFenced(t *testing.T) {
 	}
 }
 
-// 输出无法解析为 JSON 时应返回 ErrJSONParse 与预览
+// 输出无法解析为结构时应返回解析错误与预览
 func TestGenerateJSONNonJSON(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeCompletion(w, "这不是 JSON")
@@ -266,7 +266,7 @@ func TestGenerateEmptyContentRetry(t *testing.T) {
 	}
 }
 
-// 空正文耗尽重试应返回 ErrEmptyResponse
+// 空正文耗尽重试应返回空响应错误
 func TestGenerateEmptyContentExhausted(t *testing.T) {
 	cl := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeCompletion(w, "")
@@ -279,7 +279,7 @@ func TestGenerateEmptyContentExhausted(t *testing.T) {
 	}
 }
 
-// out 非指针或为 nil 时应直接拒绝，避免 Unmarshal 触发 panic
+// 输出目标非指针或为空时应直接拒绝，避免反序列化触发崩溃
 func TestGenerateJSONNilOut(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeCompletion(w, "{}")
@@ -287,7 +287,7 @@ func TestGenerateJSONNilOut(t *testing.T) {
 	requireErrorContains(t, client.GenerateJSON(context.Background(), Request{}, nil), "non-nil pointer")
 }
 
-// Generate 应返回纯文本，且请求不要求 JSON 输出（给 Reporter 出 Markdown 用）
+// 生成应返回纯文本，且请求不要求结构化输出（给报告员出标记文本用）
 func TestGenerate(t *testing.T) {
 	var sawFormat any
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +310,7 @@ func TestGenerate(t *testing.T) {
 
 // -------------------------- 重试与错误 --------------------------
 
-// 可重试错误（5xx）应自动重试，最终在成功响应上返回结果
+// 可重试的服务端错误应自动重试，最终在成功响应上返回结果
 func TestGenerateRetryThenSucceed(t *testing.T) {
 	var attempts atomic.Int32
 	cl := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -335,7 +335,7 @@ func TestGenerateRetryThenSucceed(t *testing.T) {
 	}
 }
 
-// 不可重试的 4xx 应立即失败，不发起额外请求
+// 不可重试的客户端错误应立即失败，不发起额外请求
 func TestGenerateNonRetryable(t *testing.T) {
 	var attempts atomic.Int32
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -356,7 +356,7 @@ func TestGenerateTimeout(t *testing.T) {
 	var attempts atomic.Int32
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		attempts.Add(1)
-		// 客户端放弃时服务端也尽快返回，避免 Close 阻塞
+		// 客户端放弃时服务端也尽快返回，避免关闭阻塞
 		select {
 		case <-time.After(200 * time.Millisecond):
 			writeCompletion(w, "late")
@@ -376,7 +376,7 @@ func TestGenerateTimeout(t *testing.T) {
 	}
 }
 
-// 错误应保留底层供应商错误，便于上层按需用 errors.As 分类（如鉴权、限流），我们只包裹不擦除
+// 错误应保留底层供应商错误，便于上层按需分类（如鉴权、限流），我们只包裹不擦除
 func TestGenerateErrorPreservesUnderlying(t *testing.T) {
 	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -386,7 +386,7 @@ func TestGenerateErrorPreservesUnderlying(t *testing.T) {
 	_, err := client.Generate(context.Background(), Request{})
 	requireErrorContains(t, err, "llm generate")
 
-	// sashabaranov 依据 body 格式返回 *APIError 或 *RequestError，至少一种应出现在错误链中
+	// 供应商库依据正文格式返回接口错误或请求错误，至少一种应出现在错误链中
 	var apiErr *openai.APIError
 	var reqErr *openai.RequestError
 	if !errors.As(err, &apiErr) && !errors.As(err, &reqErr) {

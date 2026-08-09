@@ -1,5 +1,5 @@
-// Package agenttest 提供测试替身（Fake 角色 / Fake Tower），仅供测试 import。
-// 产品二进制与 cmd 不得依赖本包。
+// 测试替身包：假角色与假基线塔，仅供测试导入
+// 产品二进制与命令入口不得依赖本包
 package agenttest
 
 import (
@@ -17,8 +17,9 @@ import (
 	"aruing/internal/tools"
 )
 
-// 保存假解析器使用的固定问题模板，可在多次运行之间安全复用
+// 可复用的假解析器，始终返回构造时给定的问题模板
 type FakeParser struct {
+	// 固定问题模板（按次克隆）
 	query core.Query
 }
 
@@ -53,8 +54,9 @@ func (p *FakeParser) Parse(ctx context.Context, run core.Run) (core.Query, error
 	return query, nil
 }
 
-// 保存假定位器使用的固定身份模板
+// 可复用的假定位器，首轮提交构造时给定的目标模板
 type FakeResolver struct {
+	// 固定身份模板（按次克隆）
 	templates []core.Target
 }
 
@@ -113,8 +115,9 @@ func (r *FakeResolver) Next(ctx context.Context, state agent.ResolveState) (agen
 	}, nil
 }
 
-// 保存假规划器使用的固定计划模板
+// 可复用的假规划器，始终返回构造时给定的计划模板
 type FakePlanner struct {
+	// 固定计划模板（按次克隆）
 	plan agent.Plan
 }
 
@@ -175,8 +178,9 @@ func (p *FakePlanner) Plan(ctx context.Context, state agent.PlanState) (agent.Pl
 	return plan, nil
 }
 
-// 保存假判断器使用的固定结果模板
+// 可复用的假判断器，始终返回构造时给定的结论模板
 type FakeVerifier struct {
+	// 固定判断结果模板（按次克隆）
 	verdicts []core.Verdict
 }
 
@@ -246,8 +250,9 @@ func (v *FakeVerifier) Verify(
 	return verdicts, nil
 }
 
-// 保存假报告器使用的固定报告模板
+// 可复用的假报告器，始终返回构造时给定的报告模板
 type FakeReporter struct {
+	// 固定报告模板（按次克隆）
 	report core.Report
 }
 
@@ -311,27 +316,38 @@ func (r *FakeReporter) Report(
 	return report, nil
 }
 
-// 测试用基线工具提议
+// 假基线塔在调用工具时使用的工具提议
 type ToolCall struct {
-	ToolName  string
+	// 工具名，须已在调度器中注册
+	ToolName string
+	// 调用参数；空则按空对象发送
 	Arguments json.RawMessage
-	Purpose   string
+	// 调用目的说明
+	Purpose string
 }
 
+// 假基线塔默认的基线工具轮次上限
 const defaultBaselineMaxToolRounds = 12
 
-// 测试用 Tower：用 Decide 选动作，不调 LLM
+// 测试用基线塔：由决定函数选择动作，不调用大模型
 type FakeTowerResponder struct {
-	Factory               *core.Factory
-	Executor              session.RunExecutor
-	Ledger                session.RunLedger
-	Dispatcher            *tools.Dispatcher
-	Decide                func(in session.RespondInput) (action, content, question string)
-	CallTool              ToolCall
+	// 发号器；调用工具与升格需要
+	Factory *core.Factory
+	// 正式诊断执行器；升格需要
+	Executor session.RunExecutor
+	// 诊断账本；升格成功后写入
+	Ledger session.RunLedger
+	// 工具调度器；调用工具需要
+	Dispatcher *tools.Dispatcher
+	// 决定本轮动作；返回动作名、回复正文、升格问题
+	Decide func(in session.RespondInput) (action, content, question string)
+	// 调用工具时执行的工具提议
+	CallTool ToolCall
+	// 基线工具轮次上限；非正数时用默认值
 	BaselineMaxToolRounds int
 }
 
-// 按 Decide 分支 reply、call_tool 或 escalate
+// 按决定在回复、调工具与升格之间分支
 func (f *FakeTowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return session.RespondOutput{}, fmt.Errorf("fake tower: %w", err)

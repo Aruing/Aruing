@@ -13,7 +13,7 @@ import (
 	"aruing/internal/store"
 )
 
-// run 无 LLM 应明确失败（产品路径不再走 fake）
+// 单次运行在无大模型配置时应明确失败，不再走假实现
 func TestDispatchRunRequiresLLM(t *testing.T) {
 	cfgPath := emptyConfigPath(t)
 	var stdout bytes.Buffer
@@ -29,7 +29,7 @@ func TestDispatchRunRequiresLLM(t *testing.T) {
 	}
 }
 
-// 非法 format 应报错
+// 单次运行非法输出格式应报错
 func TestDispatchRunBadFormat(t *testing.T) {
 	clearLLMEnv(t)
 	var stdout bytes.Buffer
@@ -44,7 +44,7 @@ func TestDispatchRunBadFormat(t *testing.T) {
 	}
 }
 
-// usage 与分发应识别 chat 子命令
+// 用法说明与分发应识别多轮对话子命令
 func TestDispatchChatRecognized(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -56,7 +56,7 @@ func TestDispatchChatRecognized(t *testing.T) {
 		t.Fatalf("usage missing chat:\n%s", stdout.String())
 	}
 
-	// 无 LLM 时单句 chat 应明确失败，而不是 unknown command
+	// 无大模型时单句对话应明确失败，而不是未知命令
 	cfgPath := emptyConfigPath(t)
 	err := dispatch([]string{"chat", "--config", cfgPath, "hello"}, &stdout, &stderr)
 	if err == nil {
@@ -71,7 +71,7 @@ func TestDispatchChatRecognized(t *testing.T) {
 	}
 }
 
-// chat 非法 format 应报错
+// 多轮对话非法输出格式应报错
 func TestDispatchChatBadFormat(t *testing.T) {
 	clearLLMEnv(t)
 	var stdout bytes.Buffer
@@ -81,13 +81,13 @@ func TestDispatchChatBadFormat(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error for unknown format")
 	}
-	// format 校验在 stack 组装前，不依赖 LLM
+	// 格式校验在栈组装前，不依赖大模型
 	if !strings.Contains(err.Error(), "unknown format") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-// newSessionStack 无 LLM 应硬失败
+// 组装会话栈在无大模型配置时应硬失败
 func TestNewSessionStackRequiresLLM(t *testing.T) {
 	cfg := config.Config{}
 	_, err := newSessionStack(core.NewFactory(), cfg, &bytes.Buffer{})
@@ -99,7 +99,7 @@ func TestNewSessionStackRequiresLLM(t *testing.T) {
 	}
 }
 
-// newOrchestrator 无 LLM 应硬失败（无 fake 回退）
+// 组装编排器在无大模型配置时应硬失败，无假实现回退
 func TestNewOrchestratorRequiresLLM(t *testing.T) {
 	cfg := config.Config{}
 	_, err := newOrchestrator(core.NewFactory(), cfg, &bytes.Buffer{})
@@ -111,7 +111,7 @@ func TestNewOrchestratorRequiresLLM(t *testing.T) {
 	}
 }
 
-// baseline 轮只写 Content；diagnostic 附加报告块
+// 基线轮只写助手正文；诊断轮附加报告块
 func TestWriteTurnResult(t *testing.T) {
 	t.Run("baseline", func(t *testing.T) {
 		var out bytes.Buffer
@@ -161,7 +161,7 @@ func TestWriteTurnResult(t *testing.T) {
 	})
 }
 
-// 注入 Echo 的 Service 证明 chatTurn 接线形状：两轮后 ListMessages 4 条交错
+// 注入回显响应器证明对话接线：两轮后应有四条用户与助手交错消息
 func TestChatTurnEchoStack(t *testing.T) {
 	factory := core.NewFactory()
 	mem := store.NewMemoryStore()
@@ -195,7 +195,7 @@ func TestChatTurnEchoStack(t *testing.T) {
 	}
 }
 
-// 清空 LLM 相关 env，保证无凭据路径可测
+// 清空大模型相关环境变量，保证无凭据路径可测
 func clearLLMEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ARUING_LLM_BASE_URL", "")
@@ -203,7 +203,7 @@ func clearLLMEnv(t *testing.T) {
 	t.Setenv("ARUING_LLM_MODEL", "")
 }
 
-// 写一份无 LLM 字段的配置文件路径，并阻断 ARUING_CONFIG / 默认搜索
+// 写入无大模型字段的配置文件，并阻断环境配置与默认搜索路径
 func emptyConfigPath(t *testing.T) string {
 	t.Helper()
 	clearLLMEnv(t)
@@ -212,7 +212,7 @@ func emptyConfigPath(t *testing.T) string {
 	if err := os.WriteFile(path, []byte("debug: false\n"), 0o600); err != nil {
 		t.Fatalf("write empty config: %v", err)
 	}
-	// 避免进程环境里已有 ARUING_CONFIG 指向完整配置
+	// 避免进程环境里已有配置路径环境变量指向完整配置
 	t.Setenv("ARUING_CONFIG", path)
 	return path
 }

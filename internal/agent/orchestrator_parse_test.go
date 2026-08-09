@@ -13,9 +13,9 @@ import (
 	"aruing/internal/tools"
 )
 
-// parseAPIResources：4 列默认输出与 5 列（含 APIVERSION）均正确解析；超 maxKeep 截断且不挑类别
+// 四列默认输出与五列含版本列均正确解析；超出保留上限时截断且不按类别挑选
 func TestParseAPIResources(t *testing.T) {
-	// 4 列：NAME SHORTNAMES NAMESPACED KIND，无 APIVERSION
+	// 四列：名称、短名、是否命名空间、种类，无接口版本
 	fourCol := "NAME                              SHORTNAMES   NAMESPACED   KIND\n" +
 		"pods                              po           true         Pod\n" +
 		"services                          svc          true         Service\n" +
@@ -25,7 +25,7 @@ func TestParseAPIResources(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("4-col len = %d, want 4: %+v", len(got), got)
 	}
-	// IngressRoute（beta4 动机的 CRD）应被发现，apiGroup 为空（无 APIVERSION 列）
+	// 入口路由类自定义资源应被发现，接口组为空（无接口版本列）
 	ir := findResource(got, "IngressRoute")
 	if ir == nil {
 		t.Fatalf("IngressRoute not parsed: %+v", got)
@@ -36,12 +36,12 @@ func TestParseAPIResources(t *testing.T) {
 	if ir.APIGroup != "" {
 		t.Errorf("4-col IngressRoute apiGroup = %q, want empty", ir.APIGroup)
 	}
-	// 集群级资源 nodes 应标记为非命名空间级
+	// 集群级资源节点应标记为非命名空间级
 	if node := findResource(got, "Node"); node == nil || node.Namespaced {
 		t.Errorf("Node namespaced misparsed: %+v", node)
 	}
 
-	// 5 列：CRD 行带 group/version，核心资源行 APIVERSION 为空（被 Fields 收敛为 4 列）
+	// 五列：自定义资源行带组与版本，核心资源行接口版本为空（被字段解析收敛为四列）
 	fiveCol := "NAME              SHORTNAMES   NAMESPACED   KIND            APIVERSION\n" +
 		"pods              po           true         Pod\n" +
 		"ingressroutes     ico          true         IngressRoute    traefik.io/v1\n"
@@ -53,7 +53,7 @@ func TestParseAPIResources(t *testing.T) {
 		t.Errorf("5-col Pod apiGroup = %q, want empty: %+v", pod.APIGroup, pod)
 	}
 
-	// 超 maxKeep（300）截断；构造 305 行确认上限生效且不挑类别
+	// 超保留上限截断；构造三百零五行确认上限生效且不挑类别
 	var b strings.Builder
 	b.WriteString("NAME   SHORTNAMES   NAMESPACED   KIND\n")
 	for i := range 305 {
@@ -73,7 +73,7 @@ func findResource(rs []ClusterResource, kind string) *ClusterResource {
 	return nil
 }
 
-// 模拟 k8s 工具：按配置返回 api-resources stdout 或失败，用于侦察路径测试
+// 模拟集群工具：按配置返回资源清单标准输出或失败，用于侦察路径测试
 type fakeK8sAPIResourcesTool struct {
 	stdout string
 	fail   bool
@@ -105,7 +105,7 @@ func (t *fakeK8sAPIResourcesTool) Execute(context.Context, json.RawMessage) (*co
 	}, nil
 }
 
-// 白盒侦察测试用：可注入字段的最小 factory
+// 白盒侦察测试用：可注入字段的最小工厂
 type reconTestFactory struct {
 	ids []string
 	now time.Time
@@ -129,7 +129,7 @@ func (f *reconTestFactory) Now() time.Time {
 	return f.now
 }
 
-// 侦察成功：走 executeTask，返回带发现摘要的 Evidence + 精简清单（含 CRD）
+// 侦察成功：走执行任务，返回带发现摘要的证据与精简清单（含自定义资源）
 func TestReconClusterSuccess(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(&fakeK8sAPIResourcesTool{
@@ -155,21 +155,21 @@ func TestReconClusterSuccess(t *testing.T) {
 	if findResource(resources, "IngressRoute") == nil {
 		t.Errorf("resources missing IngressRoute: %+v", resources)
 	}
-	// Summary 被覆写为侦察成果摘要
+	// 摘要被覆写为侦察成果摘要
 	if !strings.Contains(evidence.Summary, "发现") || !strings.Contains(evidence.Summary, "2") {
 		t.Errorf("summary = %q, want recon digest", evidence.Summary)
 	}
-	// 编号经 Factory 发放，Evidence ID 来自 Factory（e_recon）
+	// 编号经工厂发放，证据编号来自工厂
 	if evidence.ID != "e_recon" {
 		t.Errorf("evidence ID = %q, want e_recon (factory-issued)", evidence.ID)
 	}
-	// 原始 stdout 仍在 Raw，供用户深挖
+	// 原始标准输出仍在原文，供用户深挖
 	if !strings.Contains(extractStdout(evidence.Raw), "ingressroutes") {
 		t.Errorf("raw stdout lost: %s", evidence.Raw)
 	}
 }
 
-// 侦察工具失败：error evidence 进链（透明），resources 为 nil，不报错
+// 侦察工具失败：错误证据进链（透明），资源列表为空，不报错
 func TestReconClusterFailure(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(&fakeK8sAPIResourcesTool{fail: true}); err != nil {
@@ -196,8 +196,8 @@ func TestReconClusterFailure(t *testing.T) {
 	}
 }
 
-// 侦察未启用（无集群环境）：不尝试、不进证据链，返回 (nil, nil)
-// reconEnabled 默认 false，wiring 仅在 k8s 注册后开启，避免 fake/CI 产生噪音
+// 侦察未启用时不尝试、不进证据链，返回空结果
+// 默认关闭；装配层仅在集群工具注册后开启，避免假环境与持续集成噪音
 func TestReconClusterDisabled(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(&fakeK8sAPIResourcesTool{stdout: "NAME   x   true   Pod\n"}); err != nil {
@@ -206,7 +206,7 @@ func TestReconClusterDisabled(t *testing.T) {
 	orch := &Orchestrator{
 		executor: tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		factory:  &reconTestFactory{now: time.Now().UTC()},
-		// reconEnabled 保持默认 false
+		// 侦察开关保持默认关闭
 	}
 	evidence, resources := orch.reconCluster(context.Background(), "run_x")
 	if evidence != nil || resources != nil {

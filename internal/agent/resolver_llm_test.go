@@ -50,7 +50,7 @@ func TestLLMResolverSubmit(t *testing.T) {
 	}
 }
 
-// call_tool 校验工具名必须在 Specs 中
+// 调用工具校验工具名必须在规格中
 func TestLLMResolverCallTool(t *testing.T) {
 	specs := []tools.ToolSpec{{
 		Name:        "k8s",
@@ -79,7 +79,7 @@ func TestLLMResolverCallTool(t *testing.T) {
 	}
 }
 
-// 未知工具 / 未知节点 / 无证据提交 → 业务重试后 ErrLLMOutputInconsistent
+// 未知工具 / 未知节点 / 无证据提交 → 业务重试后报输出不一致
 func TestLLMResolverInvalidOutput(t *testing.T) {
 	specs := []tools.ToolSpec{{
 		Name:        "k8s",
@@ -177,7 +177,7 @@ func TestNewLLMResolverValidate(t *testing.T) {
 	}
 }
 
-// system prompt 应注入 Specs 并替换占位符
+// 系统提示词应注入工具规格并替换占位符
 func TestLLMResolverPromptIncludesSpecs(t *testing.T) {
 	specs := []tools.ToolSpec{{
 		Name:        "k8s",
@@ -196,7 +196,7 @@ func TestLLMResolverPromptIncludesSpecs(t *testing.T) {
 	}
 }
 
-// 多条 evidence 共享 raw 预算：优先保新；权威切片不变
+// 多条证据共享原文预算：优先保新；权威切片不变
 func TestPrepareResolverRawPreviewsBudget(t *testing.T) {
 	oldMark := "OLD_EVIDENCE_MARK"
 	newMark := "NEW_EVIDENCE_MARK"
@@ -230,7 +230,7 @@ func TestPrepareResolverRawPreviewsBudget(t *testing.T) {
 	}
 }
 
-// 小 raw 全文；超预算注入截断标记，权威 Raw 不变
+// 小原文全文；超预算注入截断标记，权威原文不变
 func TestPrepareResolverRawPreviewsTruncates(t *testing.T) {
 	raw := json.RawMessage(`{"stdout":"` + strings.Repeat("A", 500) + `"}`)
 	items := []core.Evidence{{
@@ -259,7 +259,7 @@ func TestPrepareResolverRawPreviewsTruncates(t *testing.T) {
 	}
 }
 
-// payload 不得再使用固定 2000 字数墙；超预算须有 rawTruncated
+// 载荷不得再使用固定二千字数墙；超预算须有原文截断标记
 func TestBuildResolverUserPayloadBudget(t *testing.T) {
 	raw := json.RawMessage(`{"stdout":"` + strings.Repeat("B", 5000) + `"}`)
 	payload, err := buildResolverUserPayload(ResolveState{
@@ -272,7 +272,7 @@ func TestBuildResolverUserPayloadBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	// 默认合计预算足以吃下本条；全文应在 rawPreview 中
+	// 默认合计预算足以吃下本条；全文应在原文预览中
 	if !strings.Contains(payload, strings.Repeat("B", 100)) {
 		t.Fatal("payload should include raw content under default budget")
 	}

@@ -1,9 +1,9 @@
 // 命令行入口的依赖组装模块
 //
-// 产品路径：LLM 五角色 + 真实 k8s（kubectl 可选）；不再组装 Fake 诊断闭环
-// run / chat 均要求 LLM 齐全；Tower 与 Orchestrator 共用同一 Dispatcher
+// 产品路径：大模型五角色加真实集群工具（集群命令可选）；不再组装假诊断闭环
+// 单次运行与多轮对话均要求大模型齐全；基线塔与编排器共用同一调度器
 //
-// 进程级参数只来自 config.Config，本文件不再直接读 env
+// 进程级参数只来自配置结构，本文件不再直接读环境变量
 package main
 
 import (
@@ -24,7 +24,7 @@ import (
 )
 
 // 生产环境调查阶段规划轮数上限
-// 一轮≈1 次 Planner + N 次工具 + 1 次 Verifier；3 轮可走完 Pod→logs→describe 这类证据链
+// 一轮约一次规划、若干工具调用与一次验证；三轮可走完常见证据链
 const productionInvestigateMaxRounds = 3
 
 // 组装编排器所需的角色集合（不含工具图）
@@ -44,14 +44,14 @@ type orchestratorRoles struct {
 	}
 }
 
-// 工具注册表与调度器；Tower 与 Orchestrator 必须共用同一 Dispatcher
+// 工具注册表与调度器；基线塔与编排器必须共用同一调度器
 type tooling struct {
 	registry     *tools.Registry
 	dispatcher   *tools.Dispatcher
 	reconEnabled bool
 }
 
-// 组装工具注册表与 Dispatcher；kubectl 可用时注册 k8s
+// 组装工具注册表与调度器；集群命令可用时注册集群工具
 func buildTooling(toolsCfg config.Tools) (tooling, error) {
 	registry := tools.NewRegistry()
 	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg.KubectlPath)
@@ -70,8 +70,8 @@ func buildTooling(toolsCfg config.Tools) (tooling, error) {
 	}, nil
 }
 
-// 当 kubectl 可用时注册后端级 k8s 工具；不可用则跳过
-// 路径：显式 KubectlPath > PATH 中的 kubectl
+// 当集群命令可用时注册后端级集群工具；不可用则跳过
+// 路径优先使用显式配置，否则在系统路径中查找默认集群命令
 func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) (bool, error) {
 	path := kubectlPath
 	if path == "" {
@@ -95,7 +95,7 @@ func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) (bool, error
 	return true, nil
 }
 
-// 组装 Orchestrator：必须 LLM 齐全，无 Fake 回退
+// 组装编排器：必须大模型齐全，无假实现回退
 func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, error) {
 	if factory == nil {
 		return nil, fmt.Errorf("orchestrator requires a factory")
@@ -131,8 +131,8 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 	return orch, nil
 }
 
-// 组装 chat 用的 Session 栈：MemoryStore + MemoryRunLedger + TowerResponder
-// 无 LLM 时硬失败
+// 组装多轮对话会话栈：内存存储、诊断账本与基线塔
+// 无大模型配置时硬失败
 func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Writer) (*session.Service, error) {
 	if err := config.ValidateLLM(cfg); err != nil {
 		return nil, err
@@ -185,7 +185,7 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 	return session.NewService(store.NewMemoryStore(), factory, tower), nil
 }
 
-// 用 LLM 客户端组装五角色；specs 与 Dispatcher 同源
+// 用大模型客户端组装五角色；工具规格与调度器同源
 func buildLLMRoles(client llm.Client, factory *core.Factory, specs []tools.ToolSpec) (orchestratorRoles, error) {
 	parser, err := agent.NewLLMParser(client, factory)
 	if err != nil {

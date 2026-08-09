@@ -45,7 +45,7 @@ func TestFakeVerifierVerify(t *testing.T) {
 
 // 判断只能引用同一运行中存在的猜想和证据，避免跨运行或悬空结论
 func TestFakeVerifierValidate(t *testing.T) {
-	// 代表校验：未知猜想、任务与证据链断裂、跨运行证据、空 RunID 基线观察
+	// 代表校验：未知猜想、任务与证据链断裂、跨运行证据、空运行编号的基线观察
 	tests := []struct {
 		name       string
 		verdicts   []core.Verdict
@@ -71,7 +71,7 @@ func TestFakeVerifierValidate(t *testing.T) {
 			evidence:   []core.Evidence{{ID: "e_test", RunID: "run_other", TaskID: "task_test"}},
 		},
 		{
-			// 基线 tool 观察不得冒充正式裁决证据
+			// 基线工具观察不得冒充正式裁决证据
 			name:       "empty run id evidence",
 			verdicts:   []core.Verdict{{ID: "v_test", HypothesisID: "h_test"}},
 			hypotheses: []core.Hypothesis{{ID: "h_test", RunID: "run_test"}},

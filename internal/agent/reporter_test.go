@@ -58,7 +58,7 @@ func TestFakeReporterReport(t *testing.T) {
 // 报告只能整理一致且可追溯的判断与证据，不能生成悬空或跨运行结论
 func TestFakeReporterValidate(t *testing.T) {
 	run := core.Run{ID: "run_test"}
-	// 代表校验：未知结论、result 与 verdict 不一致、跨运行证据
+	// 代表校验：未知结论、结果与判决不一致、跨运行证据
 	tests := []struct {
 		name     string
 		report   core.Report

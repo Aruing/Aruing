@@ -1,7 +1,7 @@
 // 规划模块负责根据问题结构和已确认目标生成候选猜想与待执行任务
 //
-// 真实现见 LLMPlanner（planner_llm.go）：同一 Plan 边界，单次 LLM 调用，工具规格来自 Registry.Specs
-// 测试替身见 agenttest.FakePlanner
+// 真实现见大模型规划器：同一计划边界，单次大模型调用，工具规格来自注册表
+// 测试替身见测试假规划器
 // 调用方必须先完成目标定位，返回的猜想和任务会绑定到同一次运行
 package agent
 

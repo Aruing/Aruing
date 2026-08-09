@@ -10,7 +10,7 @@ import (
 	"aruing/internal/session"
 )
 
-// 短消息远超原 last-20 条数时，预算内应全量进 payload，禁止 last-N
+// 短消息远超原最近二十条时，预算内应全量进载荷，禁止按固定条数截断
 func TestTowerPayloadHistory(t *testing.T) {
 	history := make([]session.Message, 0, 30)
 	for i := 0; i < 30; i++ {
@@ -41,7 +41,7 @@ func TestTowerPayloadHistory(t *testing.T) {
 	}
 }
 
-// payload 可注入 cluster_resources；空列表 omitempty
+// 载荷可注入集群资源；空列表省略
 func TestTowerPayloadClusterResources(t *testing.T) {
 	view, err := prepareTowerContext(context.Background(), nil, nil, defaultTowerContextBudgetTokens, 0, 0)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestTowerPayloadClusterResources(t *testing.T) {
 	}
 }
 
-// prior_diagnostics 只收录诊断助手消息，不含基线闲聊
+// 既往诊断只收录诊断助手消息，不含基线闲聊
 func TestTowerPayloadPrior(t *testing.T) {
 	history := []session.Message{
 		{Role: session.RoleUser, Content: "查 demo-api"},
@@ -107,7 +107,7 @@ func TestTowerPayloadPrior(t *testing.T) {
 	}
 }
 
-// L0 对超长单条打 truncated，体积须小于原文
+// 零级压缩对超长单条打截断标记，体积须小于原文
 func TestCompactL0(t *testing.T) {
 	long := strings.Repeat("字", 5000)
 	hist := []towerHistMsg{{
@@ -126,7 +126,7 @@ func TestCompactL0(t *testing.T) {
 	}
 }
 
-// L1 优先折叠非诊断；带 RunID 的诊断不得当非诊断 fold
+// 一级压缩优先折叠非诊断；带运行编号的诊断不得当非诊断折叠
 func TestCompactL1(t *testing.T) {
 	hist := []towerHistMsg{
 		{Role: session.RoleUser, Content: "闲聊很长" + strings.Repeat("x", 200)},
@@ -164,7 +164,7 @@ func TestCompactL1(t *testing.T) {
 	}
 }
 
-// 超预算时 L0/L1 留下 compact 痕迹，且诊断 run 不丢
+// 超预算时零级一级压缩留下压缩痕迹，且诊断运行不丢
 func TestTowerContextBudget(t *testing.T) {
 	history := make([]session.Message, 0, 40)
 	for i := 0; i < 40; i++ {
@@ -217,7 +217,7 @@ func TestTowerContextBudget(t *testing.T) {
 	}
 }
 
-// L2：紧预算 + mock LLM → handoff checkpoint 与近期原文
+// 二级压缩：紧预算加模拟大模型，产出交接检查点与近期原文
 func TestPrepareTowerContextL2(t *testing.T) {
 	history := make([]session.Message, 0, 30)
 	for i := 0; i < 24; i++ {
@@ -252,7 +252,7 @@ func TestPrepareTowerContextL2(t *testing.T) {
 		writeChatCompletion(w, `{"summary":"用户曾查 demo；诊断 run_keep 结论镜像拉取失败","run_ids":["run_keep"],"open_questions":[]}`)
 	})
 
-	// 极紧预算：逼出 L0/L1 后仍超，进入 L2
+	// 极紧预算：逼出第零层与第一层压缩后仍超，进入第二层
 	view, err := prepareTowerContext(context.Background(), client, history, 120, 40, 20)
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
@@ -279,7 +279,7 @@ func TestPrepareTowerContextL2(t *testing.T) {
 	}
 }
 
-// nil client 不得触发 L2，CheckpointContent 须为空
+// 客户端为空时不得触发二级压缩，检查点正文须为空
 func TestPrepareTowerContextNoClient(t *testing.T) {
 	history := make([]session.Message, 0, 20)
 	for i := 0; i < 20; i++ {
@@ -297,7 +297,7 @@ func TestPrepareTowerContextNoClient(t *testing.T) {
 	}
 }
 
-// L2 后仍超预算时优先压 recent，注入视图的 checkpoint 不得先被 fold 再截断
+// 二级压缩后仍超预算时优先压近期，注入视图的检查点不得先被折叠再截断
 func TestFitMergedL2View(t *testing.T) {
 	marker := "HANDOFF_MARKER_run_keep_镜像拉取失败"
 	body := "[checkpoint] session handoff summary\n" + marker + "\n" + strings.Repeat("详", 200)
@@ -312,7 +312,7 @@ func TestFitMergedL2View(t *testing.T) {
 			RunID:   "run_recent",
 		},
 	}
-	// 紧预算：若走旧逻辑会先 fold checkpoint
+	// 紧预算：若走旧逻辑会先折叠检查点
 	out := fitMergedL2View(merged, 100, body)
 
 	var cp *towerHistMsg
@@ -332,7 +332,7 @@ func TestFitMergedL2View(t *testing.T) {
 		t.Fatalf("injected checkpoint should keep handoff marker, got %q", cp.Content)
 	}
 
-	// recent 非诊断应已被折叠
+	// 近期非诊断应已被折叠
 	foldedRecent := false
 	for _, m := range out {
 		if m.Mode == session.ModeCheckpoint {
@@ -348,7 +348,7 @@ func TestFitMergedL2View(t *testing.T) {
 	}
 }
 
-// checkpoint 消息不得进入 prior_diagnostics
+// 检查点消息不得进入既往诊断
 func TestExtractPriorCheckpoint(t *testing.T) {
 	history := []session.Message{
 		{

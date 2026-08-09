@@ -27,7 +27,7 @@ func (e *escalateFakeExecutor) Execute(_ context.Context, run core.Run) (core.Re
 	return rep, e.evidence, nil
 }
 
-// escalate 成功后写入 RunLedger，Mode 为 diagnostic
+// 升格成功后写入诊断账本，模式为诊断
 func TestEscalateWritesLedger(t *testing.T) {
 	ctx := context.Background()
 	factory := core.NewFactory()
@@ -57,7 +57,7 @@ func TestEscalateWritesLedger(t *testing.T) {
 	}
 }
 
-// Execute 失败时不写账本
+// 执行失败时不写账本
 func TestEscalateExecuteErrorSkipsLedger(t *testing.T) {
 	ctx := context.Background()
 	factory := core.NewFactory()
@@ -73,7 +73,7 @@ func TestEscalateExecuteErrorSkipsLedger(t *testing.T) {
 	}
 }
 
-// ledger 为 nil 时拒绝
+// 台账为空时拒绝
 func TestEscalateRequiresLedger(t *testing.T) {
 	factory := core.NewFactory()
 	_, err := session.Escalate(context.Background(), factory, &escalateFakeExecutor{}, nil, "s", "q")

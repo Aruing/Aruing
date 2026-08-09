@@ -16,7 +16,7 @@ import (
 	"aruing/internal/tools"
 )
 
-// 用临时脚本伪造 kubectl，验证 argv 透传与证据语义
+// 用临时脚本伪造集群命令，验证参数透传与证据语义
 func TestToolExecuteSuccess(t *testing.T) {
 	kubectl := writeFakeKubectl(t, `#!/bin/sh
 printf '%s\n' "$@" > "$FAKE_KUBECTL_ARGV"
@@ -69,7 +69,7 @@ exit 0
 	}
 }
 
-// 非零退出码应写入证据而不是变成 Go error，便于上层纠错
+// 非零退出码应写入证据而不是变成语言错误，便于上层纠错
 func TestToolExecuteNonZeroExit(t *testing.T) {
 	kubectl := writeFakeKubectl(t, `#!/bin/sh
 printf 'boom' 1>&2
@@ -95,7 +95,7 @@ exit 3
 	}
 }
 
-// stdin 应完整进入子进程，证据只保留长度与哈希
+// 标准输入应完整进入子进程，证据只保留长度与哈希
 func TestToolExecuteStdin(t *testing.T) {
 	kubectl := writeFakeKubectl(t, `#!/bin/sh
 cat > "$FAKE_KUBECTL_STDIN"
@@ -183,7 +183,7 @@ exit 0
 	}
 }
 
-// 无法启动二进制时应返回 Go 错误
+// 无法启动二进制时应返回运行时错误
 func TestToolExecuteMissingBinary(t *testing.T) {
 	tool := mustNewTool(t, Config{
 		KubectlPath: filepath.Join(t.TempDir(), "missing-kubectl"),
@@ -196,7 +196,7 @@ func TestToolExecuteMissingBinary(t *testing.T) {
 	}
 }
 
-// 参数必须符合 Schema，未知字段与空 argv 应被拒绝
+// 参数必须符合规格，未知字段与空参数列表应被拒绝
 func TestToolParseArgs(t *testing.T) {
 	tool := mustNewTool(t, Config{KubectlPath: writeFakeKubectl(t, "#!/bin/sh\nexit 0\n")})
 
@@ -224,7 +224,7 @@ func TestToolParseArgs(t *testing.T) {
 	}
 }
 
-// CommandView 应对 token 类参数脱敏
+// 命令视图应对凭证类参数脱敏
 func TestCommandViewRedact(t *testing.T) {
 	got := commandView([]string{"--token=secret-value", "get", "pods", "--password", "p@ss"})
 	if strings.Contains(got, "secret-value") || strings.Contains(got, "p@ss") {
@@ -235,7 +235,7 @@ func TestCommandViewRedact(t *testing.T) {
 	}
 }
 
-// 工具应能注册进统一 Registry 并出现在 Specs 中
+// 工具应能注册进统一注册表并出现在规格列表中
 func TestToolRegisterSpecs(t *testing.T) {
 	tool := mustNewTool(t, Config{KubectlPath: writeFakeKubectl(t, "#!/bin/sh\nexit 0\n")})
 	registry := tools.NewRegistry()
@@ -251,7 +251,7 @@ func TestToolRegisterSpecs(t *testing.T) {
 	}
 }
 
-// 证明调用不经 shell：参数中的元字符不会被解释
+// 证明调用不经命令行外壳：参数中的元字符不会被解释
 func TestToolNoShell(t *testing.T) {
 	kubectl := writeFakeKubectl(t, `#!/bin/sh
 printf '%s\n' "$@" > "$FAKE_KUBECTL_ARGV"

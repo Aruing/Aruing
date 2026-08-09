@@ -8,7 +8,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// 从 path 读取 YAML 配置；允许省略任意键（零值）
+// 从给定路径读取配置文件；允许省略任意键，省略项保持零值
 func LoadFile(path string) (Config, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {

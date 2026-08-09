@@ -6,7 +6,7 @@ import (
 	"aruing/internal/core"
 )
 
-// 白盒测试共用：假诊断管道，记录收到的 Run 并返回固定报告
+// 白盒测试共用：假诊断管道，记录收到的运行并返回固定报告
 type fakeRunExecutor struct {
 	lastRun core.Run
 	report  core.Report

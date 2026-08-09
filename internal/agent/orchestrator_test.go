@@ -29,7 +29,7 @@ type testFactory struct {
 	timeCalls int
 }
 
-// 按顺序返回预设编号，用尽后用 prefix_N 形式继续，保证测试可断言前几次发号
+// 按顺序返回预设编号，用尽后用前缀加序号形式继续，保证测试可断言前几次发号
 func (f *testFactory) NewID(prefix string) (string, error) {
 	f.prefixes = append(f.prefixes, prefix)
 	if f.index < len(f.ids) {
@@ -71,8 +71,8 @@ func TestOrchestratorExecute(t *testing.T) {
 			"k8s.name":      "demo-api",
 		},
 	}})
-	// Planner 仍用固定模板；Target 引用在 agent.Plan 内按 knownRefs 校验
-	// 假规划不依赖 Target.ID，Refs 使用假设与节点侧约定
+	// 规划器仍用固定模板；目标引用在规划内按已知引用校验
+	// 假规划不依赖目标编号，引用使用假设与节点侧约定
 	planner := agenttest.NewFakePlanner(agent.Plan{
 		Hypotheses: []core.Hypothesis{{
 			ID:        "h_pods",
@@ -128,13 +128,13 @@ func TestOrchestratorExecute(t *testing.T) {
 	if len(report.Conclusions) != 1 || report.Conclusions[0].EvidenceIDs[0] != "e_runtime" {
 		t.Errorf("report evidence chain was not preserved: %#v", report.Conclusions)
 	}
-	// 假路径：先 target 发号，再规划任务证据发号
+	// 假路径：先目标发号，再规划任务证据发号
 	if len(factory.prefixes) < 2 || factory.prefixes[0] != "target" || factory.prefixes[1] != "e" {
 		t.Errorf("factory prefixes = %v, want target then e", factory.prefixes)
 	}
 }
 
-// 脚本化驱动：先 call_tool 再 submit_targets，证明定位循环经统一执行器取证
+// 脚本化驱动：先调用工具再提交目标，证明定位循环经统一执行器取证
 func TestOrchestratorResolveLoop(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
@@ -153,9 +153,9 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 				Refs:      []string{nodeID},
 			}},
 		},
-		// submit 在第二轮由驱动根据 state 填充 evidence
+		// 提交在第二轮由驱动根据状态填充证据
 	}}
-	// 第二步在 Next 内根据 state 动态构造，见 scriptedResolveDriver
+	// 第二步在下一步内根据状态动态构造，见脚本化解析驱动
 
 	parser := agenttest.NewFakeParser(core.Query{
 		ID: "query_loop",
@@ -209,7 +209,7 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 	}
 }
 
-// 超预算时不得伪造 Target
+// 超预算时不得伪造目标
 func TestOrchestratorResolveBudget(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
@@ -221,7 +221,7 @@ func TestOrchestratorResolveBudget(t *testing.T) {
 		ID:    "q",
 		Nodes: []core.Node{{ID: "n1", Text: "x"}},
 	})
-	// agent.Plan 不应被调用；用会失败的空规划兜底
+	// 规划不应被调用；用会失败的空规划兜底
 	planner := agenttest.NewFakePlanner(agent.Plan{})
 	verifier := agenttest.NewFakeVerifier(nil)
 	reporter := agenttest.NewFakeReporter(core.Report{ID: "r"})
@@ -243,7 +243,7 @@ func TestOrchestratorResolveBudget(t *testing.T) {
 	}
 }
 
-// 引用未知节点的 submit 应被编排拒绝
+// 引用未知节点的提交应被编排拒绝
 func TestOrchestratorResolveUnknownNode(t *testing.T) {
 	driver := &staticResolveDriver{action: agent.ResolveAction{
 		Action: agent.ResolveActionSubmitTargets,
@@ -271,7 +271,7 @@ func TestOrchestratorResolveUnknownNode(t *testing.T) {
 	}
 }
 
-// 脚本：第一轮 call_tool，之后根据已有证据 submit
+// 脚本：第一轮调用工具，之后根据已有证据提交
 type scriptedResolveDriver struct {
 	steps []agent.ResolveAction
 	calls int
@@ -301,7 +301,7 @@ func (d *scriptedResolveDriver) Next(ctx context.Context, state agent.ResolveSta
 	}, nil
 }
 
-// 每轮都 call_tool，用于预算测试
+// 每轮都调用工具，用于预算测试
 type alwaysCallToolDriver struct{}
 
 func (d *alwaysCallToolDriver) Next(ctx context.Context, state agent.ResolveState) (agent.ResolveAction, error) {
@@ -343,7 +343,7 @@ func countPrefix(prefixes []string, want string) int {
 	return n
 }
 
-// 调查循环：首轮 insufficient 触发再 agent.Plan，次轮 supported 即停；两轮各取证一次
+// 调查循环：首轮证据不足触发再规划，次轮支持即停；两轮各取证一次
 func TestOrchestratorInvestigateLoop(t *testing.T) {
 	taskPlan := agent.Plan{
 		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
@@ -369,7 +369,7 @@ func TestOrchestratorInvestigateLoop(t *testing.T) {
 	if got := countPrefix(factory.prefixes, "e"); got != 2 {
 		t.Errorf("evidence count = %d, want 2 (one per round)", got)
 	}
-	// 第二轮 agent.Plan 应看到首轮累积的证据
+	// 第二轮规划应看到首轮累积的证据
 	if len(planner.seen) < 2 || planner.seen[1] != 1 {
 		t.Errorf("round-1 planner did not see prior evidence: %v", planner.seen)
 	}
@@ -392,7 +392,7 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 		}
 	})
 
-	// 默认预算 1：即便 insufficient 也只跑一轮
+	// 默认预算一：即便证据不足也只跑一轮
 	t.Run("default single round", func(t *testing.T) {
 		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
@@ -405,7 +405,7 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 		}
 	})
 
-	// 后续轮空任务：提前结束，不再 Verify
+	// 后续轮空任务：提前结束，不再验证
 	t.Run("empty tasks", func(t *testing.T) {
 		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan, {}}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
@@ -463,7 +463,7 @@ func TestOrchestratorInvestigateRefuted(t *testing.T) {
 type scriptedPlanner struct {
 	plans []agent.Plan
 	calls int
-	seen  []int // 每次 agent.Plan 收到的累积证据条数
+	seen  []int // 每次规划收到的累积证据条数
 }
 
 func (p *scriptedPlanner) Plan(ctx context.Context, state agent.PlanState) (agent.Plan, error) {
@@ -550,7 +550,7 @@ func (failingTool) Execute(context.Context, json.RawMessage) (*core.Evidence, er
 	return nil, errors.New("simulated tool failure")
 }
 
-// 工具失败应被容忍：合成 error evidence 入链，调查继续并正常出报告
+// 工具失败应被容忍：合成错误证据入链，调查继续并正常出报告
 func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
@@ -580,7 +580,7 @@ func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("tool failure should be tolerated, got: %v", err)
 	}
-	// 两条证据都入链：一条正常、一条带 Error
+	// 两条证据都入链：一条正常、一条带错误
 	if len(verifier.evSeen) == 0 || len(verifier.evSeen[0]) != 2 {
 		t.Fatalf("evidence seen = %v, want 2 items", verifier.evSeen)
 	}
@@ -595,9 +595,9 @@ func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 	}
 }
 
-// 定位阶段已取的证据应作为首轮上下文喂给调查阶段的 Planner
-// scriptedResolveDriver 第一轮调一次 fake.list_pods 产生证据，第二轮提交目标
-// 调查首轮 Planner 调用时 state.Evidence 应含该证据（而非空）
+// 定位阶段已取的证据应作为首轮上下文喂给调查阶段的规划器
+// 脚本化解析驱动第一轮调一次伪装列举容器组产生证据，第二轮提交目标
+// 调查首轮规划器调用时状态中的证据应含该证据（而非空）
 func TestOrchestratorReuseResolveEvidence(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
@@ -637,13 +637,13 @@ func TestOrchestratorReuseResolveEvidence(t *testing.T) {
 	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_reuse", Question: "demo?"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	// scriptedResolveDriver 第一轮 call_tool 产生 1 条 evidence；调查首轮 Planner 应看到它
+	// 脚本化解析驱动第一轮调用工具产生 1 条证据；调查首轮规划器应看到它
 	if len(planner.seen) == 0 || planner.seen[0] != 1 {
 		t.Errorf("首轮回喂 evidence = %v, want 1 (定位证据复用)", planner.seen)
 	}
 }
 
-// 模拟 k8s 工具：按配置返回 api-resources stdout 或失败，用于侦察路径黑盒测试
+// 模拟集群工具：按配置返回资源清单标准输出或失败，用于侦察路径黑盒测试
 type fakeK8sAPIResourcesTool struct {
 	stdout string
 	fail   bool
@@ -675,7 +675,7 @@ func (t *fakeK8sAPIResourcesTool) Execute(ctx context.Context, args json.RawMess
 	}, nil
 }
 
-// 侦察 Evidence 进返回链（透明），但不在 Verifier 输入（侦察是 context 不是 verdict 依据）
+// 侦察证据进返回链（透明），但不在验证器输入（侦察是上下文不是判决依据）
 func TestOrchestratorReconEvidenceScope(t *testing.T) {
 	registry := tools.NewRegistry()
 	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {

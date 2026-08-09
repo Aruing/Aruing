@@ -1,5 +1,5 @@
-// Package toolstest 提供测试用假工具，仅供测试 import。
-// 产品二进制与 cmd 不得依赖本包。
+// 测试假工具包：提供固定响应的工具实现，仅供测试导入
+// 产品二进制与命令行入口不得依赖本包
 package toolstest
 
 import (
@@ -10,19 +10,19 @@ import (
 	"aruing/internal/tools"
 )
 
-// 返回固定的 Pod 列表数据，模拟 demo-api 未就绪的场景
+// 返回固定的容器组列表数据，模拟演示接口未就绪场景
 type fakeListPodsTool struct{}
 
-// Spec 返回假工具的固定规格
+// 返回假工具的固定规格
 func (t *fakeListPodsTool) Spec() tools.ToolSpec {
 	return tools.ToolSpec{
 		Name:        "fake.list_pods",
-		Description: "模拟查询 Pod 列表，返回固定数据：demo-api 未就绪，restartCount=8",
+		Description: "模拟查询容器组列表，返回固定数据：演示接口未就绪，重启次数为八",
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
 	}
 }
 
-// Execute 执行假查询，忽略参数，返回固定证据
+// 执行假查询，忽略参数，返回固定证据
 func (t *fakeListPodsTool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidence, error) {
 	raw := json.RawMessage(`{"pods":[{"name":"demo-api-7c8f9d","phase":"Running","ready":false,"reason":"CrashLoopBackOff","restartCount":8}]}`)
 
@@ -35,7 +35,7 @@ func (t *fakeListPodsTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}, nil
 }
 
-// NewFakeListPodsTool 创建假工具实例
+// 创建返回固定容器组列表的假工具
 func NewFakeListPodsTool() tools.Tool {
 	return &fakeListPodsTool{}
 }

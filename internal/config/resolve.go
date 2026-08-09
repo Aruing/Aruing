@@ -9,26 +9,26 @@ import (
 	"strings"
 )
 
-// 解析配置路径时可注入的依赖（单测用）
+// 解析配置路径时可注入的依赖，仅用于单测替换真实文件系统与环境
 type ResolveOptions struct {
-	// 工作目录；空则 os.Getwd
+	// 工作目录；空则取进程当前目录
 	Cwd string
-	// 用户配置根；空则 os.UserConfigDir
+	// 用户配置根目录；空则取系统用户配置目录
 	UserConfigDir string
-	// 系统级路径；空则非 Windows 用 /etc/aruing/config.yaml，Windows 为空（跳过）
+	// 系统级配置文件路径；空则非视窗系统默认为系统配置路径，视窗系统跳过
 	SystemPath string
-	// 环境查询；空则 os.LookupEnv
+	// 查询环境变量；空则使用进程环境
 	LookupEnv func(string) (string, bool)
-	// 文件存在性；空则 os.Stat
+	// 判断路径是否存在；空则使用真实文件系统
 	Stat func(string) (fs.FileInfo, error)
 }
 
-// 解析应加载的配置文件路径
+// 按优先级解析应加载的配置文件路径
 //
-// explicit 非空：必须存在，否则 error
-// 否则若 ARUING_CONFIG 非空：必须存在
-// 否则按 playground → user → system 找第一个存在的文件
-// ok=false 表示无文件（纯 env），err=nil
+// 显式路径非空时必须存在，否则报错
+// 否则若设置了配置路径环境变量且非空，该路径必须存在
+// 否则按演示目录、用户目录、系统路径依次取第一个存在的文件
+// 全部不存在时存在标志为假且错误为空，表示仅用环境变量
 func ResolveConfigPath(explicit string, opt ResolveOptions) (path string, ok bool, err error) {
 	lookup := opt.LookupEnv
 	if lookup == nil {
@@ -107,14 +107,14 @@ func ResolveConfigPath(explicit string, opt ResolveOptions) (path string, ok boo
 	return "", false, nil
 }
 
-// 解析路径 → 可选 LoadFile → MergeEnv → ValidateLLM
+// 解析配置路径后可选读文件，再叠环境变量并校验大模型三件套
 //
-// path 为实际使用的文件路径；无文件时 ""（调用方打印 "(none; env only)"）
+// 返回的路径为实际使用的文件；无文件时为空串，调用方可展示为仅环境变量
 func LoadResolved(explicit string) (Config, string, error) {
 	return LoadResolvedWith(explicit, ResolveOptions{})
 }
 
-// LoadResolvedWith 与 LoadResolved 相同，可注入 ResolveOptions
+// 与已解析加载相同，可注入路径与环境依赖以便单测
 func LoadResolvedWith(explicit string, opt ResolveOptions) (Config, string, error) {
 	lookup := opt.LookupEnv
 	if lookup == nil {

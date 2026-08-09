@@ -12,7 +12,7 @@ import (
 	"aruing/internal/store"
 )
 
-// 账本记录映射为 prior_run_details，含结论与证据 id/summary
+// 账本记录映射为既往运行详情，含结论与证据编号与摘要
 func TestBuildPriorRunDetails(t *testing.T) {
 	records := []session.DiagnosticRecord{{
 		RunID:     "run_1",
@@ -84,7 +84,7 @@ func TestBuildPriorRunDetailsRawBudget(t *testing.T) {
 	}
 }
 
-// Ledger 有 prior 时 user payload 含 prior_run_details；解释追问 reply 且不调 Execute
+// 台账有先前运行时用户载荷含先前详情；解释追问直接回复且不调执行
 func TestTowerPriorRunDetailsFromLedger(t *testing.T) {
 	ctx := context.Background()
 	ledger := store.NewMemoryRunLedger()
@@ -170,7 +170,7 @@ func TestTowerPriorRunDetailsFromLedger(t *testing.T) {
 	}
 }
 
-// 空账本：prior_run_details 为空；解释追问不调 Execute，不注入伪证据
+// 空账本：既往运行明细为空；解释追问不调执行，不注入伪证据
 func TestTowerEmptyLedgerNoPriorRuns(t *testing.T) {
 	ctx := context.Background()
 	ledger := store.NewMemoryRunLedger()

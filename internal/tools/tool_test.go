@@ -51,7 +51,7 @@ func (emptyNameTool) Execute(context.Context, json.RawMessage) (*core.Evidence, 
 	return nil, nil
 }
 
-// 模拟 Schema 非法的工具，用于验证注册阶段的 Schema 编译
+// 模拟参数规格非法的工具，用于验证注册阶段的规格编译
 type invalidSchemaTool struct {
 	schema json.RawMessage
 }
@@ -109,7 +109,7 @@ func TestRegistryRegister(t *testing.T) {
 
 // 无效工具应在注册阶段被拒绝，避免空名称污染注册表或空对象触发崩溃
 func TestRegistryValidate(t *testing.T) {
-	// 代表校验：nil、空名、坏 schema（JSON Schema 语义）
+	// 代表校验：空引用、空名、坏参数规格
 	tests := []struct {
 		name      string
 		tool      tools.Tool
@@ -132,7 +132,7 @@ func TestRegistryValidate(t *testing.T) {
 	}
 }
 
-// Specs 应按名称稳定排序，并返回可独立修改的副本
+// 规格列表应按名称稳定排序，并返回可独立修改的副本
 func TestRegistrySpecs(t *testing.T) {
 	registry := tools.NewRegistry()
 	for _, tool := range []tools.Tool{
@@ -153,7 +153,7 @@ func TestRegistrySpecs(t *testing.T) {
 		t.Fatalf("specs order = %q, %q, %q", specs[0].Name, specs[1].Name, specs[2].Name)
 	}
 
-	// 修改返回切片中的 Schema 不应污染注册表
+	// 修改返回切片中的参数规格不应污染注册表
 	specs[0].InputSchema[0] = 'X'
 	again := registry.Specs()
 	if again[0].InputSchema[0] == 'X' {
@@ -187,7 +187,7 @@ func TestDispatcherExecute(t *testing.T) {
 	}
 }
 
-// 空 RunID 表示基线非诊断观察，调度器应允许执行并原样拷贝到证据
+// 空运行编号表示基线非诊断观察，调度器应允许执行并原样拷贝到证据
 func TestDispatcherExecuteEmptyRunID(t *testing.T) {
 	registry := tools.NewRegistry()
 	tool := testEvidenceTool{
@@ -224,7 +224,7 @@ func TestDispatcherValidate(t *testing.T) {
 		t.Fatalf("register fake tool: %v", err)
 	}
 
-	// 代表校验：调度器无 registry、任务缺关键身份字段
+	// 代表校验：调度器无注册表、任务缺关键身份字段
 	tests := []struct {
 		name       string
 		dispatcher *tools.Dispatcher
@@ -270,7 +270,7 @@ func TestDispatcherNilEvidence(t *testing.T) {
 	requireErrorContains(t, err, "returned nil evidence")
 }
 
-// 仅用于 Specs 排序测试的最小工具
+// 仅用于规格排序测试的最小工具
 type namedSpecTool struct {
 	name string
 }

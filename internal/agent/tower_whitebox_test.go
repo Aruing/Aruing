@@ -10,7 +10,7 @@ import (
 	"aruing/internal/tools/toolstest"
 )
 
-// fetchBaselineClusterResources 在无 dispatcher 时返回 nil
+// 无调度器时基线集群资源侦察返回空
 func TestFetchBaselineClusterResourcesNoDispatcher(t *testing.T) {
 	tower := &TowerResponder{
 		factory: newTestFactory(t),
@@ -21,10 +21,10 @@ func TestFetchBaselineClusterResourcesNoDispatcher(t *testing.T) {
 	}
 }
 
-// 单条超预算时注入副本截断并标记；环内权威 raw 不变
+// 单条超预算时注入副本截断并标记；环内权威原文不变
 // 预算充足时保持全文，证明不是无条件截断
 func TestPrepareTowerObservationsTruncates(t *testing.T) {
-	// 远超 10 token 预算，迫使走截断路径
+	// 远超 10 词元预算，迫使走截断路径
 	raw := json.RawMessage(`{"stdout":"` + strings.Repeat("A", 500) + `"}`)
 	auth := []towerObservation{{
 		TaskID:   "t_1",
@@ -54,7 +54,7 @@ func TestPrepareTowerObservationsTruncates(t *testing.T) {
 	}
 }
 
-// 多条共享预算时优先保留较新观察全文；旧条截断或占位，权威切片不变
+// 多条共享预算时优先保留较新观察全文；旧条截断或占位，权威数据不变
 func TestPrepareTowerObservationsBudget(t *testing.T) {
 	oldMark := "OLD_RAW_MARK_zzz"
 	newMark := "NEW_RAW_MARK_yyy"

@@ -49,7 +49,7 @@ func testReportEvidence() []core.Evidence {
 	}
 }
 
-// 标准路径：回填编号、绑定 Run，并保留与 Verdict 对齐的结论
+// 标准路径：回填编号、绑定运行，并保留与判决对齐的结论
 func TestLLMReporterReport(t *testing.T) {
 	body := `{
 		"title":"demo-api 诊断报告",
@@ -96,9 +96,9 @@ func TestLLMReporterNewRequiresDeps(t *testing.T) {
 	}
 }
 
-// 非法模型输出触发业务重试并最终 ErrLLMOutputInconsistent
+// 非法模型输出触发业务重试并最终报输出不一致
 func TestLLMReporterInvalidOutput(t *testing.T) {
-	// 代表几类校验：改写 result、未知证据、漏结论、空 title
+	// 代表几类校验：改写结果、未知证据、漏结论、空标题
 	tests := []struct {
 		name string
 		body string
@@ -186,7 +186,7 @@ func TestLLMReporterRetry(t *testing.T) {
 	})
 }
 
-// Verdict 无证据时在入口拒绝，不进入 LLM
+// 判决无证据时在入口拒绝，不进入大模型
 func TestLLMReporterVerdictWithoutEvidence(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {

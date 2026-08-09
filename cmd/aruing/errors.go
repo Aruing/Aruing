@@ -9,9 +9,9 @@ import (
 	"aruing/internal/llm"
 )
 
-// 为 run 失败补充可操作的人话提示（L-8 最小版）
+// 为单次运行失败补充可操作的人话提示
 //
-// 保留原始错误链，仅在识别到 LLM 配置/输出类问题时追加建议
+// 保留原始错误链，仅在识别到大模型配置或输出类问题时追加建议
 // 无法分类时原样返回，避免误导
 func formatRunError(err error) error {
 	if err == nil {
