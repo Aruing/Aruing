@@ -1,15 +1,16 @@
-package agent
+package agent_test
 
 import (
 	"context"
 	"testing"
 
+	"aruing/internal/agent/agenttest"
 	"aruing/internal/core"
 )
 
 // 判断结果必须绑定猜想所在运行并保留证据引用，才能形成可回溯结论
 func TestFakeVerifierVerify(t *testing.T) {
-	verifier := NewFakeVerifier([]core.Verdict{{
+	verifier := agenttest.NewFakeVerifier([]core.Verdict{{
 		ID:           "verdict_demo",
 		RunID:        "stale_run",
 		HypothesisID: "h_demo",
@@ -81,7 +82,7 @@ func TestFakeVerifierValidate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := NewFakeVerifier(test.verdicts).Verify(context.Background(), core.Query{}, test.hypotheses, test.tasks, test.evidence)
+			_, err := agenttest.NewFakeVerifier(test.verdicts).Verify(context.Background(), core.Query{}, test.hypotheses, test.tasks, test.evidence)
 			if err == nil {
 				t.Fatal("verify evidence: error = nil")
 			}

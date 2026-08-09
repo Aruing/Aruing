@@ -1,16 +1,17 @@
-package agent
+package agent_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"aruing/internal/agent/agenttest"
 	"aruing/internal/core"
 )
 
 // 假解析器应稳定返回预设的问题结构，并把结果绑定到当前运行
 func TestFakeParserParse(t *testing.T) {
-	parser := NewFakeParser(core.Query{
+	parser := agenttest.NewFakeParser(core.Query{
 		ID:    "query_test",
 		RunID: "stale_run",
 		Goal:  "定位 demo 无法访问的原因",
@@ -78,7 +79,7 @@ func TestFakeParserValidate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := NewFakeParser(test.query).Parse(context.Background(), test.run)
+			_, err := agenttest.NewFakeParser(test.query).Parse(context.Background(), test.run)
 			if err == nil {
 				t.Fatal("parse query: error = nil")
 			}

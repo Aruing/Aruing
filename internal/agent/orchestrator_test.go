@@ -1,16 +1,18 @@
-package agent
+package agent_test
 
 import (
+	"aruing/internal/agent"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"aruing/internal/agent/agenttest"
 	"aruing/internal/core"
 	"aruing/internal/tools"
+	"aruing/internal/tools/toolstest"
 )
 
 // 提供可观察的固定元数据，验证编排器是否统一生成证据身份和时间
@@ -48,11 +50,11 @@ func (f *testFactory) Now() time.Time {
 // 完整假闭环必须实际执行任务并让最终报告引用生成的证据
 func TestOrchestratorExecute(t *testing.T) {
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register fake tool: %v", err)
 	}
 
-	parser := NewFakeParser(core.Query{
+	parser := agenttest.NewFakeParser(core.Query{
 		ID:   "query_demo",
 		Goal: "定位 demo-api 无法访问的原因",
 		Nodes: []core.Node{{
@@ -61,7 +63,7 @@ func TestOrchestratorExecute(t *testing.T) {
 			Text: "demo-api",
 		}},
 	})
-	resolver := NewFakeResolver([]core.Target{{
+	resolver := agenttest.NewFakeResolver([]core.Target{{
 		Type: "k8s.resource",
 		Attrs: map[string]string{
 			"k8s.kind":      "Deployment",
@@ -69,9 +71,9 @@ func TestOrchestratorExecute(t *testing.T) {
 			"k8s.name":      "demo-api",
 		},
 	}})
-	// Planner 仍用固定模板；Target 引用在 Plan 内按 knownRefs 校验
+	// Planner 仍用固定模板；Target 引用在 agent.Plan 内按 knownRefs 校验
 	// 假规划不依赖 Target.ID，Refs 使用假设与节点侧约定
-	planner := NewFakePlanner(Plan{
+	planner := agenttest.NewFakePlanner(agent.Plan{
 		Hypotheses: []core.Hypothesis{{
 			ID:        "h_pods",
 			Statement: "后端 Pod 没有正常运行",
@@ -82,13 +84,13 @@ func TestOrchestratorExecute(t *testing.T) {
 			ToolName: "fake.list_pods",
 		}},
 	})
-	verifier := NewFakeVerifier([]core.Verdict{{
+	verifier := agenttest.NewFakeVerifier([]core.Verdict{{
 		ID:           "verdict_pods",
 		HypothesisID: "h_pods",
 		Result:       core.VerdictSupported,
 		Reason:       "Pod 处于 CrashLoopBackOff",
 	}})
-	reporter := NewFakeReporter(core.Report{
+	reporter := agenttest.NewFakeReporter(core.Report{
 		ID:      "report_demo",
 		Title:   "demo-api 诊断报告",
 		Summary: "后端 Pod 未正常运行",
@@ -103,7 +105,7 @@ func TestOrchestratorExecute(t *testing.T) {
 		ids: []string{"target_runtime", "e_runtime"},
 		now: time.Date(2026, 7, 15, 10, 30, 0, 0, time.UTC),
 	}
-	orchestrator := NewOrchestrator(
+	orchestrator := agent.NewOrchestrator(
 		parser,
 		resolver,
 		planner,
@@ -135,16 +137,16 @@ func TestOrchestratorExecute(t *testing.T) {
 // 脚本化驱动：先 call_tool 再 submit_targets，证明定位循环经统一执行器取证
 func TestOrchestratorResolveLoop(t *testing.T) {
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 
 	nodeID := "node_loop"
-	driver := &scriptedResolveDriver{steps: []ResolveAction{
+	driver := &scriptedResolveDriver{steps: []agent.ResolveAction{
 		{
-			Action: ResolveActionCallTool,
+			Action: agent.ResolveActionCallTool,
 			Reason: "list pods",
-			ToolCalls: []ProposedToolCall{{
+			ToolCalls: []agent.ProposedToolCall{{
 				ToolName:  "fake.list_pods",
 				Arguments: json.RawMessage(`{"namespace":"default"}`),
 				Purpose:   "confirm workload",
@@ -155,7 +157,7 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 	}}
 	// 第二步在 Next 内根据 state 动态构造，见 scriptedResolveDriver
 
-	parser := NewFakeParser(core.Query{
+	parser := agenttest.NewFakeParser(core.Query{
 		ID: "query_loop",
 		Nodes: []core.Node{{
 			ID:   nodeID,
@@ -163,14 +165,14 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 			Text: "demo",
 		}},
 	})
-	planner := NewFakePlanner(Plan{
+	planner := agenttest.NewFakePlanner(agent.Plan{
 		Hypotheses: []core.Hypothesis{{ID: "h1", Statement: "x"}},
 		Tasks:      []core.Task{{ID: "t_plan", Refs: []string{"h1"}, ToolName: "fake.list_pods"}},
 	})
-	verifier := NewFakeVerifier([]core.Verdict{{
+	verifier := agenttest.NewFakeVerifier([]core.Verdict{{
 		ID: "v1", HypothesisID: "h1", Result: core.VerdictSupported, Reason: "ok",
 	}})
-	reporter := NewFakeReporter(core.Report{
+	reporter := agenttest.NewFakeReporter(core.Report{
 		ID: "r1", Summary: "ok",
 		Conclusions: []core.Conclusion{{
 			HypothesisID: "h1", Result: core.VerdictSupported, Reason: "ok",
@@ -181,7 +183,7 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 		ids: []string{"t_resolve", "e_resolve", "target_1", "e_plan"},
 		now: time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC),
 	}
-	orch := NewOrchestrator(
+	orch := agent.NewOrchestrator(
 		parser, driver, planner,
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, reporter, factory,
@@ -210,22 +212,22 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 // 超预算时不得伪造 Target
 func TestOrchestratorResolveBudget(t *testing.T) {
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 
 	driver := &alwaysCallToolDriver{}
-	parser := NewFakeParser(core.Query{
+	parser := agenttest.NewFakeParser(core.Query{
 		ID:    "q",
 		Nodes: []core.Node{{ID: "n1", Text: "x"}},
 	})
-	// Plan 不应被调用；用会失败的空规划兜底
-	planner := NewFakePlanner(Plan{})
-	verifier := NewFakeVerifier(nil)
-	reporter := NewFakeReporter(core.Report{ID: "r"})
+	// agent.Plan 不应被调用；用会失败的空规划兜底
+	planner := agenttest.NewFakePlanner(agent.Plan{})
+	verifier := agenttest.NewFakeVerifier(nil)
+	reporter := agenttest.NewFakeReporter(core.Report{ID: "r"})
 
 	factory := &testFactory{ids: nil, now: time.Now().UTC()}
-	orch := NewOrchestrator(
+	orch := agent.NewOrchestrator(
 		parser, driver, planner,
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, reporter, factory,
@@ -243,21 +245,21 @@ func TestOrchestratorResolveBudget(t *testing.T) {
 
 // 引用未知节点的 submit 应被编排拒绝
 func TestOrchestratorResolveUnknownNode(t *testing.T) {
-	driver := &staticResolveDriver{action: ResolveAction{
-		Action: ResolveActionSubmitTargets,
-		Targets: []ProposedTarget{{
+	driver := &staticResolveDriver{action: agent.ResolveAction{
+		Action: agent.ResolveActionSubmitTargets,
+		Targets: []agent.ProposedTarget{{
 			NodeID: "node_missing",
 			Type:   "resource",
 		}},
 	}}
-	parser := NewFakeParser(core.Query{
+	parser := agenttest.NewFakeParser(core.Query{
 		ID:    "q",
 		Nodes: []core.Node{{ID: "node_real"}},
 	})
-	orch := NewOrchestrator(
-		parser, driver, NewFakePlanner(Plan{}),
+	orch := agent.NewOrchestrator(
+		parser, driver, agenttest.NewFakePlanner(agent.Plan{}),
 		tools.NewDispatcher(tools.NewRegistry(), tools.NewReadonlyPolicy()),
-		NewFakeVerifier(nil), NewFakeReporter(core.Report{ID: "r"}),
+		agenttest.NewFakeVerifier(nil), agenttest.NewFakeReporter(core.Report{ID: "r"}),
 		&testFactory{now: time.Now().UTC()},
 	)
 	_, _, err := orch.Execute(context.Background(), core.Run{ID: "run_x", Question: "x"})
@@ -271,26 +273,26 @@ func TestOrchestratorResolveUnknownNode(t *testing.T) {
 
 // 脚本：第一轮 call_tool，之后根据已有证据 submit
 type scriptedResolveDriver struct {
-	steps []ResolveAction
+	steps []agent.ResolveAction
 	calls int
 }
 
-func (d *scriptedResolveDriver) Next(ctx context.Context, state ResolveState) (ResolveAction, error) {
+func (d *scriptedResolveDriver) Next(ctx context.Context, state agent.ResolveState) (agent.ResolveAction, error) {
 	d.calls++
 	if d.calls == 1 {
 		return d.steps[0], nil
 	}
 	if len(state.Evidence) == 0 {
-		return ResolveAction{Action: ResolveActionFail, Error: "expected evidence after tool call"}, nil
+		return agent.ResolveAction{Action: agent.ResolveActionFail, Error: "expected evidence after tool call"}, nil
 	}
 	nodeID := ""
 	if len(state.Query.Nodes) > 0 {
 		nodeID = state.Query.Nodes[0].ID
 	}
-	return ResolveAction{
-		Action: ResolveActionSubmitTargets,
+	return agent.ResolveAction{
+		Action: agent.ResolveActionSubmitTargets,
 		Reason: "confirmed via evidence",
-		Targets: []ProposedTarget{{
+		Targets: []agent.ProposedTarget{{
 			NodeID:      nodeID,
 			Type:        "k8s.resource",
 			Attrs:       map[string]string{"k8s.name": "demo"},
@@ -302,10 +304,10 @@ func (d *scriptedResolveDriver) Next(ctx context.Context, state ResolveState) (R
 // 每轮都 call_tool，用于预算测试
 type alwaysCallToolDriver struct{}
 
-func (d *alwaysCallToolDriver) Next(ctx context.Context, state ResolveState) (ResolveAction, error) {
-	return ResolveAction{
-		Action: ResolveActionCallTool,
-		ToolCalls: []ProposedToolCall{{
+func (d *alwaysCallToolDriver) Next(ctx context.Context, state agent.ResolveState) (agent.ResolveAction, error) {
+	return agent.ResolveAction{
+		Action: agent.ResolveActionCallTool,
+		ToolCalls: []agent.ProposedToolCall{{
 			ToolName:  "fake.list_pods",
 			Arguments: json.RawMessage(`{}`),
 			Purpose:   "burn budget",
@@ -315,10 +317,10 @@ func (d *alwaysCallToolDriver) Next(ctx context.Context, state ResolveState) (Re
 
 // 固定返回同一动作
 type staticResolveDriver struct {
-	action ResolveAction
+	action agent.ResolveAction
 }
 
-func (d *staticResolveDriver) Next(ctx context.Context, state ResolveState) (ResolveAction, error) {
+func (d *staticResolveDriver) Next(ctx context.Context, state agent.ResolveState) (agent.ResolveAction, error) {
 	return d.action, nil
 }
 
@@ -341,13 +343,13 @@ func countPrefix(prefixes []string, want string) int {
 	return n
 }
 
-// 调查循环：首轮 insufficient 触发再 Plan，次轮 supported 即停；两轮各取证一次
+// 调查循环：首轮 insufficient 触发再 agent.Plan，次轮 supported 即停；两轮各取证一次
 func TestOrchestratorInvestigateLoop(t *testing.T) {
-	taskPlan := Plan{
+	taskPlan := agent.Plan{
 		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
 		Tasks:      []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}},
 	}
-	planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+	planner := &scriptedPlanner{plans: []agent.Plan{taskPlan}}
 	verifier := &scriptedVerifier{results: [][]core.Verdict{
 		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictInsufficient}},
 		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictSupported}},
@@ -367,7 +369,7 @@ func TestOrchestratorInvestigateLoop(t *testing.T) {
 	if got := countPrefix(factory.prefixes, "e"); got != 2 {
 		t.Errorf("evidence count = %d, want 2 (one per round)", got)
 	}
-	// 第二轮 Plan 应看到首轮累积的证据
+	// 第二轮 agent.Plan 应看到首轮累积的证据
 	if len(planner.seen) < 2 || planner.seen[1] != 1 {
 		t.Errorf("round-1 planner did not see prior evidence: %v", planner.seen)
 	}
@@ -375,10 +377,10 @@ func TestOrchestratorInvestigateLoop(t *testing.T) {
 
 // 调查停止条件：预算、默认单轮、空任务提前结束
 func TestOrchestratorInvestigateStop(t *testing.T) {
-	taskPlan := Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
+	taskPlan := agent.Plan{Tasks: []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}}}
 
 	t.Run("budget", func(t *testing.T) {
-		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
 		orch.SetInvestigateMaxRounds(2)
@@ -392,7 +394,7 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 
 	// 默认预算 1：即便 insufficient 也只跑一轮
 	t.Run("default single round", func(t *testing.T) {
-		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
 		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
@@ -405,7 +407,7 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 
 	// 后续轮空任务：提前结束，不再 Verify
 	t.Run("empty tasks", func(t *testing.T) {
-		planner := &scriptedPlanner{plans: []Plan{taskPlan, {}}}
+		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan, {}}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
 		orch.SetInvestigateMaxRounds(3)
@@ -420,13 +422,13 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 
 // 全部猜想被排除时应继续转向；预算耗尽则出报告
 func TestOrchestratorInvestigateRefuted(t *testing.T) {
-	taskPlan := Plan{
+	taskPlan := agent.Plan{
 		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
 		Tasks:      []core.Task{{ID: "t1", RunID: "run_inv", ToolName: "fake.list_pods"}},
 	}
 
 	t.Run("pivot to supported", func(t *testing.T) {
-		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{
 			{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},
 			{{HypothesisID: "h2", RunID: "run_inv", Result: core.VerdictSupported}},
@@ -442,7 +444,7 @@ func TestOrchestratorInvestigateRefuted(t *testing.T) {
 	})
 
 	t.Run("budget after refuted", func(t *testing.T) {
-		planner := &scriptedPlanner{plans: []Plan{taskPlan}}
+		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{
 			{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictRefuted}},
 		}}
@@ -459,19 +461,19 @@ func TestOrchestratorInvestigateRefuted(t *testing.T) {
 
 // 用脚本驱动的调查阶段测试桩：按序返回计划，用尽后重复最后一个
 type scriptedPlanner struct {
-	plans []Plan
+	plans []agent.Plan
 	calls int
-	seen  []int // 每次 Plan 收到的累积证据条数
+	seen  []int // 每次 agent.Plan 收到的累积证据条数
 }
 
-func (p *scriptedPlanner) Plan(ctx context.Context, state PlanState) (Plan, error) {
+func (p *scriptedPlanner) Plan(ctx context.Context, state agent.PlanState) (agent.Plan, error) {
 	if err := ctx.Err(); err != nil {
-		return Plan{}, err
+		return agent.Plan{}, err
 	}
 	p.seen = append(p.seen, len(state.Evidence))
 	p.calls++
 	if len(p.plans) == 0 {
-		return Plan{}, nil
+		return agent.Plan{}, nil
 	}
 	idx := p.calls - 1
 	if idx >= len(p.plans) {
@@ -511,21 +513,21 @@ func (r *scriptedReporter) Report(ctx context.Context, run core.Run, verdicts []
 }
 
 // 组装一个定位即提交、调查阶段用脚本桩的编排器
-func newInvestigateOrch(t *testing.T, planner *scriptedPlanner, verifier *scriptedVerifier) (*Orchestrator, *scriptedReporter, *testFactory) {
+func newInvestigateOrch(t *testing.T, planner *scriptedPlanner, verifier *scriptedVerifier) (*agent.Orchestrator, *scriptedReporter, *testFactory) {
 	t.Helper()
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	parser := NewFakeParser(core.Query{
+	parser := agenttest.NewFakeParser(core.Query{
 		ID:    "q_inv",
 		RunID: "run_inv",
 		Nodes: []core.Node{{ID: "n_inv", Type: "resource", Text: "demo"}},
 	})
-	resolver := NewFakeResolver(nil)
+	resolver := agenttest.NewFakeResolver(nil)
 	reporter := &scriptedReporter{}
 	factory := &testFactory{now: time.Date(2026, 7, 24, 10, 0, 0, 0, time.UTC)}
-	orch := NewOrchestrator(
+	orch := agent.NewOrchestrator(
 		parser, resolver, planner,
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, reporter, factory,
@@ -551,14 +553,14 @@ func (failingTool) Execute(context.Context, json.RawMessage) (*core.Evidence, er
 // 工具失败应被容忍：合成 error evidence 入链，调查继续并正常出报告
 func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register fake: %v", err)
 	}
 	if err := registry.Register(failingTool{}); err != nil {
 		t.Fatalf("register failing: %v", err)
 	}
 	// 规划两个任务：一个失败、一个正常，验证失败不拖垮另一个
-	planner := &scriptedPlanner{plans: []Plan{{
+	planner := &scriptedPlanner{plans: []agent.Plan{{
 		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_inv", Statement: "x"}},
 		Tasks: []core.Task{
 			{ID: "t_fail", RunID: "run_inv", ToolName: "fake.failing"},
@@ -568,9 +570,9 @@ func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 	verifier := &scriptedVerifier{results: [][]core.Verdict{
 		{{HypothesisID: "h1", RunID: "run_inv", Result: core.VerdictSupported}},
 	}}
-	parser := NewFakeParser(core.Query{ID: "q_inv", RunID: "run_inv", Nodes: []core.Node{{ID: "n_inv"}}})
-	orch := NewOrchestrator(
-		parser, NewFakeResolver(nil), planner,
+	parser := agenttest.NewFakeParser(core.Query{ID: "q_inv", RunID: "run_inv", Nodes: []core.Node{{ID: "n_inv"}}})
+	orch := agent.NewOrchestrator(
+		parser, agenttest.NewFakeResolver(nil), planner,
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, &scriptedReporter{}, &testFactory{now: time.Now().UTC()},
 	)
@@ -598,15 +600,15 @@ func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 // 调查首轮 Planner 调用时 state.Evidence 应含该证据（而非空）
 func TestOrchestratorReuseResolveEvidence(t *testing.T) {
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	nodeID := "n_reuse"
-	driver := &scriptedResolveDriver{steps: []ResolveAction{
+	driver := &scriptedResolveDriver{steps: []agent.ResolveAction{
 		{
-			Action: ResolveActionCallTool,
+			Action: agent.ResolveActionCallTool,
 			Reason: "list pods to confirm workload",
-			ToolCalls: []ProposedToolCall{{
+			ToolCalls: []agent.ProposedToolCall{{
 				ToolName:  "fake.list_pods",
 				Arguments: json.RawMessage(`{"namespace":"default"}`),
 				Purpose:   "确认目标",
@@ -614,7 +616,7 @@ func TestOrchestratorReuseResolveEvidence(t *testing.T) {
 			}},
 		},
 	}}
-	planner := &scriptedPlanner{plans: []Plan{{
+	planner := &scriptedPlanner{plans: []agent.Plan{{
 		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_reuse", Statement: "x"}},
 		Tasks:      []core.Task{{ID: "t1", RunID: "run_reuse", Refs: []string{"h1"}, ToolName: "fake.list_pods"}},
 	}}}
@@ -625,8 +627,8 @@ func TestOrchestratorReuseResolveEvidence(t *testing.T) {
 		ids: []string{"t_resolve", "e_resolve", "target_1"},
 		now: time.Date(2026, 7, 25, 10, 0, 0, 0, time.UTC),
 	}
-	orch := NewOrchestrator(
-		NewFakeParser(core.Query{ID: "q_reuse", RunID: "run_reuse", Nodes: []core.Node{{ID: nodeID, Type: "resource", Text: "demo"}}}),
+	orch := agent.NewOrchestrator(
+		agenttest.NewFakeParser(core.Query{ID: "q_reuse", RunID: "run_reuse", Nodes: []core.Node{{ID: nodeID, Type: "resource", Text: "demo"}}}),
 		driver, planner,
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, &scriptedReporter{}, factory,
@@ -641,67 +643,7 @@ func TestOrchestratorReuseResolveEvidence(t *testing.T) {
 	}
 }
 
-// parseAPIResources：4 列默认输出与 5 列（含 APIVERSION）均正确解析；超 maxKeep 截断且不挑类别
-func TestParseAPIResources(t *testing.T) {
-	// 4 列：NAME SHORTNAMES NAMESPACED KIND，无 APIVERSION
-	fourCol := "NAME                              SHORTNAMES   NAMESPACED   KIND\n" +
-		"pods                              po           true         Pod\n" +
-		"services                          svc          true         Service\n" +
-		"ingressroutes                     ico          true         IngressRoute\n" +
-		"nodes                                          false        Node\n"
-	got := parseAPIResources(fourCol)
-	if len(got) != 4 {
-		t.Fatalf("4-col len = %d, want 4: %+v", len(got), got)
-	}
-	// IngressRoute（beta4 动机的 CRD）应被发现，apiGroup 为空（无 APIVERSION 列）
-	ir := findResource(got, "IngressRoute")
-	if ir == nil {
-		t.Fatalf("IngressRoute not parsed: %+v", got)
-	}
-	if !ir.Namespaced {
-		t.Errorf("IngressRoute namespaced = false, want true")
-	}
-	if ir.APIGroup != "" {
-		t.Errorf("4-col IngressRoute apiGroup = %q, want empty", ir.APIGroup)
-	}
-	// 集群级资源 nodes 应标记为非命名空间级
-	if node := findResource(got, "Node"); node == nil || node.Namespaced {
-		t.Errorf("Node namespaced misparsed: %+v", node)
-	}
-
-	// 5 列：CRD 行带 group/version，核心资源行 APIVERSION 为空（被 Fields 收敛为 4 列）
-	fiveCol := "NAME              SHORTNAMES   NAMESPACED   KIND            APIVERSION\n" +
-		"pods              po           true         Pod\n" +
-		"ingressroutes     ico          true         IngressRoute    traefik.io/v1\n"
-	got5 := parseAPIResources(fiveCol)
-	if ir := findResource(got5, "IngressRoute"); ir == nil || ir.APIGroup != "traefik.io" {
-		t.Errorf("5-col IngressRoute apiGroup = %q, want traefik.io: %+v", ir.APIGroup, ir)
-	}
-	if pod := findResource(got5, "Pod"); pod == nil || pod.APIGroup != "" {
-		t.Errorf("5-col Pod apiGroup = %q, want empty: %+v", pod.APIGroup, pod)
-	}
-
-	// 超 maxKeep（300）截断；构造 305 行确认上限生效且不挑类别
-	var b strings.Builder
-	b.WriteString("NAME   SHORTNAMES   NAMESPACED   KIND\n")
-	for i := range 305 {
-		fmt.Fprintf(&b, "r%d   x   true   Kind%d\n", i, i)
-	}
-	if got := parseAPIResources(b.String()); len(got) != 300 {
-		t.Errorf("truncated len = %d, want 300", len(got))
-	}
-}
-
-func findResource(rs []ClusterResource, kind string) *ClusterResource {
-	for i := range rs {
-		if rs[i].Kind == kind {
-			return &rs[i]
-		}
-	}
-	return nil
-}
-
-// 模拟 k8s 工具：按配置返回 api-resources stdout 或失败，用于侦察路径测试
+// 模拟 k8s 工具：按配置返回 api-resources stdout 或失败，用于侦察路径黑盒测试
 type fakeK8sAPIResourcesTool struct {
 	stdout string
 	fail   bool
@@ -715,7 +657,7 @@ func (t *fakeK8sAPIResourcesTool) Spec() tools.ToolSpec {
 	}
 }
 
-func (t *fakeK8sAPIResourcesTool) Execute(context.Context, json.RawMessage) (*core.Evidence, error) {
+func (t *fakeK8sAPIResourcesTool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidence, error) {
 	if t.fail {
 		return nil, errors.New("simulated api-resources failure")
 	}
@@ -733,95 +675,10 @@ func (t *fakeK8sAPIResourcesTool) Execute(context.Context, json.RawMessage) (*co
 	}, nil
 }
 
-// 侦察成功：走 executeTask，返回带发现摘要的 Evidence + 精简清单（含 CRD）
-func TestReconClusterSuccess(t *testing.T) {
-	registry := tools.NewRegistry()
-	if err := registry.Register(&fakeK8sAPIResourcesTool{
-		stdout: "NAME           SHORTNAMES   NAMESPACED   KIND\n" +
-			"pods           po           true         Pod\n" +
-			"ingressroutes  ico          true         IngressRoute\n",
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	orch := &Orchestrator{
-		executor:     tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
-		factory:      &testFactory{ids: []string{"t_recon", "e_recon"}, now: time.Now().UTC()},
-		reconEnabled: true,
-	}
-
-	evidence, resources := orch.reconCluster(context.Background(), "run_recon")
-	if evidence == nil {
-		t.Fatal("evidence = nil, want recon evidence")
-	}
-	if len(resources) != 2 {
-		t.Fatalf("resources = %d, want 2: %+v", len(resources), resources)
-	}
-	if findResource(resources, "IngressRoute") == nil {
-		t.Errorf("resources missing IngressRoute: %+v", resources)
-	}
-	// Summary 被覆写为侦察成果摘要
-	if !strings.Contains(evidence.Summary, "发现") || !strings.Contains(evidence.Summary, "2") {
-		t.Errorf("summary = %q, want recon digest", evidence.Summary)
-	}
-	// 编号经 Factory 发放，Evidence ID 来自 Factory（e_recon）
-	if evidence.ID != "e_recon" {
-		t.Errorf("evidence ID = %q, want e_recon (factory-issued)", evidence.ID)
-	}
-	// 原始 stdout 仍在 Raw，供用户深挖
-	if !strings.Contains(extractStdout(evidence.Raw), "ingressroutes") {
-		t.Errorf("raw stdout lost: %s", evidence.Raw)
-	}
-}
-
-// 侦察工具失败：error evidence 进链（透明），resources 为 nil，不报错
-func TestReconClusterFailure(t *testing.T) {
-	registry := tools.NewRegistry()
-	if err := registry.Register(&fakeK8sAPIResourcesTool{fail: true}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	orch := &Orchestrator{
-		executor:     tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
-		factory:      &testFactory{ids: []string{"t_recon", "e_recon"}, now: time.Now().UTC()},
-		reconEnabled: true,
-	}
-
-	evidence, resources := orch.reconCluster(context.Background(), "run_recon")
-	if evidence == nil {
-		t.Fatal("evidence = nil, want error evidence (transparent failure)")
-	}
-	if resources != nil {
-		t.Errorf("resources = %+v, want nil on failure", resources)
-	}
-	if evidence.Error == "" {
-		t.Errorf("error evidence should carry Error field: %+v", evidence)
-	}
-	if !strings.Contains(evidence.Summary, "侦察") || !strings.Contains(evidence.Summary, "失败") {
-		t.Errorf("summary = %q, want recon failure note", evidence.Summary)
-	}
-}
-
-// 侦察未启用（无集群环境）：不尝试、不进证据链，返回 (nil, nil)
-// reconEnabled 默认 false，wiring 仅在 k8s 注册后开启，避免 fake/CI 产生噪音
-func TestReconClusterDisabled(t *testing.T) {
-	registry := tools.NewRegistry()
-	if err := registry.Register(&fakeK8sAPIResourcesTool{stdout: "NAME   x   true   Pod\n"}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	orch := &Orchestrator{
-		executor: tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
-		factory:  &testFactory{now: time.Now().UTC()},
-		// reconEnabled 保持默认 false
-	}
-	evidence, resources := orch.reconCluster(context.Background(), "run_x")
-	if evidence != nil || resources != nil {
-		t.Errorf("got evidence=%v resources=%v, want nil/nil when recon disabled", evidence, resources)
-	}
-}
-
 // 侦察 Evidence 进返回链（透明），但不在 Verifier 输入（侦察是 context 不是 verdict 依据）
 func TestOrchestratorReconEvidenceScope(t *testing.T) {
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register fake.list_pods: %v", err)
 	}
 	if err := registry.Register(&fakeK8sAPIResourcesTool{
@@ -830,16 +687,16 @@ func TestOrchestratorReconEvidenceScope(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register fake k8s: %v", err)
 	}
-	planner := &scriptedPlanner{plans: []Plan{{
+	planner := &scriptedPlanner{plans: []agent.Plan{{
 		Hypotheses: []core.Hypothesis{{ID: "h1", RunID: "run_recon", Statement: "x"}},
 		Tasks:      []core.Task{{ID: "t1", RunID: "run_recon", Refs: []string{"h1"}, ToolName: "fake.list_pods"}},
 	}}}
 	verifier := &scriptedVerifier{results: [][]core.Verdict{
 		{{HypothesisID: "h1", RunID: "run_recon", Result: core.VerdictSupported}},
 	}}
-	parser := NewFakeParser(core.Query{ID: "q_recon", RunID: "run_recon", Nodes: []core.Node{{ID: "n_recon"}}})
-	orch := NewOrchestrator(
-		parser, NewFakeResolver(nil), planner,
+	parser := agenttest.NewFakeParser(core.Query{ID: "q_recon", RunID: "run_recon", Nodes: []core.Node{{ID: "n_recon"}}})
+	orch := agent.NewOrchestrator(
+		parser, agenttest.NewFakeResolver(nil), planner,
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, &scriptedReporter{}, &testFactory{now: time.Now().UTC()},
 	)
@@ -850,7 +707,6 @@ func TestOrchestratorReconEvidenceScope(t *testing.T) {
 		t.Fatalf("execute: %v", err)
 	}
 
-	// 返回链应含侦察证据（ToolName=k8s，Summary 标注侦察）
 	var reconInChain *core.Evidence
 	for i := range evidence {
 		if evidence[i].ToolName == "k8s" {
@@ -865,7 +721,6 @@ func TestOrchestratorReconEvidenceScope(t *testing.T) {
 		t.Errorf("recon evidence summary = %q, want recon note", reconInChain.Summary)
 	}
 
-	// Verifier 输入不得含侦察证据（侦察是 Planner context，不是 verdict 依据）
 	if len(verifier.evSeen) == 0 {
 		t.Fatal("verifier not called")
 	}

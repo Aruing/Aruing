@@ -1,17 +1,19 @@
-package agent
+package agent_test
 
 import (
+	"aruing/internal/agent"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"aruing/internal/agent/agenttest"
 	"aruing/internal/core"
 )
 
 // 假定位器应按 Query 节点生成目标，NodeID 来自输入而非模板固定值
 func TestFakeResolverNext(t *testing.T) {
-	resolver := NewFakeResolver([]core.Target{{
+	resolver := agenttest.NewFakeResolver([]core.Target{{
 		ID:     "stale_target",
 		RunID:  "stale_run",
 		NodeID: "stale_node",
@@ -23,7 +25,7 @@ func TestFakeResolverNext(t *testing.T) {
 		},
 		CreatedAt: time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC),
 	}})
-	state := ResolveState{
+	state := agent.ResolveState{
 		Query: core.Query{
 			ID:    "query_test",
 			RunID: "run_test",
@@ -40,7 +42,7 @@ func TestFakeResolverNext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	if action.Action != ResolveActionSubmitTargets {
+	if action.Action != agent.ResolveActionSubmitTargets {
 		t.Fatalf("action = %q, want submit_targets", action.Action)
 	}
 	if len(action.Targets) != 1 {
@@ -70,11 +72,11 @@ func TestFakeResolverNext(t *testing.T) {
 
 // 多节点应各自生成目标，NodeID 与输入顺序一一对应
 func TestFakeResolverMultiNode(t *testing.T) {
-	resolver := NewFakeResolver([]core.Target{
+	resolver := agenttest.NewFakeResolver([]core.Target{
 		{Type: "k8s.resource", Attrs: map[string]string{"k8s.name": "a"}},
 		{Type: "k8s.resource", Attrs: map[string]string{"k8s.name": "b"}},
 	})
-	state := ResolveState{
+	state := agent.ResolveState{
 		Query: core.Query{
 			RunID: "run_multi",
 			Nodes: []core.Node{
@@ -98,14 +100,14 @@ func TestFakeResolverMultiNode(t *testing.T) {
 
 // 无节点时应 fail，而不是提交空目标列表
 func TestFakeResolverEmptyNodes(t *testing.T) {
-	resolver := NewFakeResolver(nil)
-	action, err := resolver.Next(context.Background(), ResolveState{
+	resolver := agenttest.NewFakeResolver(nil)
+	action, err := resolver.Next(context.Background(), agent.ResolveState{
 		Query: core.Query{RunID: "run_empty"},
 	})
 	if err != nil {
 		t.Fatalf("next: %v", err)
 	}
-	if action.Action != ResolveActionFail {
+	if action.Action != agent.ResolveActionFail {
 		t.Fatalf("action = %q, want fail", action.Action)
 	}
 	if !strings.Contains(action.Error, "no nodes") {

@@ -1,9 +1,7 @@
-// 命令行程序是项目当前的入口
+// aruing 命令行入口：解析参数、组装依赖、输出诊断结果
 //
-// 这里只做命令解析和依赖组装：
-// - run：直连 Orchestrator.Execute（单轮诊断）
-// - chat：Session.Turn + Tower（多轮基线，需要根因时升格诊断）
-// 诊断推理、工具调用、存储和报告生成都放在内部模块中
+// 配置：YAML 文件（见 config.ResolveConfigPath）+ 环境变量覆盖；产品路径要求 LLM 齐全
+// 依赖在 wiring 中组装；本文件只负责 CLI 边界与输出
 package main
 
 import (
@@ -34,12 +32,23 @@ Usage:
 Commands:
   version          Print version information
   help             Print this help message
-  run <question>   Run a one-shot diagnosis for the given question
+  run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
+
+Configuration (file then env, env wins):
+  --config PATH            config YAML (or ARUING_CONFIG)
+  playground/config.yaml   default search from cwd
+  $XDG_CONFIG_HOME/aruing/config.yaml
+  /etc/aruing/config.yaml  (non-Windows)
+
+LLM (required for run/chat):
+  llm.base_url / ARUING_LLM_BASE_URL
+  llm.api_key  / ARUING_LLM_API_KEY
+  llm.model    / ARUING_LLM_MODEL
 
 Examples:
   aruing version
-  aruing run why is demo-api unreachable in default namespace
+  aruing run --config playground/config.yaml why is demo-api unreachable
   aruing chat hello
   aruing chat --session sess_xxx what about the redis dependency
 `
@@ -97,10 +106,12 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	format := fs.String("format", "markdown", "output format: markdown|json")
+	configPath := fs.String("config", "", "path to config YAML (or ARUING_CONFIG / search paths)")
+	verbose := fs.Bool("verbose", false, "print orchestrator progress to stderr (same as ARUING_DEBUG=1)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: aruing run [flags] <question>")
 		fmt.Fprintln(stderr, "")
-		fmt.Fprintln(stderr, "Run a diagnosis for the given question.")
+		fmt.Fprintln(stderr, "Run a diagnosis for the given question (requires LLM).")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "Flags:")
 		fs.PrintDefaults()
@@ -114,6 +125,19 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	question := strings.Join(fs.Args(), " ")
 	if question == "" {
 		return errors.New("run requires a question, e.g. aruing run why is demo-api unreachable")
+	}
+	switch *format {
+	case "markdown", "json":
+	default:
+		return fmt.Errorf("unknown format %q: use markdown or json", *format)
+	}
+
+	cfg, _, err := config.LoadResolved(*configPath)
+	if err != nil {
+		return formatRunError(err)
+	}
+	if *verbose {
+		cfg.Debug = true
 	}
 
 	factory := core.NewFactory()
@@ -130,8 +154,6 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		UpdatedAt: now,
 	}
 
-	// 配置由 internal/config 统一从 env 读取；LLM 三件套不全时 newOrchestrator 走全 fake
-	cfg := config.Load()
 	orchestrator, err := newOrchestrator(factory, cfg, stderr)
 	if err != nil {
 		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
@@ -156,6 +178,7 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 	fs.SetOutput(stderr)
 	sessionIDFlag := fs.String("session", "", "existing session id (omit to create a new session)")
 	format := fs.String("format", "markdown", "diagnostic report format: markdown|json (baseline is always plain text)")
+	configPath := fs.String("config", "", "path to config YAML (or ARUING_CONFIG / search paths)")
 	verbose := fs.Bool("verbose", false, "print Tower debug progress to stderr (same as ARUING_DEBUG=1)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: aruing chat [flags] [question]")
@@ -179,7 +202,10 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 		return fmt.Errorf("unknown format %q: use markdown or json", formatVal)
 	}
 
-	cfg := config.Load()
+	cfg, _, err := config.LoadResolved(*configPath)
+	if err != nil {
+		return formatRunError(err)
+	}
 	if *verbose {
 		cfg.Debug = true
 	}

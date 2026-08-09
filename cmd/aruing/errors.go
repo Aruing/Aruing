@@ -39,8 +39,9 @@ func runErrorHint(err error) string {
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "build llm client"),
-		strings.Contains(msg, "llm config"):
-		return "检查 ARUING_LLM_BASE_URL / ARUING_LLM_API_KEY / ARUING_LLM_MODEL 是否齐全（见 .env.example）"
+		strings.Contains(msg, "llm config"),
+		strings.Contains(msg, "llm configuration incomplete"):
+		return "检查配置文件 llm.* 或 ARUING_LLM_BASE_URL / API_KEY / MODEL（见 aruing.example.yaml）"
 	case strings.Contains(msg, "invalid api key"),
 		strings.Contains(msg, "authentication"),
 		strings.Contains(msg, "unauthorized"),

@@ -7,7 +7,7 @@
 // 规划器从 Registry.Specs 发现可用能力，不在接口层枚举资源类型或子命令
 //
 // 工具接口本身不限定只读；读写策略由 Policy（挂在 Dispatcher 执行前）与注册层面控制
-// 当前阶段假闭环仍使用假工具；真实后端工具按工作单元逐步接入
+// 测试替身见 toolstest.NewFakeListPodsTool
 package tools
 
 import (
@@ -220,37 +220,4 @@ func validateInputSchema(schema json.RawMessage) error {
 		return fmt.Errorf("input schema is not a valid JSON Schema: %w", err)
 	}
 	return nil
-}
-
-// ---------- 假工具，用于最小闭环阶段验证证据链是否完整
-
-// 返回固定的 Pod 列表数据，模拟 demo-api 未就绪的场景
-type fakeListPodsTool struct{}
-
-// 返回假工具的固定规格，参数可忽略
-func (t *fakeListPodsTool) Spec() ToolSpec {
-	return ToolSpec{
-		Name:        "fake.list_pods",
-		Description: "模拟查询 Pod 列表，返回固定数据：demo-api 未就绪，restartCount=8",
-		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
-	}
-}
-
-// 执行假查询，忽略参数，返回固定证据
-// 证据的 ID 由调用方（调度器）或编排层在持久化时填充
-func (t *fakeListPodsTool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidence, error) {
-	raw := json.RawMessage(`{"pods":[{"name":"demo-api-7c8f9d","phase":"Running","ready":false,"reason":"CrashLoopBackOff","restartCount":8}]}`)
-
-	return &core.Evidence{
-		Source:      "fake",
-		ToolName:    t.Spec().Name,
-		CommandView: "kubectl get pods -n default -l app=demo-api",
-		Summary:     "找到 1 个 Pod：demo-api-7c8f9d，状态 CrashLoopBackOff，restartCount=8",
-		Raw:         raw,
-	}, nil
-}
-
-// 创建假工具实例，方便注册时使用
-func NewFakeListPodsTool() Tool {
-	return &fakeListPodsTool{}
 }
