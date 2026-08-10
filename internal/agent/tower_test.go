@@ -350,8 +350,8 @@ func TestFakeTowerSuspendThenResume(t *testing.T) {
 		t.Fatalf("clarify msg: %+v", r1.AssistantMessage)
 	}
 	runID := r1.AssistantMessage.RunID
-	if _, err := ledger.Get(ctx, runID); !errors.Is(err, session.ErrRunNotFound) {
-		t.Fatalf("ledger should be empty while suspended, got %v", err)
+	if _, gErr := ledger.Get(ctx, runID); !errors.Is(gErr, session.ErrRunNotFound) {
+		t.Fatalf("ledger should be empty while suspended, got %v", gErr)
 	}
 
 	exec.suspension = nil
