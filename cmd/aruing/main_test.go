@@ -99,6 +99,41 @@ func TestNewSessionStackRequiresLLM(t *testing.T) {
 	}
 }
 
+// 配置横幅应展示路径与模型，且不泄露密钥
+func TestWriteConfigBanner(t *testing.T) {
+	var stderr bytes.Buffer
+	writeConfigBanner(&stderr, "/tmp/demo.yaml", config.Config{
+		LLM: config.LLM{
+			BaseURL: "https://example.com/v1",
+			APIKey:  "sk-secret",
+			Model:   "demo-model",
+		},
+	})
+	got := stderr.String()
+	if !strings.Contains(got, "path=/tmp/demo.yaml") {
+		t.Fatalf("missing path: %q", got)
+	}
+	if !strings.Contains(got, "llm_model=demo-model") {
+		t.Fatalf("missing model: %q", got)
+	}
+	if !strings.Contains(got, "ready=true") {
+		t.Fatalf("want ready=true: %q", got)
+	}
+	if strings.Contains(got, "sk-secret") {
+		t.Fatalf("must not print api key: %q", got)
+	}
+
+	stderr.Reset()
+	writeConfigBanner(&stderr, "", config.Config{})
+	got = stderr.String()
+	if !strings.Contains(got, "path=env-only") {
+		t.Fatalf("want env-only path: %q", got)
+	}
+	if !strings.Contains(got, "ready=false") {
+		t.Fatalf("want ready=false: %q", got)
+	}
+}
+
 // 组装编排器在无大模型配置时应硬失败，无假实现回退
 func TestNewOrchestratorRequiresLLM(t *testing.T) {
 	cfg := config.Config{}

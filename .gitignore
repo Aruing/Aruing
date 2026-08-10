@@ -28,6 +28,10 @@ go.work.sum
 .env.*
 !.env.example
 
+# Local config with secrets (keep aruing.example.yaml tracked)
+/aruing.yaml
+/playground/
+
 # Local agent skill installs
 /.agents/
 /agent/
