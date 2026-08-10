@@ -119,7 +119,7 @@ type suspendedRun struct {
 type Orchestrator struct {
 	// 负责把原始问题转换为结构化线索
 	parser parser
-	// 负责定位阶段每轮提议（工具 / 提交目标 / 失败）
+	// 负责定位阶段每轮提议（工具 / 提交目标 / 澄清 / 失败）
 	resolver ResolveDriver
 	// 负责生成候选猜想和工具任务
 	planner planner
@@ -333,6 +333,7 @@ func (o *Orchestrator) continueFromResolve(
 	}, nil
 }
 
+// 存入挂起快照并标记运行状态为等待用户；深拷贝定位状态避免污染
 func (o *Orchestrator) putSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state ResolveState) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -353,6 +354,7 @@ func (o *Orchestrator) putSuspended(run core.Run, query core.Query, clarify Clar
 	o.suspended[run.ID] = snap
 }
 
+// 取出并删除挂起快照；不存在时返回 false，调用方据此报错或降级
 func (o *Orchestrator) takeSuspended(runID string) (*suspendedRun, bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()

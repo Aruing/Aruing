@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-10（**文档对齐代码**：`0.1.0-beta8` 配置文件化已由 #61/#62 落地；候选与 architecture 同步）
+> 最后更新：2026-08-10（**beta9 进行中**：通用挂起抽象 + resolve clarify 端到端已落地，待验收/归档；architecture 同步 `Suspension`/`Outcome`/`ModeClarify`/`SuspendedRunner`）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta9` / 澄清挂起（waiting_user）** ⏳ 进行中（2026-08-10 起）：`core.Suspension`/`Outcome` 通用抽象；`ResolveActionClarify` + `Clarifications`；`Orchestrator.Execute` 返 `Outcome` + `Resume`/`FindSuspended`；`session.SuspendedRunner`（可选）+ `session.Resume` + `ModeClarify`；Tower 入口挂起恢复优先；CLI `run` 遇挂起打印问题并退出。plan 在笔记 `plan/0.1.0-beta9/`。#15–#17 兑现的第一锤。
 
 **`0.1.0-beta8` / 配置文件化** ✅ 完成并归档（2026-08-10；#61 YAML + env 覆盖 + 路径链 + CLI 须 LLM；#62 config banner / playground ignore）。示例：`aruing.example.yaml`；`--config` / `ARUING_CONFIG` / 默认搜索路径。plan 在笔记 `plan/archive/0.1.0-beta8/`。
 
@@ -44,6 +46,7 @@
 | beta6-fix-1 | 网关空响应 / Tower 可恢复重试 | ✅ | #58 |
 | beta7-1～2 | 压缩后按范围回灌 + smoke | ✅ | #59–#60 |
 | beta8 | 配置文件化 | ✅ | #61 YAML/路径链/merge；#62 banner；Fake* → agenttest/toolstest；CLI 无假闭环 |
+| beta9 | 澄清挂起（waiting_user） | ⏳ | `Suspension`/`Outcome`/`RunStatusWaitingUser`；`ResolveActionClarify`；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口优先 Resume；CLI run 遇挂起退出 |
 
 产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -51,17 +54,17 @@
 
 ## 下一步
 
-**下一项**：从 `0.1.0` 候选里选下一里程碑（beta8 已归档）。
+**下一项**：beta9 验收 → 归档（demo：chat 同名资源多 ns 触发 clarify → 用户答 → 报告；`make test`/`make check` 全绿）。
 
-**0.1.0 候选**（仍有效）：
+**0.1.0 候选**（beta9 后仍有效）：
 
-1. **`waiting_user`**（澄清/挂起）
-2. **T-obs-3**（k8s Summary 人读，可选 polish）
-3. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
+1. **T-obs-3**（k8s Summary 人读，可选 polish）
+2. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
+3. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
 
-**已完成、勿再当候选**：配置文件化（beta8 / #61/#62）。
+**已完成、勿再当候选**：配置文件化（beta8 / #61/#62）、`waiting_user`（beta9）。
 
-已确认（beta5–8 交付后仍有效）：
+已确认（beta5–9 交付后仍有效）：
 
 1. 入口 `Session.Turn`；**Tower** 每轮必经；诊断 = escalate → Orchestrator
 2. Run = 正式证据链；**进程内 `RunLedger` 为 Report/Evidence 读回权威源**
@@ -71,10 +74,11 @@
 6. **配置**：可选 YAML + env 覆盖 + `--config`；`config.Config` 为 wiring 唯一入口
 7. **#18**：Store / Ledger 进程内可全量；注入触顶用压缩，禁止 last-N
 8. **深解 / 回灌**：`prior_run_details`；`rehydrated_messages`
+9. **挂起 / 恢复**：`Suspension`（通用，`Stage` 留位）；`Outcome` 三态；`Resume` 重跑（非 checkpoint）；挂起态进程内、退出即丢；澄清次数不限（#18），触顶明确失败
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`（活跃）与 `plan/archive/`（已关）。
 
-已落地要点（beta2–8 摘要）：
+已落地要点（beta2–9 摘要）：
 
 1. **#4a/#4b～#8 / R-1**：Policy + 可选 k8s；LLM 角色链；config env；Markdown CLI
 2. **beta3**：`investigateLoop` + 工具失败容错 + 报告证据明细
@@ -85,16 +89,18 @@
 7. **beta6-fix-1**：空响应/JSON 可恢复重试（#58）
 8. **beta7**：压缩后按范围回灌（#59）
 9. **beta8**：YAML 配置文件 + 路径链 + env 覆盖；CLI 去假闭环（#61/#62）
+10. **beta9**：`Suspension`/`Outcome` 通用挂起抽象；resolve clarify 端到端；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口挂起恢复优先
 
 ## 编排与多轮
 
 | 项 | 结论 |
 | --- | --- |
-| 诊断管道 | 线性 `Orchestrator.Execute` 仍是**诊断升格路径**的实现；#15–#17 不变 |
-| 用户侧多轮 | **已落地**：`Session.Turn` + Tower + `aruing chat`（O-1） |
+| 诊断管道 | `Orchestrator.Execute` 返 `Outcome`（`Report` 或 `Suspension`）；`Resume` 恢复挂起；#15–#17 不变 |
+| 用户侧多轮 | **已落地**：`Session.Turn` + Tower + `aruing chat`（O-1）；挂起时 Tower 入口优先 Resume |
 | 正式诊断读回 | **已落地（beta6）**：`RunLedger` 进程内 |
 | 深解 / 回灌 | **已落地（beta6/7）** |
 | 配置文件 | **已落地（beta8）**：文件 → env → CLI |
+| 澄清挂起 | **已落地（beta9）**：`Suspension`/`Outcome` + resolve clarify + `Resume`；进程内、退出即丢 |
 | 会否推倒 core/tools | **否** |
 | 单轮期禁止事项 | 动编排/工具/角色时仍对照笔记 `plan/archive/0.0.1-beta2/2026-7-22.md` §4 |
 
@@ -121,7 +127,7 @@
 | --- | --- |
 | L-8 | CLI 已有最小 `formatRunError`；更细分类可随配置扩展再补 |
 | C-1 | ✅ env 收敛到 `internal/config`；**文件化 ✅ beta8** |
-| O-1 | ✅ 用户侧多轮 / 深解 / 回灌已关；`waiting_user` 仍开放 |
+| O-1 | ✅ 用户侧多轮 / 深解 / 回灌 / 澄清挂起已关（beta9） |
 | R-1 | ✅ CLI 默认 Markdown，`--format json` 保留 |
 
 更多条目与关闭条件见笔记仓 plan。

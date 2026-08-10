@@ -42,7 +42,7 @@ func NewDiagnoseResponder(factory *core.Factory, executor RunExecutor, ledger Ru
 	}
 }
 
-// 建运行（填会话编号与问题）→ 执行 → 落账本 → 用报告标题与摘要拼简短回复
+// 建运行（填会话编号与问题）→ 执行 → 完成时落账本并拼诊断回复；挂起时返回澄清正文
 func (r *DiagnoseResponder) Respond(ctx context.Context, in RespondInput) (RespondOutput, error) {
 	if r == nil {
 		return RespondOutput{}, fmt.Errorf("diagnose responder is nil")
