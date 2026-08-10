@@ -8,6 +8,8 @@
 
 **`0.1.0-beta7` / 压缩后按范围回灌（PR-C）** ✅ 完成并归档（2026-08-08 关闭）：`locateRange`（规则优先 + LLM 兜底）→ `rehydrateRange` → `compactRange`；Tower 注入 `rehydrated_messages`（#59）；LLM smoke 路径 B（超长 pad 逼 L0 后追问）stderr 见 `rehydrated=N`，回答命中 Store 原文标记、不 re-escalate。路径 A（真诊断 L2）本机集群 API 不可达未跑。plan 在笔记 `plan/archive/0.1.0-beta7/`。
 
+**`0.1.0-beta6-fix-1` / 网关空响应 · Tower 可恢复重试** ✅ 完成并归档（2026-08-07 关闭 · **修复型**）：`ErrEmptyResponse` / `ErrJSONParse` sentinel；LLM 客户端空响应退避重试；Tower decide 业务重试，耗尽包 `ErrLLMOutputInconsistent`（Go 1.20+ 多 `%w` 保留双 sentinel）；`ARUING_DEBUG` / `chat --verbose` → Tower 重试 progress 写 stderr（#58）。plan 在笔记 `plan/archive/0.1.0-beta6-fix-1/`。
+
 **`0.1.0-beta6` / 按 run 深解** ✅ 完成并归档（2026-08-06 关闭）：进程内 `RunLedger` 落账；Tower `prior_run_details` 注入结论+证据（#18 raw 预算）；解释默认 reply；wiring smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta6/`。
 
 **`0.1.0-beta5-fix-2` / 基线浅查与环境可见性** ✅ 完成并归档（2026-08-01 关闭 · **修复型**）：证据纪律 + 基线 `cluster_resources` recon + 默认 12 轮 tool / 触顶自动 escalate（#50/#52/#53）。plan 在笔记 `plan/archive/0.1.0-beta5-fix-2/`。
@@ -39,6 +41,7 @@
 | beta6-1 | Run 账本 + escalate 落账 | ✅ | #55；`RunLedger` + `MemoryRunLedger` |
 | beta6-2 | Tower 方案 A 注入加深 | ✅ | `prior_run_details`；证据 raw 共享预算；解释默认 reply |
 | beta6-3 | wiring smoke + 文档收尾 | ✅ | 空账本单测；chat 诊断→续聊依据 smoke；关里程碑 |
+| beta6-fix-1 | 网关空响应 / Tower 可恢复重试 | ✅ | #58；`ErrEmptyResponse`/`ErrJSONParse` + 多 `%w`；`ARUING_DEBUG`/`--verbose` |
 | beta7-1 | locate + rehydrate + compactRange + Tower 接线 | ✅ | #59；规则优先+LLM 兜底；`rehydrated_messages` |
 | beta7-2 | smoke + 文档收尾 | ✅ | LLM 路径 B 回灌命中；关里程碑（路径 A 集群不可达未跑） |
 
@@ -76,7 +79,8 @@
 5. **beta5-fix-1**：基线/定位观察注入 Raw + 共享预算 #18（#45–#47）
 6. **beta5-fix-2**：基线 recon + 证据纪律 + 默认 12 轮/触顶 escalate（#50/#52/#53）
 7. **beta6**：`RunLedger` 落账（#55）+ Tower `prior_run_details` 深解 + smoke/文档收尾
-8. **beta7**：压缩后按范围回灌（#59）+ LLM smoke 路径 B
+8. **beta6-fix-1**：`ErrEmptyResponse`/`ErrJSONParse` sentinel + Tower 可恢复重试 + 多 `%w` 错误链（#58）
+9. **beta7**：压缩后按范围回灌（#59）+ LLM smoke 路径 B
 
 ## 编排与多轮
 
