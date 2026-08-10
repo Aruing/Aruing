@@ -18,10 +18,17 @@
 
 ## 当前阶段
 
-版本 **`0.1.0`** / 可追问的诊断助手（进行中）。里程碑 **`0.1.0-beta7`（压缩后按范围回灌）已关闭**；`0.1.0-beta6`（按 run 深解）已关闭。
+**正在开发中 —— 收拢诊断闭环。** 预计 **2026 年 8 月底** 完成可用闭环。
 
-- `aruing run` — 单轮诊断（线性 Orchestrator）  
-- `aruing chat` — 多轮 Session + Tower（须 LLM；需根因时 escalate；成功落 `RunLedger`；同会话追问注入 `prior_run_details`，解释默认 reply；compact 后按范围回灌 `rehydrated_messages`）  
+Aruing 现在已能端到端跑通，但仍处于早期：
+
+- **目前仅支持简单的试用 / 测试** —— 尚未达到生产可用
+- **配套的交互与工程化仍在开发** —— 终端输入交互、结构化日志等打磨尚未完成
+
+当前能力（版本 `0.1.0` 进行中）：
+
+- `aruing run` — 单轮诊断（线性 Orchestrator）
+- `aruing chat` — 多轮 Session + Tower（须 LLM；需根因时 escalate；`RunLedger` + `prior_run_details`；compact 后按范围回灌 `rehydrated_messages`）
 
 详见 [`docs/project-state.md`](docs/project-state.md)。
 

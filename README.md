@@ -18,10 +18,17 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-Version **`0.1.0`** — *askable diagnostic assistant* (in progress). Milestone **`0.1.0-beta7`** (post-compaction range rehydrate) **closed**; `0.1.0-beta6` (deep follow-up by run) closed.
+**In active development — closing the diagnostic loop.** Targeting a usable closed loop by **end of August 2026**.
 
-- `aruing run` — single-shot diagnosis via linear Orchestrator  
-- `aruing chat` — multi-turn Session + Tower (LLM required); escalate when root cause is needed; successful escalate writes `RunLedger`; follow-ups inject `prior_run_details` (explain via reply by default); after compact, range rehydrate restores Store text into `rehydrated_messages` when needed
+Aruing runs end-to-end today, but it's still early:
+
+- **Only simple trials / testing are supported right now** — not production-ready
+- **Supporting UX & engineering is still in progress** — terminal input UX, structured logging, and similar polish are not yet built
+
+What works today (version `0.1.0`, in progress):
+
+- `aruing run` — single-shot diagnosis via linear Orchestrator
+- `aruing chat` — multi-turn Session + Tower (LLM required); escalate when root cause is needed; `RunLedger` + `prior_run_details`; after compaction, range rehydrate restores Store text into `rehydrated_messages`
 
 Details: [`docs/project-state.md`](docs/project-state.md).
 
