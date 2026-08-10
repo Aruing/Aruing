@@ -30,6 +30,7 @@
 - 每轮最多一条工具调用；不要编造工具返回结果
 - 若 history 含 `[folded]` / `[truncated...]`，仍以 `prior_run_details` / `prior_diagnostics` 与可见摘要为准；不得编造未出现的步骤细节
 - 若提供了 `rehydrated_messages`，答该步「为什么 / 当时如何」时引用其中原文要点；仍不伪装本轮新裁决或新 Evidence
+- 若 history 最近助手 `mode` 为 `clarify`（诊断挂起问用户），程序会在决策前自动 Resume；你通常看不到该路径。勿把澄清答复误当成全新闲聊并忽略上下文
 
 ## 证据完整度（结论纪律）
 

@@ -114,13 +114,17 @@ func TestOrchestratorExecute(t *testing.T) {
 		reporter,
 		factory,
 	)
-	report, _, err := orchestrator.Execute(context.Background(), core.Run{
+	outcome, err := orchestrator.Execute(context.Background(), core.Run{
 		ID:       "run_demo",
 		Question: "demo-api 为什么访问不了",
 	})
 	if err != nil {
 		t.Fatalf("execute run: %v", err)
 	}
+	if outcome.Report == nil {
+		t.Fatalf("expected report, got suspension: %+v", outcome.Suspension)
+	}
+	report := *outcome.Report
 
 	if report.RunID != "run_demo" || report.Summary != "后端 Pod 未正常运行" {
 		t.Errorf("report was not bound to run: %#v", report)
@@ -188,14 +192,17 @@ func TestOrchestratorResolveLoop(t *testing.T) {
 		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
 		verifier, reporter, factory,
 	)
-	report, _, err := orch.Execute(context.Background(), core.Run{
+	outcome, err := orch.Execute(context.Background(), core.Run{
 		ID: "run_loop", Question: "demo?",
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if report.Summary != "ok" {
-		t.Errorf("report = %#v", report)
+	if outcome.Report == nil {
+		t.Fatalf("expected report, got suspension: %+v", outcome.Suspension)
+	}
+	if outcome.Report.Summary != "ok" {
+		t.Errorf("report = %#v", outcome.Report)
 	}
 	if driver.calls < 2 {
 		t.Errorf("driver calls = %d, want >= 2", driver.calls)
@@ -234,7 +241,7 @@ func TestOrchestratorResolveBudget(t *testing.T) {
 	)
 	orch.SetResolveMaxRounds(2)
 
-	_, _, err := orch.Execute(context.Background(), core.Run{ID: "run_budget", Question: "x"})
+	_, err := orch.Execute(context.Background(), core.Run{ID: "run_budget", Question: "x"})
 	if err == nil {
 		t.Fatal("error = nil, want budget exceeded")
 	}
@@ -262,12 +269,129 @@ func TestOrchestratorResolveUnknownNode(t *testing.T) {
 		agenttest.NewFakeVerifier(nil), agenttest.NewFakeReporter(core.Report{ID: "r"}),
 		&testFactory{now: time.Now().UTC()},
 	)
-	_, _, err := orch.Execute(context.Background(), core.Run{ID: "run_x", Question: "x"})
+	_, err := orch.Execute(context.Background(), core.Run{ID: "run_x", Question: "x"})
 	if err == nil {
 		t.Fatal("error = nil, want unknown node")
 	}
 	if !strings.Contains(err.Error(), "unknown node") {
 		t.Errorf("error = %q", err)
+	}
+}
+
+// 先澄清再提交：首轮 clarify，Resume 注入答复后提交目标
+type clarifyThenSubmitDriver struct {
+	calls int
+	seen  [][]string
+}
+
+func (d *clarifyThenSubmitDriver) Next(ctx context.Context, state agent.ResolveState) (agent.ResolveAction, error) {
+	d.calls++
+	d.seen = append(d.seen, append([]string(nil), state.Clarifications...))
+	if len(state.Clarifications) == 0 {
+		return agent.ResolveAction{
+			Action: agent.ResolveActionClarify,
+			Reason: "ambiguous namespace",
+			Clarify: &agent.ClarifyRequest{
+				Question: "是哪个命名空间？",
+				Options:  []string{"ns-a", "ns-b"},
+			},
+		}, nil
+	}
+	nodeID := ""
+	if len(state.Query.Nodes) > 0 {
+		nodeID = state.Query.Nodes[0].ID
+	}
+	return agent.ResolveAction{
+		Action: agent.ResolveActionSubmitTargets,
+		Reason: "disambiguated by user",
+		Targets: []agent.ProposedTarget{{
+			NodeID: nodeID,
+			Type:   "k8s.resource",
+			Attrs:  map[string]string{"k8s.namespace": state.Clarifications[0], "k8s.name": "demo"},
+		}},
+	}, nil
+}
+
+// 定位驱动首轮澄清 → 挂起 → Resume 注入答复后完成
+func TestOrchestratorSuspendAndResume(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	driver := &clarifyThenSubmitDriver{}
+	parser := agenttest.NewFakeParser(core.Query{
+		ID: "q_clarify",
+		Nodes: []core.Node{{
+			ID:   "n_demo",
+			Type: "resource",
+			Text: "demo",
+		}},
+	})
+	planner := agenttest.NewFakePlanner(agent.Plan{
+		Hypotheses: []core.Hypothesis{{ID: "h1", Statement: "x"}},
+		Tasks:      []core.Task{{ID: "t1", Refs: []string{"h1"}, ToolName: "fake.list_pods"}},
+	})
+	verifier := agenttest.NewFakeVerifier([]core.Verdict{{
+		ID: "v1", HypothesisID: "h1", Result: core.VerdictSupported, Reason: "ok",
+	}})
+	reporter := agenttest.NewFakeReporter(core.Report{ID: "r1", Summary: "ok"})
+	orch := agent.NewOrchestrator(
+		parser, driver, planner,
+		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
+		verifier, reporter, &testFactory{now: time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)},
+	)
+
+	run := core.Run{ID: "run_clarify", SessionID: "sess_c", Question: "demo 挂了"}
+	out1, err := orch.Execute(context.Background(), run)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if out1.Report != nil || out1.Suspension == nil {
+		t.Fatalf("want suspension, got %+v", out1)
+	}
+	if out1.Suspension.RunID != "run_clarify" || out1.Suspension.Stage != core.StageResolve {
+		t.Fatalf("suspension: %+v", out1.Suspension)
+	}
+	if !strings.Contains(out1.Suspension.Question, "命名空间") {
+		t.Fatalf("question: %q", out1.Suspension.Question)
+	}
+	if got := orch.FindSuspended("sess_c"); got != "run_clarify" {
+		t.Fatalf("FindSuspended = %q", got)
+	}
+
+	out2, err := orch.Resume(context.Background(), "run_clarify", "ns-a")
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if out2.Report == nil || out2.Suspension != nil {
+		t.Fatalf("want report after resume, got %+v", out2)
+	}
+	if out2.Report.Summary != "ok" {
+		t.Fatalf("report: %+v", out2.Report)
+	}
+	if orch.FindSuspended("sess_c") != "" {
+		t.Fatal("expected no suspended run after complete resume")
+	}
+	// 首轮无澄清；恢复轮应看到注入答复
+	if len(driver.seen) < 2 || len(driver.seen[1]) == 0 || driver.seen[1][0] != "ns-a" {
+		t.Fatalf("clarifications seen: %+v", driver.seen)
+	}
+}
+
+// 无挂起快照时 Resume 失败
+func TestOrchestratorResumeMissing(t *testing.T) {
+	orch := agent.NewOrchestrator(
+		agenttest.NewFakeParser(core.Query{ID: "q"}),
+		agenttest.NewFakeResolver(nil),
+		agenttest.NewFakePlanner(agent.Plan{}),
+		tools.NewDispatcher(tools.NewRegistry(), tools.NewReadonlyPolicy()),
+		agenttest.NewFakeVerifier(nil),
+		agenttest.NewFakeReporter(core.Report{}),
+		&testFactory{now: time.Now().UTC()},
+	)
+	_, err := orch.Resume(context.Background(), "missing", "ans")
+	if err == nil {
+		t.Fatal("expected error")
 	}
 }
 
@@ -357,7 +481,7 @@ func TestOrchestratorInvestigateLoop(t *testing.T) {
 	orch, reporter, factory := newInvestigateOrch(t, planner, verifier)
 	orch.SetInvestigateMaxRounds(3)
 
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	if planner.calls != 2 || verifier.calls != 2 {
@@ -384,7 +508,7 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
 		orch.SetInvestigateMaxRounds(2)
-		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 			t.Fatalf("execute: %v", err)
 		}
 		if planner.calls != 2 {
@@ -397,7 +521,7 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 		planner := &scriptedPlanner{plans: []agent.Plan{taskPlan}}
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
-		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 			t.Fatalf("execute: %v", err)
 		}
 		if planner.calls != 1 || verifier.calls != 1 {
@@ -411,7 +535,7 @@ func TestOrchestratorInvestigateStop(t *testing.T) {
 		verifier := &scriptedVerifier{results: [][]core.Verdict{{{Result: core.VerdictInsufficient}}}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
 		orch.SetInvestigateMaxRounds(3)
-		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 			t.Fatalf("execute: %v", err)
 		}
 		if planner.calls != 2 || verifier.calls != 1 {
@@ -435,7 +559,7 @@ func TestOrchestratorInvestigateRefuted(t *testing.T) {
 		}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
 		orch.SetInvestigateMaxRounds(3)
-		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 			t.Fatalf("execute: %v", err)
 		}
 		if planner.calls != 2 || verifier.calls != 2 {
@@ -450,7 +574,7 @@ func TestOrchestratorInvestigateRefuted(t *testing.T) {
 		}}
 		orch, _, _ := newInvestigateOrch(t, planner, verifier)
 		orch.SetInvestigateMaxRounds(2)
-		if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+		if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 			t.Fatalf("execute: %v", err)
 		}
 		if planner.calls != 2 {
@@ -577,7 +701,7 @@ func TestOrchestratorInvestigateToolFailure(t *testing.T) {
 		verifier, &scriptedReporter{}, &testFactory{now: time.Now().UTC()},
 	)
 
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_inv", Question: "x"}); err != nil {
 		t.Fatalf("tool failure should be tolerated, got: %v", err)
 	}
 	// 两条证据都入链：一条正常、一条带错误
@@ -634,7 +758,7 @@ func TestOrchestratorReuseResolveEvidence(t *testing.T) {
 		verifier, &scriptedReporter{}, factory,
 	)
 
-	if _, _, err := orch.Execute(context.Background(), core.Run{ID: "run_reuse", Question: "demo?"}); err != nil {
+	if _, err := orch.Execute(context.Background(), core.Run{ID: "run_reuse", Question: "demo?"}); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	// 脚本化解析驱动第一轮调用工具产生 1 条证据；调查首轮规划器应看到它
@@ -702,10 +826,14 @@ func TestOrchestratorReconEvidenceScope(t *testing.T) {
 	)
 	orch.SetReconEnabled(true)
 
-	_, evidence, err := orch.Execute(context.Background(), core.Run{ID: "run_recon", Question: "x"})
+	outcome, err := orch.Execute(context.Background(), core.Run{ID: "run_recon", Question: "x"})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	if outcome.Report == nil {
+		t.Fatalf("expected report, got suspension: %+v", outcome.Suspension)
+	}
+	evidence := outcome.Evidence
 
 	var reconInChain *core.Evidence
 	for i := range evidence {

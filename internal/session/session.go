@@ -22,6 +22,8 @@ const (
 	ModeBaseline = "baseline"
 	// 本轮走了正式诊断管道
 	ModeDiagnostic = "diagnostic"
+	// 诊断挂起，助手正文为澄清问题（等待用户下一轮答复）
+	ModeClarify = "clarify"
 	// 上下文压缩检查点（模型视图用，权威历史仍全量保留）
 	ModeCheckpoint = "checkpoint"
 )

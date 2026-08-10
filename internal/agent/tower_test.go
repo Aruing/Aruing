@@ -53,21 +53,54 @@ func newTestFactory(t *testing.T) *core.Factory {
 // 与基线塔最大尝试次数对齐（未导出，黑盒测试用字面量）
 const maxTowerAttempts = 3
 
-// 假诊断管道：记录收到的运行，并返回固定报告
+// 假诊断管道：记录收到的运行，并返回固定报告或挂起
 type fakeRunExecutor struct {
-	lastRun core.Run
-	report  core.Report
-	err     error
+	lastRun       core.Run
+	report        core.Report
+	suspension    *core.Suspension
+	err           error
+	resumeRunID   string
+	resumeAns     string
+	resumeOutcome *core.Outcome
+	suspendedID   string
 }
 
-func (f *fakeRunExecutor) Execute(_ context.Context, run core.Run) (core.Report, []core.Evidence, error) {
+func (f *fakeRunExecutor) Execute(_ context.Context, run core.Run) (core.Outcome, error) {
 	f.lastRun = run
 	if f.err != nil {
-		return core.Report{}, nil, f.err
+		return core.Outcome{}, f.err
+	}
+	if f.suspension != nil {
+		s := *f.suspension
+		if s.RunID == "" {
+			s.RunID = run.ID
+		}
+		if s.SessionID == "" {
+			s.SessionID = run.SessionID
+		}
+		return core.Outcome{Suspension: &s}, nil
 	}
 	rep := f.report
 	rep.RunID = run.ID
-	return rep, nil, nil
+	return core.Outcome{Report: &rep}, nil
+}
+
+func (f *fakeRunExecutor) Resume(_ context.Context, runID, answer string) (core.Outcome, error) {
+	f.resumeRunID = runID
+	f.resumeAns = answer
+	if f.err != nil {
+		return core.Outcome{}, f.err
+	}
+	if f.resumeOutcome != nil {
+		return *f.resumeOutcome, nil
+	}
+	rep := f.report
+	rep.RunID = runID
+	return core.Outcome{Report: &rep}, nil
+}
+
+func (f *fakeRunExecutor) FindSuspended(sessionID string) string {
+	return f.suspendedID
 }
 
 // 假塔直接回复：基线模式且无诊断运行
@@ -277,6 +310,104 @@ func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(out.Content), "budget") {
 		t.Fatalf("user-facing content must not mention budget: %q", out.Content)
+	}
+}
+
+// 假塔升格挂起：澄清模式、账本空；再 Resume 完成写账
+func TestFakeTowerSuspendThenResume(t *testing.T) {
+	ctx := context.Background()
+	factory := newTestFactory(t)
+	mem := store.NewMemoryStore()
+	ledger := store.NewMemoryRunLedger()
+	exec := &fakeRunExecutor{
+		suspension: &core.Suspension{
+			Stage:    core.StageResolve,
+			Question: "是哪个命名空间？",
+			Options:  []string{"ns-a", "ns-b"},
+		},
+	}
+	tower := &agenttest.FakeTowerResponder{
+		Factory:  factory,
+		Executor: exec,
+		Ledger:   ledger,
+		Decide: func(in session.RespondInput) (string, string, string) {
+			return "escalate", "", in.UserText
+		},
+	}
+	svc := session.NewService(mem, factory, tower)
+	sess, err := svc.NewSession(ctx)
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	r1, err := svc.Turn(ctx, sess.ID, "demo 挂了")
+	if err != nil {
+		t.Fatalf("turn1: %v", err)
+	}
+	if r1.AssistantMessage.Mode != session.ModeClarify {
+		t.Fatalf("mode1: %q", r1.AssistantMessage.Mode)
+	}
+	if r1.AssistantMessage.RunID == "" || !strings.Contains(r1.AssistantMessage.Content, "命名空间") {
+		t.Fatalf("clarify msg: %+v", r1.AssistantMessage)
+	}
+	runID := r1.AssistantMessage.RunID
+	if _, gErr := ledger.Get(ctx, runID); !errors.Is(gErr, session.ErrRunNotFound) {
+		t.Fatalf("ledger should be empty while suspended, got %v", gErr)
+	}
+
+	exec.suspension = nil
+	exec.resumeOutcome = &core.Outcome{
+		Report: &core.Report{Title: "完成", Summary: "澄清后诊断完成"},
+	}
+	out2, err := session.Resume(ctx, exec, ledger, sess.ID, runID, "ns-a")
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if out2.Mode != session.ModeDiagnostic || out2.RunID != runID {
+		t.Fatalf("output2: %+v", out2)
+	}
+	if exec.resumeRunID != runID || exec.resumeAns != "ns-a" {
+		t.Fatalf("resume args: id=%q ans=%q", exec.resumeRunID, exec.resumeAns)
+	}
+	rec, err := ledger.Get(ctx, runID)
+	if err != nil {
+		t.Fatalf("ledger get: %v", err)
+	}
+	if rec.Report.Summary != "澄清后诊断完成" {
+		t.Fatalf("record: %+v", rec)
+	}
+}
+
+// 真塔：会话有挂起时优先 Resume，不重新走 LLM
+func TestTowerResumePriority(t *testing.T) {
+	// 任何 LLM 调用都失败：若误走 LLM 会炸
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "should not call llm while resuming", http.StatusInternalServerError)
+	})
+	exec := &fakeRunExecutor{
+		suspendedID: "run_wait",
+		resumeOutcome: &core.Outcome{
+			Report: &core.Report{Title: "完成", Summary: "已恢复"},
+		},
+	}
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+	out, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_wait",
+		UserText:  "ns-a",
+	})
+	if err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if out.Mode != session.ModeDiagnostic || out.RunID != "run_wait" {
+		t.Fatalf("output: %+v", out)
+	}
+	if exec.resumeRunID != "run_wait" || exec.resumeAns != "ns-a" {
+		t.Fatalf("resume: id=%q ans=%q", exec.resumeRunID, exec.resumeAns)
+	}
+	if !strings.Contains(out.Content, "已恢复") {
+		t.Fatalf("content: %q", out.Content)
 	}
 }
 

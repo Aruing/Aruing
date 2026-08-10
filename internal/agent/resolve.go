@@ -24,6 +24,8 @@ const (
 	ResolveActionCallTool ResolveActionKind = "call_tool"
 	// 提交已确认目标，校验通过后结束定位阶段
 	ResolveActionSubmitTargets ResolveActionKind = "submit_targets"
+	// 多义匹配且无法工具消歧时向用户澄清；编排挂起运行
+	ResolveActionClarify ResolveActionKind = "clarify"
 	// 无法确认目标时显式失败，编排中止本次运行
 	ResolveActionFail ResolveActionKind = "fail"
 )
@@ -41,6 +43,16 @@ type ResolveState struct {
 	Round int
 	// 允许的工具调用上限
 	MaxRounds int
+	// 用户澄清答复累积（Resume 重跑时注入）；优先据此消歧
+	Clarifications []string
+}
+
+// 定位驱动向用户澄清的请求内容
+type ClarifyRequest struct {
+	// 面向用户的问题
+	Question string
+	// 可选候选列表，可空
+	Options []string
 }
 
 // 定位驱动提议的一次工具调用，尚未分配任务编号
@@ -79,6 +91,8 @@ type ResolveAction struct {
 	ToolCalls []ProposedToolCall
 	// 提交目标时至少一条
 	Targets []ProposedTarget
+	// 澄清时非空
+	Clarify *ClarifyRequest
 	// 失败时的错误说明，优先于理由展示给调用方
 	Error string
 }

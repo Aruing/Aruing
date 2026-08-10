@@ -177,6 +177,18 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	t.progressf("tower: context_ready hist=%d checkpoint=%v", len(view.Hist), view.CheckpointContent != "")
 
 	// 压缩后按范围回灌：视图丢失旧文时，定位相关区间从权威存储取原文注入
+	// 挂起恢复优先：会话内有 waiting_user 的 run 时，本轮用户原文作澄清答复，不经动作决策
+	if runner, ok := t.executor.(session.SuspendedRunner); ok {
+		if runID := runner.FindSuspended(in.SessionID); runID != "" {
+			t.progressf("tower: resume suspended run=%s", runID)
+			out, resumeErr := session.Resume(ctx, runner, t.ledger, in.SessionID, runID, in.UserText)
+			if resumeErr != nil {
+				return session.RespondOutput{}, resumeErr
+			}
+			return out, nil
+		}
+	}
+
 	// 定位规则优先、大模型兜底；命中后窗内压缩压进子预算，作为回灌消息注入
 	var rehydrated []rehydratedMsg
 	if viewCompactedAwayDetail(view) {

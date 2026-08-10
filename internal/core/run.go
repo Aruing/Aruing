@@ -31,6 +31,8 @@ const (
 	RunStatusReported RunStatus = "reported"
 	// 运行遇到不可恢复错误，报告可能不存在或只包含部分信息
 	RunStatusFailed RunStatus = "failed"
+	// 运行挂起等待用户澄清；进程内索引，退出即丢
+	RunStatusWaitingUser RunStatus = "waiting_user"
 )
 
 // 标记某个故障猜想被证据验证后的结果，空值表示调用方尚未完成判断
