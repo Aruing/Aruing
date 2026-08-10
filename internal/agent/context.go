@@ -203,8 +203,8 @@ func buildTowerContextView(
 ) (hist []towerHistMsg, priors []towerPriorDiagnostic) {
 	view, err := prepareTowerContext(context.Background(), nil, history, budgetTokens, maxMsgTokens, previewTokens)
 	if err != nil {
-// 空客户端路径不应失败；回退为未压缩视图
-	return messagesToHist(history), extractPriorDiagnostics(history)
+		// 空客户端路径不应失败；回退为未压缩视图
+		return messagesToHist(history), extractPriorDiagnostics(history)
 	}
 	return view.Hist, view.Priors
 }

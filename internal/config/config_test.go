@@ -161,8 +161,8 @@ debug: true
 	}
 
 	minimal := filepath.Join(dir, "min.yaml")
-	if err := os.WriteFile(minimal, []byte("llm:\n  model: only\n"), 0o600); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(minimal, []byte("llm:\n  model: only\n"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 	cfg, err = LoadFile(minimal)
 	if err != nil {

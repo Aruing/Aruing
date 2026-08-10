@@ -59,7 +59,7 @@ func buildTooling(toolsCfg config.Tools) (tooling, error) {
 		return tooling{}, err
 	}
 
-	var policy tools.Policy = tools.NewReadonlyPolicy()
+	var policy = tools.NewReadonlyPolicy()
 	if toolsCfg.AllowDiagnosticExec {
 		policy = tools.NewDiagnosticPolicy()
 	}
