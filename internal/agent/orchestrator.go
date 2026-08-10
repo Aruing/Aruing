@@ -142,8 +142,8 @@ type Orchestrator struct {
 	// 运行过程进度输出；默认丢弃，命令行接标准错误让用户实时看到诊断流程
 	progress io.Writer
 	// 挂起运行索引（runID → 快照）；澄清 Resume 用
-	mu         sync.Mutex
-	suspended  map[string]*suspendedRun
+	mu        sync.Mutex
+	suspended map[string]*suspendedRun
 }
 
 // 绑定完整闭环所需依赖并创建编排器
