@@ -8,7 +8,7 @@ import (
 	"aruing/internal/core"
 )
 
-// 建运行并执行正式诊断，成功时写入诊断账本，组装诊断模式的应答输出
+// 建运行并执行正式诊断；完成写账本，挂起则返回澄清模式应答
 // 基线塔升格与临时诊断应答器共用，避免两套建运行逻辑
 func Escalate(
 	ctx context.Context,
@@ -50,27 +50,107 @@ func Escalate(
 		UpdatedAt: now,
 	}
 
-	report, evidence, err := executor.Execute(ctx, run)
+	outcome, err := executor.Execute(ctx, run)
 	if err != nil {
 		return RespondOutput{}, fmt.Errorf("execute run: %w", err)
 	}
+	return outcomeToRespond(ctx, ledger, sessionID, question, run.ID, outcome)
+}
 
+// 恢复挂起运行：注入用户答复，完成写账本，再次挂起则再澄清
+func Resume(
+	ctx context.Context,
+	runner SuspendedRunner,
+	ledger RunLedger,
+	sessionID, runID, answer string,
+) (RespondOutput, error) {
+	if err := ctx.Err(); err != nil {
+		return RespondOutput{}, fmt.Errorf("resume: %w", err)
+	}
+	if runner == nil {
+		return RespondOutput{}, fmt.Errorf("resume: runner is nil")
+	}
+	if ledger == nil {
+		return RespondOutput{}, fmt.Errorf("resume: ledger is nil")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return RespondOutput{}, fmt.Errorf("resume: session id is required")
+	}
+	if strings.TrimSpace(runID) == "" {
+		return RespondOutput{}, fmt.Errorf("resume: run id is required")
+	}
+	if strings.TrimSpace(answer) == "" {
+		return RespondOutput{}, fmt.Errorf("resume: answer is required")
+	}
+
+	outcome, err := runner.Resume(ctx, runID, answer)
+	if err != nil {
+		return RespondOutput{}, fmt.Errorf("resume run: %w", err)
+	}
+	// 原问题在挂起快照内，账本 question 用用户澄清答复标注上下文；完成报告仍以 run 为准
+	return outcomeToRespond(ctx, ledger, sessionID, answer, runID, outcome)
+}
+
+// 将编排 Outcome 转为会话应答：完成落账本，挂起返回澄清正文
+func outcomeToRespond(
+	ctx context.Context,
+	ledger RunLedger,
+	sessionID, question, runID string,
+	outcome core.Outcome,
+) (RespondOutput, error) {
+	if outcome.Suspension != nil {
+		content := formatClarifyReply(outcome.Suspension)
+		return RespondOutput{
+			Content: content,
+			Mode:    ModeClarify,
+			RunID:   outcome.Suspension.RunID,
+		}, nil
+	}
+	if outcome.Report == nil {
+		return RespondOutput{}, fmt.Errorf("outcome: report and suspension both empty")
+	}
+	report := *outcome.Report
 	if err := ledger.Put(ctx, DiagnosticRecord{
-		RunID:     run.ID,
+		RunID:     runID,
 		SessionID: sessionID,
 		Question:  question,
 		Report:    report,
-		Evidence:  evidence,
+		Evidence:  outcome.Evidence,
 	}); err != nil {
 		return RespondOutput{}, fmt.Errorf("put run ledger: %w", err)
 	}
-
 	return RespondOutput{
 		Content: formatDiagnosticReply(report),
 		Mode:    ModeDiagnostic,
-		RunID:   run.ID,
+		RunID:   runID,
 		Report:  &report,
 	}, nil
+}
+
+// 将澄清问题与候选格式化为用户可见正文
+func formatClarifyReply(s *core.Suspension) string {
+	if s == nil {
+		return "需要更多信息才能继续诊断"
+	}
+	q := strings.TrimSpace(s.Question)
+	if q == "" {
+		q = "需要更多信息才能继续诊断"
+	}
+	if len(s.Options) == 0 {
+		return q
+	}
+	var b strings.Builder
+	b.WriteString(q)
+	b.WriteString("\n")
+	for _, opt := range s.Options {
+		opt = strings.TrimSpace(opt)
+		if opt == "" {
+			continue
+		}
+		b.WriteString("\n- ")
+		b.WriteString(opt)
+	}
+	return b.String()
 }
 
 // 将报告展开为可落库的诊断摘要（供后续会话解释引用，不人为砍字段条数）

@@ -160,12 +160,25 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
 	}
-	report, evidence, err := orchestrator.Execute(context.Background(), run)
+	outcome, err := orchestrator.Execute(context.Background(), run)
 	if err != nil {
 		return formatRunError(fmt.Errorf("execute diagnosis: %w", err))
 	}
-
-	return writeReport(stdout, *format, report, evidence)
+	if outcome.Suspension != nil {
+		// 单次 run 无会话环：澄清挂起时把问题打印到标准错误并退出非零
+		fmt.Fprintf(stderr, "需要澄清才能继续（run %s）：\n%s\n", outcome.Suspension.RunID, outcome.Suspension.Question)
+		if len(outcome.Suspension.Options) > 0 {
+			for _, opt := range outcome.Suspension.Options {
+				fmt.Fprintf(stderr, "  - %s\n", opt)
+			}
+		}
+		fmt.Fprintln(stderr, "提示：在 chat 会话中回复可恢复；单次 run 无交互环。")
+		return fmt.Errorf("diagnosis suspended waiting for user clarification")
+	}
+	if outcome.Report == nil {
+		return formatRunError(fmt.Errorf("execute diagnosis: empty outcome"))
+	}
+	return writeReport(stdout, *format, *outcome.Report, outcome.Evidence)
 }
 
 // 多轮入口：会话轮次加基线塔；无位置参数则从标准输入交互读行

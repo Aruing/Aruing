@@ -85,14 +85,14 @@ type fakeExecutor struct {
 	err     error
 }
 
-func (f *fakeExecutor) Execute(_ context.Context, run core.Run) (core.Report, []core.Evidence, error) {
+func (f *fakeExecutor) Execute(_ context.Context, run core.Run) (core.Outcome, error) {
 	f.lastRun = run
 	if f.err != nil {
-		return core.Report{}, nil, f.err
+		return core.Outcome{}, f.err
 	}
 	rep := f.report
 	rep.RunID = run.ID
-	return rep, nil, nil
+	return core.Outcome{Report: &rep}, nil
 }
 
 // 临时诊断加假执行器：助手消息应有运行编号，且执行时会话编号与当前会话一致

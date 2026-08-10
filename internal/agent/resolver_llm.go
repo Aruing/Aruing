@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"aruing/internal/core"
@@ -166,15 +167,18 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 		Round int `json:"round"`
 		// 编排允许的最大定位轮数
 		MaxRounds int `json:"maxRounds"`
+		// 用户澄清答复累积（Resume 注入）；优先据此消歧
+		Clarifications []string `json:"clarifications,omitempty"`
 	}
 
 	previews := prepareResolverRawPreviews(state.Evidence, defaultResolverEvidenceBudgetTokens)
 	p := payload{
-		Query:     state.Query,
-		Tasks:     make([]taskView, 0, len(state.Tasks)),
-		Evidence:  make([]evidenceView, 0, len(state.Evidence)),
-		Round:     state.Round,
-		MaxRounds: state.MaxRounds,
+		Query:          state.Query,
+		Tasks:          make([]taskView, 0, len(state.Tasks)),
+		Evidence:       make([]evidenceView, 0, len(state.Evidence)),
+		Round:          state.Round,
+		MaxRounds:      state.MaxRounds,
+		Clarifications: slices.Clone(state.Clarifications),
 	}
 	for _, task := range state.Tasks {
 		p.Tasks = append(p.Tasks, taskView{
@@ -279,7 +283,7 @@ func omitResolverRawPreview() string {
 
 // 模型输出中间结构，映射为定位动作前须校验
 type resolverLLMOutput struct {
-	// 动作：调用工具 / 提交目标 / 失败
+	// 动作：调用工具 / 提交目标 / 澄清 / 失败
 	Action string `json:"action"`
 	// 选择该动作的理由，供编排与排障阅读
 	Reason string `json:"reason"`
@@ -287,8 +291,18 @@ type resolverLLMOutput struct {
 	ToolCalls []resolverToolCall `json:"tool_calls"`
 	// 提交目标时的目标内容（无系统目标编号）
 	Targets []resolverTargetOut `json:"targets"`
+	// 澄清时的问题与可选候选
+	Clarify *resolverClarifyOut `json:"clarify"`
 	// 失败时的错误说明
 	Error string `json:"error"`
+}
+
+// 模型产出的澄清请求
+type resolverClarifyOut struct {
+	// 面向用户的问题
+	Question string `json:"question"`
+	// 可选候选列表
+	Options []string `json:"options"`
 }
 
 // 模型提议的一次工具调用，不含任务编号（由编排发放）
@@ -319,7 +333,7 @@ type resolverTargetOut struct {
 func mapResolverOutput(out resolverLLMOutput, state ResolveState, specs []tools.ToolSpec) (ResolveAction, error) {
 	action := ResolveActionKind(strings.TrimSpace(out.Action))
 	switch action {
-	case ResolveActionCallTool, ResolveActionSubmitTargets, ResolveActionFail:
+	case ResolveActionCallTool, ResolveActionSubmitTargets, ResolveActionClarify, ResolveActionFail:
 	default:
 		return ResolveAction{}, fmt.Errorf("unknown action %q", out.Action)
 	}
@@ -409,6 +423,14 @@ func mapResolverOutput(out resolverLLMOutput, state ResolveState, specs []tools.
 				Attrs:       attrs,
 				EvidenceIDs: append([]string(nil), t.EvidenceIDs...),
 			})
+		}
+	case ResolveActionClarify:
+		if out.Clarify == nil || strings.TrimSpace(out.Clarify.Question) == "" {
+			return ResolveAction{}, errors.New("clarify requires a non-empty question")
+		}
+		result.Clarify = &ClarifyRequest{
+			Question: strings.TrimSpace(out.Clarify.Question),
+			Options:  append([]string(nil), out.Clarify.Options...),
 		}
 	case ResolveActionFail:
 		if strings.TrimSpace(out.Error) == "" && strings.TrimSpace(out.Reason) == "" {

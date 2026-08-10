@@ -42,11 +42,11 @@ type RespondInput struct {
 type RespondOutput struct {
 	// 助手回复正文
 	Content string
-	// 助手展示模式：基线或诊断（检查点由检查点正文字段另写）
+	// 助手展示模式：基线、诊断或澄清（检查点由检查点正文字段另写）
 	Mode string
-	// 本轮若开了诊断则有
+	// 本轮若开了诊断或挂起澄清则有运行编号
 	RunID string
-	// 本轮若开了诊断则非空
+	// 本轮若诊断完成则非空；澄清挂起时为空
 	Report *core.Report
 	// 深层压缩交接摘要；非空时在助手消息前写入检查点
 	// 存储层仍保留压缩前全量历史，检查点是增补不是替换

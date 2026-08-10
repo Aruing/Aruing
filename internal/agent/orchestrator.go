@@ -25,6 +25,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"aruing/internal/core"
@@ -100,6 +101,19 @@ type entityFactory interface {
 	Now() time.Time
 }
 
+// 进程内挂起运行快照：澄清后 Resume 重跑定位起
+// 不做磁盘持久化；进程退出即丢
+type suspendedRun struct {
+	// 运行快照（含问题与会话编号）
+	run core.Run
+	// 解析后的问题结构，Resume 时复用避免重复解析
+	query core.Query
+	// 定位状态（任务、证据、澄清累积）
+	resolve ResolveState
+	// 最近一次澄清请求（面向用户）
+	clarify ClarifyRequest
+}
+
 // 保存完整假闭环所需的角色和执行依赖
 // 实例只控制调用顺序，不承担任何角色内部的业务判断
 type Orchestrator struct {
@@ -127,6 +141,9 @@ type Orchestrator struct {
 	reconEnabled bool
 	// 运行过程进度输出；默认丢弃，命令行接标准错误让用户实时看到诊断流程
 	progress io.Writer
+	// 挂起运行索引（runID → 快照）；澄清 Resume 用
+	mu         sync.Mutex
+	suspended  map[string]*suspendedRun
 }
 
 // 绑定完整闭环所需依赖并创建编排器
@@ -200,25 +217,95 @@ func (o *Orchestrator) progressf(format string, args ...any) {
 // 调用方据此区分「可容忍的工具失败」与「致命错误」；编排层决定容忍、暂停或重试
 var errToolFailed = errors.New("tool execution failed")
 
-// 从一次运行开始依次推进全部角色，成功时返回最终报告与调查阶段的全部证据
+// 从一次运行开始依次推进全部角色；完成时 Outcome.Report 非空，需澄清时 Outcome.Suspension 非空
 // 证据透出供命令行渲染调查链；线性执行到报告是最小单轮驱动方式，不是对外长期契约
-func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, []core.Evidence, error) {
+func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Outcome, error) {
 	if err := ctx.Err(); err != nil {
-		return core.Report{}, nil, fmt.Errorf("execute run: %w", err)
+		return core.Outcome{}, fmt.Errorf("execute run: %w", err)
 	}
 	if err := o.validate(); err != nil {
-		return core.Report{}, nil, err
+		return core.Outcome{}, err
 	}
 
 	o.progressf("解析问题…")
 	query, err := o.parser.Parse(ctx, run)
 	if err != nil {
-		return core.Report{}, nil, fmt.Errorf("parse run: %w", err)
+		return core.Outcome{}, fmt.Errorf("parse run: %w", err)
 	}
-	targets, resolveEvidence, err := o.resolveLoop(ctx, query)
+	return o.continueFromResolve(ctx, run, query, ResolveState{})
+}
+
+// 用户澄清后恢复挂起运行：注入答复并自定位阶段重跑（调查等阶段日后同此入口按 Stage 派发）
+func (o *Orchestrator) Resume(ctx context.Context, runID, answer string) (core.Outcome, error) {
+	if err := ctx.Err(); err != nil {
+		return core.Outcome{}, fmt.Errorf("resume run: %w", err)
+	}
+	if err := o.validate(); err != nil {
+		return core.Outcome{}, err
+	}
+	if strings.TrimSpace(runID) == "" {
+		return core.Outcome{}, errors.New("resume: run id is required")
+	}
+	if strings.TrimSpace(answer) == "" {
+		return core.Outcome{}, errors.New("resume: answer is required")
+	}
+
+	snap, ok := o.takeSuspended(runID)
+	if !ok {
+		return core.Outcome{}, fmt.Errorf("resume: no suspended run %q", runID)
+	}
+
+	state := snap.resolve
+	state.Clarifications = append(slices.Clone(state.Clarifications), strings.TrimSpace(answer))
+	// 澄清后重跑定位：保留已取证据与任务，但重置轮次预算计数，避免触顶后无法消歧
+	// 证据/任务仍回喂驱动；Round 仅表示本段工具调用次数
+	state.Round = 0
+
+	o.progressf("恢复运行 %s（澄清已注入）…", runID)
+	return o.continueFromResolve(ctx, snap.run, snap.query, state)
+}
+
+// 查找会话内挂起运行编号；无则空串
+// 约定单会话至多一条挂起；多条时取 map 遍历首个（进程内极少并发挂起）
+func (o *Orchestrator) FindSuspended(sessionID string) string {
+	if o == nil || strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for id, snap := range o.suspended {
+		if snap != nil && snap.run.SessionID == sessionID {
+			return id
+		}
+	}
+	return ""
+}
+
+// 自定位阶段继续：可被 Execute（空 state）与 Resume（带澄清）共用
+func (o *Orchestrator) continueFromResolve(
+	ctx context.Context,
+	run core.Run,
+	query core.Query,
+	seed ResolveState,
+) (core.Outcome, error) {
+	targets, resolveEvidence, clarify, pausedState, err := o.resolveLoop(ctx, query, seed)
 	if err != nil {
-		return core.Report{}, nil, fmt.Errorf("resolve targets: %w", err)
+		return core.Outcome{}, fmt.Errorf("resolve targets: %w", err)
 	}
+	if clarify != nil {
+		// 挂起：保存快照，返回澄清问题；不进入侦察/调查
+		o.putSuspended(run, query, *clarify, pausedState)
+		return core.Outcome{
+			Suspension: &core.Suspension{
+				RunID:     run.ID,
+				SessionID: run.SessionID,
+				Stage:     core.StageResolve,
+				Question:  clarify.Question,
+				Options:   slices.Clone(clarify.Options),
+			},
+		}, nil
+	}
+
 	// 集群侦察：发现集群实际可用资源类型（含自定义资源），让规划器知道集群装了什么
 	// 侦察证据单独存放，不进调查循环种子（不漏到验证器）；由本方法合并进返回链
 	reconEvidence, clusterResources := o.reconCluster(ctx, run.ID)
@@ -230,7 +317,7 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	// 定位阶段已取的作为首轮种子复用，不白查已取信息；侦察证据不在此列
 	evidence, verdicts, err := o.investigateLoop(ctx, query, targets, resolveEvidence, clusterResources)
 	if err != nil {
-		return core.Report{}, nil, err
+		return core.Outcome{}, err
 	}
 	// 按时间序组装完整证据链：定位 → 侦察 → 调查，全部对用户透明可追溯
 	// 报告器只看定位与调查证据（侦察是上下文，不是结论依据）；返回链含侦察供命令行渲染
@@ -238,9 +325,58 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Report, 
 	o.progressf("生成报告…")
 	report, err := o.reporter.Report(ctx, run, verdicts, evidence)
 	if err != nil {
-		return core.Report{}, nil, fmt.Errorf("build report: %w", err)
+		return core.Outcome{}, fmt.Errorf("build report: %w", err)
 	}
-	return report, chain, nil
+	return core.Outcome{
+		Report:   &report,
+		Evidence: chain,
+	}, nil
+}
+
+func (o *Orchestrator) putSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state ResolveState) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.suspended == nil {
+		o.suspended = make(map[string]*suspendedRun)
+	}
+	// 深拷贝切片，避免后续修改污染快照
+	snap := &suspendedRun{
+		run:     run,
+		query:   query,
+		resolve: cloneResolveState(state),
+		clarify: ClarifyRequest{
+			Question: clarify.Question,
+			Options:  slices.Clone(clarify.Options),
+		},
+	}
+	snap.run.Status = core.RunStatusWaitingUser
+	o.suspended[run.ID] = snap
+}
+
+func (o *Orchestrator) takeSuspended(runID string) (*suspendedRun, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.suspended == nil {
+		return nil, false
+	}
+	snap, ok := o.suspended[runID]
+	if !ok {
+		return nil, false
+	}
+	delete(o.suspended, runID)
+	return snap, true
+}
+
+// 复制定位状态中的切片字段，避免挂起快照与进行中状态共享底层数组
+func cloneResolveState(state ResolveState) ResolveState {
+	return ResolveState{
+		Query:          state.Query,
+		Tasks:          slices.Clone(state.Tasks),
+		Evidence:       slices.Clone(state.Evidence),
+		Round:          state.Round,
+		MaxRounds:      state.MaxRounds,
+		Clarifications: slices.Clone(state.Clarifications),
+	}
 }
 
 // 把侦察证据插入到证据链的定位块之后、调查块之前（按发生时间顺序）
@@ -465,53 +601,66 @@ func parseAPIResources(stdout string) []ClusterResource {
 	return out
 }
 
-// 定位阶段循环：驱动提议 → 统一执行工具并发号 → 回喂 → 提交目标
+// 定位阶段循环：驱动提议 → 统一执行工具并发号 → 回喂 → 提交目标 / 澄清挂起
 // 角色不得在此循环外私自调工具；预算耗尽或失败动作时返回错误
-// 返回定位阶段已登记的证据，供调查阶段复用（不白查已取信息）
-func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]core.Target, []core.Evidence, error) {
+// seed 可带已有证据与澄清答复（Resume）；空 seed 表示首跑
+// 返回：目标、定位证据、澄清请求、挂起时完整定位状态、错误
+// 澄清与成功提交互斥；澄清时 targets/evidence 为空，paused 为当前状态快照
+func (o *Orchestrator) resolveLoop(
+	ctx context.Context,
+	query core.Query,
+	seed ResolveState,
+) (targets []core.Target, evidence []core.Evidence, clarify *ClarifyRequest, paused ResolveState, err error) {
 	maxRounds := o.resolveMaxRounds
 	if maxRounds <= 0 {
 		maxRounds = defaultResolveMaxRounds
 	}
 
-	state := ResolveState{
-		Query:     query,
-		Tasks:     nil,
-		Evidence:  nil,
-		Round:     0,
-		MaxRounds: maxRounds,
+	state := seed
+	state.Query = query
+	if state.MaxRounds <= 0 {
+		state.MaxRounds = maxRounds
 	}
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, ResolveState{}, err
 		}
 
 		action, err := o.resolver.Next(ctx, state)
 		if err != nil {
-			return nil, nil, fmt.Errorf("driver next: %w", err)
+			return nil, nil, nil, ResolveState{}, fmt.Errorf("driver next: %w", err)
 		}
 
 		switch action.Action {
 		case ResolveActionCallTool:
 			if len(action.ToolCalls) == 0 {
-				return nil, nil, errors.New("call_tool requires at least one tool call")
+				return nil, nil, nil, ResolveState{}, errors.New("call_tool requires at least one tool call")
 			}
 			for _, call := range action.ToolCalls {
 				if state.Round >= state.MaxRounds {
-					return nil, nil, fmt.Errorf("resolve budget exceeded after %d tool calls", state.MaxRounds)
+					return nil, nil, nil, ResolveState{}, fmt.Errorf("resolve budget exceeded after %d tool calls", state.MaxRounds)
 				}
 				if err := o.applyToolCall(ctx, &state, call); err != nil {
-					return nil, nil, err
+					return nil, nil, nil, ResolveState{}, err
 				}
 			}
 		case ResolveActionSubmitTargets:
 			targets, mErr := o.materializeTargets(query, action, state)
 			if mErr != nil {
-				return nil, nil, mErr
+				return nil, nil, nil, ResolveState{}, mErr
 			}
 			o.progressf("定位到 %d 个目标", len(targets))
-			return targets, slices.Clone(state.Evidence), nil
+			return targets, slices.Clone(state.Evidence), nil, ResolveState{}, nil
+		case ResolveActionClarify:
+			if action.Clarify == nil || strings.TrimSpace(action.Clarify.Question) == "" {
+				return nil, nil, nil, ResolveState{}, errors.New("clarify requires a non-empty question")
+			}
+			o.progressf("定位需澄清：%s", action.Clarify.Question)
+			return nil, nil, &ClarifyRequest{
+				Question: strings.TrimSpace(action.Clarify.Question),
+				Options:  slices.Clone(action.Clarify.Options),
+			}, cloneResolveState(state), nil
 		case ResolveActionFail:
 			msg := action.Error
 			if msg == "" {
@@ -520,9 +669,9 @@ func (o *Orchestrator) resolveLoop(ctx context.Context, query core.Query) ([]cor
 			if msg == "" {
 				msg = "resolve failed"
 			}
-			return nil, nil, errors.New(msg)
+			return nil, nil, nil, ResolveState{}, errors.New(msg)
 		default:
-			return nil, nil, fmt.Errorf("unknown resolve action %q", action.Action)
+			return nil, nil, nil, ResolveState{}, fmt.Errorf("unknown resolve action %q", action.Action)
 		}
 	}
 }

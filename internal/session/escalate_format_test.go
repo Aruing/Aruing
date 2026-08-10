@@ -40,3 +40,21 @@ func TestFormatDiagnosticReplyMinimal(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestFormatClarifyReply(t *testing.T) {
+	got := formatClarifyReply(&core.Suspension{
+		Question: "是哪个命名空间？",
+		Options:  []string{"ns-a", "ns-b"},
+	})
+	for _, want := range []string{"是哪个命名空间？", "- ns-a", "- ns-b"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if got := formatClarifyReply(nil); got == "" {
+		t.Fatal("nil suspension should still return fallback text")
+	}
+	if got := formatClarifyReply(&core.Suspension{Question: "仅问题"}); got != "仅问题" {
+		t.Fatalf("got %q", got)
+	}
+}
