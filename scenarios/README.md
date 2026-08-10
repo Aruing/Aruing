@@ -43,16 +43,24 @@ make scenario-down NAME=crashloop-bad-image # 拆集群 + 清理 kubeconfig
 | `manifests/` | 故障清单（kubectl apply） |
 | `scenario.yaml` | 场景元数据（给人读；脚本不解析，命名按约定 `aruing-sc-<name>`） |
 
-标准流程：
+标准流程（`scenario-chat` / `scenario-kube` 已自动注入 KUBECONFIG，无需手动 export）：
 
 ```bash
 make build
 make scenario-up NAME=crashloop-bad-image
-export KUBECONFIG=$PWD/scenarios/.kube/crashloop-bad-image.yaml
-./bin/aruing chat --config playground/config.yaml "demo 命名空间里的 demo-api 为什么起不来"
+make scenario-chat NAME=crashloop-bad-image MSG="demo 命名空间里的 demo-api 为什么起不来"
 # 对照 scenarios/crashloop-bad-image/expect.md 勾选
 make scenario-down NAME=crashloop-bad-image
 ```
+
+查集群细节（同样不用手动 export）：
+
+```bash
+make scenario-kube NAME=crashloop-bad-image CMD="get po -A"
+make scenario-kube NAME=crashloop-bad-image CMD="describe pod -n demo -l app=demo-api"
+```
+
+> 不想用包装、想自己控制环境变量也行：`make scenario-up` 结尾会打印 `export KUBECONFIG=...` 路径，自己执行后即可直接用 `./bin/aruing chat ...` 和 `kubectl ...`。多轮交互式 chat：`make scenario-chat NAME=<name>`（不带 MSG）。
 
 **通过** = `expect.md` 中「应」基本满足且无严重「不应」。LLM 措辞不要求逐字匹配。
 

@@ -113,7 +113,7 @@ clean:
 # kind 故障场景台架（不进 make test / check）。
 # 验收以 `aruing chat` 为主对象；详见 scenarios/README.md。
 
-.PHONY: scenario-up scenario-down scenario-list
+.PHONY: scenario-up scenario-down scenario-list scenario-chat scenario-kube
 
 # NAME=crashloop-bad-image
 scenario-up:
@@ -124,6 +124,25 @@ scenario-down:
 
 scenario-list:
 	@bash scripts/scenario-list.sh
+
+# 对场景集群跑 aruing chat：KUBECONFIG 已在同一行 shell 注入，无需手动 export。
+# NAME=必填；MSG=可选（填了=单轮诊断，不填=进交互式多轮）。须先 make build 与 scenario-up。
+scenario-chat:
+	@test -n "$(NAME)" || { echo "NAME= required (known: make scenario-list)"; exit 1; }
+	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make scenario-up NAME=$(NAME)"; exit 1; }
+	@test -x ./bin/aruing || { echo "first: make build"; exit 1; }
+ifneq ($(strip $(MSG)),)
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat "$(MSG)"
+else
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat
+endif
+
+# 对场景集群跑任意 kubectl：KUBECONFIG 已注入。NAME=必填，CMD=kubectl 参数。
+# 例: make scenario-kube NAME=crashloop-bad-image CMD="get po -A"
+scenario-kube:
+	@test -n "$(NAME)" || { echo "NAME= required"; exit 1; }
+	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make scenario-up NAME=$(NAME)"; exit 1; }
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml kubectl $(CMD)
 
 # ---------------- skills -----------------
 
