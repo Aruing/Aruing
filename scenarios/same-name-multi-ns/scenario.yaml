@@ -1,0 +1,4 @@
+name: same-name-multi-ns
+kind_cluster_name: aruing-sc-same-name-multi-ns
+namespace: ""
+notes: "两个 ns 各有同名 demo-api：team-a 正常、team-b 坏镜像；提示词不带 ns 制造歧义"

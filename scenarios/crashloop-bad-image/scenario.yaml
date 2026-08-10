@@ -1,0 +1,5 @@
+name: crashloop-bad-image
+kind_cluster_name: aruing-sc-crashloop-bad-image
+namespace: demo
+# 给人看的坏态提示；脚本不解析本文件
+notes: "Pod 应处于 ImagePullBackOff（引用了不存在的镜像 tag）"

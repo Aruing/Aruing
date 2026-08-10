@@ -1,0 +1,4 @@
+name: svc-wrong-selector
+kind_cluster_name: aruing-sc-svc-wrong-selector
+namespace: demo
+notes: "Service selector 故意拼错；Endpoints 应为空，Pod 正常 Running"

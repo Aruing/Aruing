@@ -109,6 +109,22 @@ check: tidy-check build test-ci fmt-check vet lint vuln
 clean:
 	rm -rf "$(BIN_DIR)"
 
+# ---------------- scenarios -----------------
+# kind 故障场景台架（不进 make test / check）。
+# 验收以 `aruing chat` 为主对象；详见 scenarios/README.md。
+
+.PHONY: scenario-up scenario-down scenario-list
+
+# NAME=crashloop-bad-image
+scenario-up:
+	bash scripts/scenario-up.sh "$(NAME)"
+
+scenario-down:
+	bash scripts/scenario-down.sh "$(NAME)"
+
+scenario-list:
+	@bash scripts/scenario-list.sh
+
 # ---------------- skills -----------------
 
 AGENTS_DIR := .agents

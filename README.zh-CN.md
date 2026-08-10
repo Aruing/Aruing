@@ -28,8 +28,8 @@ Aruing 现在已能端到端跑通，但仍处于早期：
 当前能力（版本 `0.1.0` 进行中）：
 
 - `aruing run` / `chat` — 须 LLM；YAML 配置和/或 `ARUING_*`（`--config`，见 `aruing.example.yaml`）
-- `aruing run` — 单轮诊断（线性 Orchestrator）
-- `aruing chat` — 多轮 Session + Tower；需根因时 escalate；`RunLedger` + `prior_run_details`；compact 后按范围回灌
+- `aruing run` — 单轮诊断（线性 Orchestrator；歧义时打印澄清并退出，无 resume）
+- `aruing chat` — 多轮 Session + Tower；需根因时 escalate；定位澄清挂起/恢复；`RunLedger` + `prior_run_details`；compact 后按范围回灌
 
 详见 [`docs/project-state.md`](docs/project-state.md)。
 
@@ -59,6 +59,20 @@ make check              # 完整 CI 检查（test-ci + vet + lint + fmt + tidy +
 ./bin/aruing chat hello                                    # 多轮 chat（须 LLM；session id 打在 stderr）
 ./bin/aruing chat --session sess_xxx 再查一下 redis
 ```
+
+### 可复现场景（kind）
+
+一键起故障集群用于手工 smoke。验收**以 `chat` 为主对象**（见 [`scenarios/README.md`](scenarios/README.md)）：
+
+```bash
+make scenario-list
+make scenario-up   NAME=crashloop-bad-image   # 起集群 + 故障清单
+export KUBECONFIG=$PWD/scenarios/.kube/crashloop-bad-image.yaml
+./bin/aruing chat --config playground/config.yaml "demo 里的 demo-api 为什么起不来"
+make scenario-down NAME=crashloop-bad-image
+```
+
+不进 `make test` / CI；需本机有 Docker + kind + kubectl。
 
 ### 配置与本地 LLM
 
