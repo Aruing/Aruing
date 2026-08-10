@@ -1,0 +1,22 @@
+# Aruing process config (YAML).
+# Copy to aruing.yaml or playground/config.yaml and fill LLM fields.
+# Priority: CLI (--verbose) > env (ARUING_*) > this file > zero values.
+#
+# Do not commit real api_key. Prefer env for secrets in shared/CI setups.
+
+llm:
+  # OpenAI-compatible base URL (include /v1 if required by the endpoint)
+  base_url: https://your-openai-compatible-endpoint/v1
+  # Access token; local endpoints that require a placeholder may use any non-empty string
+  api_key: ""
+  # Model name as required by the provider
+  model: ""
+
+tools:
+  # Absolute path to kubectl; empty = look up "kubectl" on PATH
+  kubectl_path: ""
+  # Allow in-pod diagnostic probes (ping/nslookup). Default false (read-only policy).
+  allow_diagnostic_exec: false
+
+# Print Tower / orchestrator progress to stderr (same as ARUING_DEBUG=1 / --verbose)
+debug: false

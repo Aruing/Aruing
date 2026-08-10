@@ -132,13 +132,15 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("unknown format %q: use markdown or json", *format)
 	}
 
-	cfg, _, err := config.LoadResolved(*configPath)
+	cfg, usedPath, err := config.LoadResolved(*configPath)
 	if err != nil {
 		return formatRunError(err)
 	}
 	if *verbose {
 		cfg.Debug = true
 	}
+	// 会话开始前打印生效配置来源与模型，便于确认文件/环境覆盖结果
+	writeConfigBanner(stderr, usedPath, cfg)
 
 	factory := core.NewFactory()
 	runID, err := factory.NewID("run")
@@ -202,13 +204,15 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 		return fmt.Errorf("unknown format %q: use markdown or json", formatVal)
 	}
 
-	cfg, _, err := config.LoadResolved(*configPath)
+	cfg, usedPath, err := config.LoadResolved(*configPath)
 	if err != nil {
 		return formatRunError(err)
 	}
 	if *verbose {
 		cfg.Debug = true
 	}
+	// 会话开始前打印生效配置来源与模型，便于确认文件/环境覆盖结果
+	writeConfigBanner(stderr, usedPath, cfg)
 	factory := core.NewFactory()
 	svc, err := newSessionStack(factory, cfg, stderr)
 	if err != nil {
@@ -287,6 +291,21 @@ func writeTurnResult(stdout io.Writer, format string, result session.TurnResult)
 	}
 	// 本步回合结果无证据切片，明细表以运行子命令为准
 	return writeReport(stdout, format, *result.Report, nil)
+}
+
+// 在会话开始前向标准错误打印配置来源与模型名
+// 无配置文件时 path 显示为 env-only；不打印访问凭证
+func writeConfigBanner(stderr io.Writer, usedPath string, cfg config.Config) {
+	path := strings.TrimSpace(usedPath)
+	if path == "" {
+		path = "env-only"
+	}
+	model := strings.TrimSpace(cfg.LLM.Model)
+	if model == "" {
+		model = "<empty>"
+	}
+	fmt.Fprintf(stderr, "config: path=%s\n", path)
+	fmt.Fprintf(stderr, "config: llm_model=%s ready=%t\n", model, cfg.LLM.Ready())
 }
 
 // 按指定格式把报告写入标准输出
