@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-10（**beta9 进行中**：通用挂起抽象 + resolve clarify 端到端已落地，待验收/归档；architecture 同步 `Suspension`/`Outcome`/`ModeClarify`/`SuspendedRunner`）
+> 最后更新：2026-08-10（**beta9 已合并** #63：通用挂起抽象 + resolve clarify 端到端；architecture 同步 `Suspension`/`Outcome`/`ModeClarify`/`SuspendedRunner`/`#16 clarify`）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta9` / 澄清挂起（waiting_user）** ⏳ 进行中（2026-08-10 起）：`core.Suspension`/`Outcome` 通用抽象；`ResolveActionClarify` + `Clarifications`；`Orchestrator.Execute` 返 `Outcome` + `Resume`/`FindSuspended`；`session.SuspendedRunner`（可选）+ `session.Resume` + `ModeClarify`；Tower 入口挂起恢复优先；CLI `run` 遇挂起打印问题并退出。plan 在笔记 `plan/0.1.0-beta9/`。#15–#17 兑现的第一锤。
+**`0.1.0-beta9` / 澄清挂起（waiting_user）** ✅ 合并（2026-08-10；#63）：`core.Suspension`/`Outcome` 通用抽象；`ResolveActionClarify` + `Clarifications`；`Orchestrator.Execute` 返 `Outcome` + `Resume`/`FindSuspended`；`session.SuspendedRunner`（可选）+ `session.Resume` + `ModeClarify`；Tower 入口挂起恢复优先；CLI `run` 遇挂起打印问题并退出。plan 在笔记 `plan/0.1.0-beta9/`（待归档）。#15–#17 兑现的第一锤。
 
 **`0.1.0-beta8` / 配置文件化** ✅ 完成并归档（2026-08-10；#61 YAML + env 覆盖 + 路径链 + CLI 须 LLM；#62 config banner / playground ignore）。示例：`aruing.example.yaml`；`--config` / `ARUING_CONFIG` / 默认搜索路径。plan 在笔记 `plan/archive/0.1.0-beta8/`。
 
@@ -46,7 +46,7 @@
 | beta6-fix-1 | 网关空响应 / Tower 可恢复重试 | ✅ | #58 |
 | beta7-1～2 | 压缩后按范围回灌 + smoke | ✅ | #59–#60 |
 | beta8 | 配置文件化 | ✅ | #61 YAML/路径链/merge；#62 banner；Fake* → agenttest/toolstest；CLI 无假闭环 |
-| beta9 | 澄清挂起（waiting_user） | ⏳ | `Suspension`/`Outcome`/`RunStatusWaitingUser`；`ResolveActionClarify`；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口优先 Resume；CLI run 遇挂起退出 |
+| beta9 | 澄清挂起（waiting_user） | ✅ | #63 `Suspension`/`Outcome`/`RunStatusWaitingUser`；`ResolveActionClarify`；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口优先 Resume；CLI run 遇挂起退出 |
 
 产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -54,7 +54,7 @@
 
 ## 下一步
 
-**下一项**：beta9 验收 → 归档（demo：chat 同名资源多 ns 触发 clarify → 用户答 → 报告；`make test`/`make check` 全绿）。
+**下一项**：从 `0.1.0` 候选里选下一里程碑（beta9 已合并，plan 待归档）。
 
 **0.1.0 候选**（beta9 后仍有效）：
 
