@@ -11,7 +11,7 @@ import (
 	"aruing/internal/store"
 )
 
-// checkpoint 或折叠/截断标记存在即说明视图丢了旧文
+// 检查点或折叠/截断标记存在即说明视图丢了旧文
 func TestViewCompactedAwayDetail(t *testing.T) {
 	if !viewCompactedAwayDetail(towerContextView{CheckpointContent: "[checkpoint] x"}) {
 		t.Fatal("checkpoint should trigger")
@@ -27,7 +27,7 @@ func TestViewCompactedAwayDetail(t *testing.T) {
 	}
 }
 
-// runId 锚定：client 为 nil 也命中，窗覆盖诊断 + 邻接 user
+// 运行编号锚定：客户端为空也命中，窗覆盖诊断与邻接用户句
 func TestLocateRangeRunIDAnchor(t *testing.T) {
 	history := []session.Message{
 		{Role: session.RoleUser, Content: "查 demo-api"},
@@ -43,7 +43,7 @@ func TestLocateRangeRunIDAnchor(t *testing.T) {
 	}
 }
 
-// 关键词分支：无 runId 但有追问措辞 + 诊断标题重叠，client 为 nil 命中
+// 关键词分支：无运行编号但有追问措辞与诊断标题重叠，客户端为空也命中
 func TestLocateRangeKeywordBranch(t *testing.T) {
 	history := []session.Message{
 		{Role: session.RoleUser, Content: "查 redis"},
@@ -59,19 +59,19 @@ func TestLocateRangeKeywordBranch(t *testing.T) {
 	}
 }
 
-// 规则未中 + client nil → 不命中（无 LLM 路径的优雅降级）
+// 规则未中且客户端为空 → 不命中（无大模型路径的优雅降级）
 func TestLocateRangeRuleMissNoClient(t *testing.T) {
 	history := []session.Message{
 		{Role: session.RoleUser, Content: "查 redis"},
 		{Role: session.RoleAssistant, Mode: session.ModeDiagnostic, RunID: "run_x", Content: "根因：DNS"},
 	}
-	// 无 runId、无追问措辞 → 规则不中
+	// 无运行编号、无追问措辞 → 规则不中
 	if _, _, ok := locateRange(context.Background(), nil, "现在 redis 状态", history); ok {
 		t.Fatal("current-state question should not locate without client")
 	}
 }
 
-// 规则未中 + LLM 兜底命中；越界由调用方 clamp
+// 规则未中加大模型兜底命中；越界由调用方钳制
 func TestLocateRangeLLMFallback(t *testing.T) {
 	history := []session.Message{
 		{Role: session.RoleUser, Content: "查网络"},
@@ -83,7 +83,7 @@ func TestLocateRangeLLMFallback(t *testing.T) {
 		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 			writeChatCompletion(w, `{"found":true,"lo":2,"hi":3}`)
 		})
-		// 无 runId、无追问措辞 → 规则不中 → LLM
+		// 无运行编号、无追问措辞 → 规则不中 → 大模型
 		lo, hi, ok := locateRange(context.Background(), client, "那个网络的事", history)
 		if !ok || lo != 2 || hi != 3 {
 			t.Fatalf("llm fallback got [%d,%d] ok=%v", lo, hi, ok)
@@ -108,7 +108,7 @@ func TestLocateRangeLLMFallback(t *testing.T) {
 	})
 }
 
-// 回灌取原文 + idx；越界自动收敛
+// 回灌取原文与序号；越界自动收敛
 func TestRehydrateRange(t *testing.T) {
 	history := []session.Message{
 		{Role: session.RoleUser, Content: "u0"},
@@ -125,7 +125,7 @@ func TestRehydrateRange(t *testing.T) {
 	}
 }
 
-// 窗超预算 → compactRange 折叠/截断到 ≤ 预算，保留 runId/idx，不静默丢段
+// 窗超预算 → 范围折叠截断到不超过预算，保留运行编号与序号，不静默丢段
 func TestCompactRange(t *testing.T) {
 	window := []rehydratedMsg{
 		{Idx: 0, Role: session.RoleUser, Content: strings.Repeat("巨", 5000)},
@@ -153,7 +153,7 @@ func TestRehydrateRestoresOriginalNotFolded(t *testing.T) {
 		{Role: session.RoleUser, Content: "查 demo-api"},
 		{Role: session.RoleAssistant, Mode: session.ModeDiagnostic, RunID: "run_x", Content: "根因：ORIGINAL_MARKER_777 Service 没选 Pod"},
 	}
-	// 模拟 compact 后的诊断消息只剩折叠骨架
+	// 模拟压缩后的诊断消息只剩折叠骨架
 	view := towerContextView{Hist: []towerHistMsg{{
 		Role: session.RoleAssistant, Mode: session.ModeDiagnostic, RunID: "run_x",
 		Content: "[folded] assistant mode=diagnostic runId=run_x | 根因…",
@@ -184,7 +184,7 @@ func TestRehydrateRestoresOriginalNotFolded(t *testing.T) {
 	}
 }
 
-// payload：传 rehydrated → 含字段；nil → omitempty
+// 载荷：传回灌窗则含字段；空则省略
 func TestTowerPayloadRehydrated(t *testing.T) {
 	view := towerContextView{Hist: []towerHistMsg{{Role: session.RoleUser, Content: "hi"}}}
 	with, err := buildTowerUserPayload(session.RespondInput{UserText: "q"}, view, nil, nil, nil, nil, []rehydratedMsg{
@@ -205,7 +205,7 @@ func TestTowerPayloadRehydrated(t *testing.T) {
 	}
 }
 
-// Respond 接线：compact 触发（超长消息 L0 截断）+ runId → 注入 rehydrated_messages，reply 不跑 Execute
+// 应答接线：压缩触发（超长消息零级截断）加运行编号 → 注入回灌消息，回复不跑执行
 func TestTowerRespondInjectsRehydrated(t *testing.T) {
 	var userPayload string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +229,7 @@ func TestTowerRespondInjectsRehydrated(t *testing.T) {
 		t.Fatalf("new tower: %v", err)
 	}
 
-	// 超长 user 消息迫使 L0 截断 → 视图丢细节 → 触发回灌门
+	// 超长用户消息迫使零级截断，视图丢细节，触发回灌门
 	history := []session.Message{
 		{Role: session.RoleUser, Content: strings.Repeat("巨", 100000)},
 		{Role: session.RoleAssistant, Mode: session.ModeDiagnostic, RunID: "run_loc1", Content: "根因：RESTORE_MARKER_555 Service 没选 Pod"},

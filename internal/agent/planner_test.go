@@ -1,17 +1,19 @@
-package agent
+package agent_test
 
 import (
+	"aruing/internal/agent"
 	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
+	"aruing/internal/agent/agenttest"
 	"aruing/internal/core"
 )
 
 // 规划结果必须绑定当前运行并保留开放引用，才能同时支持不同问题和资源类型
 func TestFakePlannerPlan(t *testing.T) {
-	planner := NewFakePlanner(Plan{
+	planner := agenttest.NewFakePlanner(agent.Plan{
 		Hypotheses: []core.Hypothesis{{
 			ID:              "h_demo",
 			RunID:           "stale_run",
@@ -36,7 +38,7 @@ func TestFakePlannerPlan(t *testing.T) {
 	}
 	targets := []core.Target{{ID: "target_demo", RunID: "run_test", NodeID: "node_demo"}}
 
-	got, err := planner.Plan(context.Background(), PlanState{Query: query, Targets: targets})
+	got, err := planner.Plan(context.Background(), agent.PlanState{Query: query, Targets: targets})
 	if err != nil {
 		t.Fatalf("plan tasks: %v", err)
 	}
@@ -53,7 +55,7 @@ func TestFakePlannerPlan(t *testing.T) {
 	// 多次规划不能共享可变列表，否则一次结果可能污染后续运行
 	got.Hypotheses[0].ExpectedSignals[0] = "changed"
 	got.Tasks[0].Refs[0] = "changed"
-	again, err := planner.Plan(context.Background(), PlanState{Query: query, Targets: targets})
+	again, err := planner.Plan(context.Background(), agent.PlanState{Query: query, Targets: targets})
 	if err != nil {
 		t.Fatalf("plan tasks again: %v", err)
 	}
@@ -67,12 +69,12 @@ func TestFakePlannerValidate(t *testing.T) {
 	query := core.Query{ID: "query_test", RunID: "run_test"}
 	tests := []struct {
 		name    string
-		plan    Plan
+		plan    agent.Plan
 		targets []core.Target
 	}{
 		{
 			name: "unknown ref",
-			plan: Plan{Tasks: []core.Task{{
+			plan: agent.Plan{Tasks: []core.Task{{
 				ID:       "task_test",
 				Refs:     []string{"target_unknown"},
 				ToolName: "fake.list_pods",
@@ -80,7 +82,7 @@ func TestFakePlannerValidate(t *testing.T) {
 		},
 		{
 			name: "foreign target",
-			plan: Plan{Tasks: []core.Task{{
+			plan: agent.Plan{Tasks: []core.Task{{
 				ID:       "task_test",
 				Refs:     []string{"target_other"},
 				ToolName: "fake.list_pods",
@@ -91,7 +93,7 @@ func TestFakePlannerValidate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if _, err := NewFakePlanner(test.plan).Plan(context.Background(), PlanState{Query: query, Targets: test.targets}); err == nil {
+			if _, err := agenttest.NewFakePlanner(test.plan).Plan(context.Background(), agent.PlanState{Query: query, Targets: test.targets}); err == nil {
 				t.Fatal("plan tasks: error = nil")
 			}
 		})

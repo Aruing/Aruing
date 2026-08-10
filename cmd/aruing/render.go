@@ -7,10 +7,10 @@ import (
 	"aruing/internal/core"
 )
 
-// 把结构化报告与调查证据渲染成 Markdown 文本
+// 把结构化报告与调查证据渲染成标记文本
 //
-// 纯展示函数：不调模型、不查集群，只依赖 core.Report 与已登记证据
-// 结论按 supported / refuted / insufficient 分组，证据编号原样列出保持可追溯
+// 纯展示函数：不调模型、不查集群，只依赖报告与已登记证据
+// 结论按已支持、已排除、证据不足分组，证据编号原样列出保持可追溯
 // 末尾「证据明细」按调查时序列出每条证据的命令与摘要，便于回溯「查了什么、结果如何」
 func renderMarkdown(report core.Report, evidence []core.Evidence) string {
 	var b strings.Builder
@@ -62,7 +62,7 @@ func renderEvidenceDetail(b *strings.Builder, evidence []core.Evidence) {
 	b.WriteString("\n")
 }
 
-// 按 supported / refuted / insufficient 分段输出结论，无对应结论的段省略
+// 按已支持、已排除、证据不足分段输出结论，无对应结论的段省略
 func renderConclusionGroups(b *strings.Builder, conclusions []core.Conclusion) {
 	groups := []struct {
 		result core.VerdictResult

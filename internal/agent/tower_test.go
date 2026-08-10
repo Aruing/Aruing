@@ -1,4 +1,4 @@
-package agent
+package agent_test
 
 import (
 	"bytes"
@@ -6,18 +6,54 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"aruing/internal/agent"
+	"aruing/internal/agent/agenttest"
 	"aruing/internal/core"
 	"aruing/internal/llm"
 	"aruing/internal/session"
 	"aruing/internal/store"
 	"aruing/internal/tools"
+	"aruing/internal/tools/toolstest"
 )
 
-// 假诊断管道：记录收到的 Run，并返回固定报告
+func writeChatCompletion(w http.ResponseWriter, content string) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"choices": []map[string]any{
+			{
+				"index":         0,
+				"message":       map[string]any{"role": "assistant", "content": content},
+				"finish_reason": "stop",
+			},
+		},
+	})
+}
+
+func newMockLLMClient(t *testing.T, handler http.HandlerFunc) llm.Client {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	c, err := llm.NewClient(llm.Config{BaseURL: server.URL, APIKey: "test-key", Model: "test-model"})
+	if err != nil {
+		t.Fatalf("new llm client: %v", err)
+	}
+	return c
+}
+
+func newTestFactory(t *testing.T) *core.Factory {
+	t.Helper()
+	return core.NewFactory()
+}
+
+// 与基线塔最大尝试次数对齐（未导出，黑盒测试用字面量）
+const maxTowerAttempts = 3
+
+// 假诊断管道：记录收到的运行，并返回固定报告
 type fakeRunExecutor struct {
 	lastRun core.Run
 	report  core.Report
@@ -34,15 +70,15 @@ func (f *fakeRunExecutor) Execute(_ context.Context, run core.Run) (core.Report,
 	return rep, nil, nil
 }
 
-// Fake reply：基线 Mode，无 Run
+// 假塔直接回复：基线模式且无诊断运行
 func TestFakeTowerReply(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
 	mem := store.NewMemoryStore()
-	tower := &FakeTowerResponder{
+	tower := &agenttest.FakeTowerResponder{
 		Factory: factory,
 		Decide: func(in session.RespondInput) (string, string, string) {
-			return towerActionReply, "你好，这是基线回答", ""
+			return "reply", "你好，这是基线回答", ""
 		},
 	}
 	svc := session.NewService(mem, factory, tower)
@@ -66,7 +102,7 @@ func TestFakeTowerReply(t *testing.T) {
 	}
 }
 
-// Fake escalate：Run.SessionID 写入，Mode=diagnostic
+// 假塔升格：诊断运行绑定会话编号，模式为诊断
 func TestFakeTowerEscalate(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
@@ -75,12 +111,12 @@ func TestFakeTowerEscalate(t *testing.T) {
 		report: core.Report{Title: "根因报告", Summary: "Pod 未就绪"},
 	}
 	ledger := store.NewMemoryRunLedger()
-	tower := &FakeTowerResponder{
+	tower := &agenttest.FakeTowerResponder{
 		Factory:  factory,
 		Executor: exec,
 		Ledger:   ledger,
 		Decide: func(session.RespondInput) (string, string, string) {
-			return towerActionEscalate, "", "定位 demo-api 故障"
+			return "escalate", "", "定位 demo-api 故障"
 		},
 	}
 	svc := session.NewService(mem, factory, tower)
@@ -117,17 +153,17 @@ func TestFakeTowerEscalate(t *testing.T) {
 	}
 }
 
-// escalate 且 question 空时回退 UserText
+// 升格且问题字段空时回退用户原文
 func TestFakeTowerEscalateQuestionFallback(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
 	exec := &fakeRunExecutor{report: core.Report{Summary: "ok"}}
-	tower := &FakeTowerResponder{
+	tower := &agenttest.FakeTowerResponder{
 		Factory:  factory,
 		Executor: exec,
 		Ledger:   store.NewMemoryRunLedger(),
 		Decide: func(session.RespondInput) (string, string, string) {
-			return towerActionEscalate, "", ""
+			return "escalate", "", ""
 		},
 	}
 
@@ -146,30 +182,30 @@ func TestFakeTowerEscalateQuestionFallback(t *testing.T) {
 	}
 }
 
-// Fake call_tool 后 reply：经 Dispatcher，RunID 空，最终 baseline 无 Run
+// 假塔先调工具再回复：经调度器取证，最终基线且无诊断运行
 func TestFakeTowerCallToolThenReply(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
 
 	var steps atomic.Int32
-	tower := &FakeTowerResponder{
+	tower := &agenttest.FakeTowerResponder{
 		Factory:    factory,
 		Dispatcher: dispatcher,
-		CallTool: towerToolCall{
+		CallTool: agenttest.ToolCall{
 			ToolName:  "fake.list_pods",
 			Arguments: json.RawMessage(`{}`),
 			Purpose:   "查 demo-api pod",
 		},
 		Decide: func(in session.RespondInput) (string, string, string) {
 			if steps.Add(1) == 1 {
-				return towerActionCallTool, "", ""
+				return "call_tool", "", ""
 			}
-			return towerActionReply, "根据查询，Pod 未就绪", ""
+			return "reply", "根据查询，Pod 未就绪", ""
 		},
 	}
 
@@ -191,12 +227,12 @@ func TestFakeTowerCallToolThenReply(t *testing.T) {
 	}
 }
 
-// call_tool 触顶后自动 escalate，不返回预算错误；question 用用户原文
+// 调用工具触顶后自动升格，不返回预算错误；问题字段用用户原文
 func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory(t)
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
@@ -204,19 +240,19 @@ func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
 		report: core.Report{Title: "升格报告", Summary: "经正式管道"},
 	}
 
-	tower := &FakeTowerResponder{
+	tower := &agenttest.FakeTowerResponder{
 		Factory:               factory,
 		Executor:              exec,
 		Ledger:                store.NewMemoryRunLedger(),
 		Dispatcher:            dispatcher,
 		BaselineMaxToolRounds: 2,
-		CallTool: towerToolCall{
+		CallTool: agenttest.ToolCall{
 			ToolName:  "fake.list_pods",
 			Arguments: json.RawMessage(`{}`),
 			Purpose:   "观察",
 		},
 		Decide: func(in session.RespondInput) (string, string, string) {
-			return towerActionCallTool, "", ""
+			return "call_tool", "", ""
 		},
 	}
 
@@ -244,14 +280,14 @@ func TestFakeTowerToolBudgetAutoEscalate(t *testing.T) {
 	}
 }
 
-// LLM 路径：call_tool 触顶自动 escalate，零用户可见预算错误
+// 大模型路径：工具轮次触顶后自动升格，用户可见内容不含预算错误
 func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"再查"}}`)
 	})
 
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
@@ -259,7 +295,7 @@ func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 		report: core.Report{Title: "正式", Summary: "诊断完成"},
 	}
 
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -283,14 +319,14 @@ func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 	}
 }
 
-// mock LLM 合法 reply JSON
+// 模拟大模型返回合法回复动作
 func TestTowerLLMReply(t *testing.T) {
 	body := `{"action":"reply","content":"这是概念解释","question":""}`
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, body)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -313,11 +349,11 @@ func TestTowerLLMReply(t *testing.T) {
 	}
 }
 
-// 有 prior 诊断时解释追问 → reply，不调用诊断管道
+// 有历史诊断时解释追问应直接回复，不调用诊断管道
 func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
 	var sawUser string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-		// 捕获 user 载荷，确认含 prior_diagnostics
+		// 捕获用户载荷，确认含既往诊断
 		var reqBody struct {
 			Messages []struct {
 				Role    string `json:"role"`
@@ -333,7 +369,7 @@ func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
 		writeChatCompletion(w, `{"action":"reply","content":"上次依据 ImagePullBackOff 判定镜像问题","question":""}`)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -365,7 +401,7 @@ func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
 	}
 }
 
-// mock LLM escalate
+// 模拟大模型返回升格动作
 func TestTowerLLMEscalate(t *testing.T) {
 	body := `{"action":"escalate","content":"","question":"查 demo-api 根因"}`
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -376,7 +412,7 @@ func TestTowerLLMEscalate(t *testing.T) {
 	}
 	factory := newTestFactory(t)
 	ledger := store.NewMemoryRunLedger()
-	tower, err := NewTowerResponder(client, factory, exec, ledger, nil, nil)
+	tower, err := agent.NewTowerResponder(client, factory, exec, ledger, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -406,7 +442,7 @@ func TestTowerLLMEscalate(t *testing.T) {
 	}
 }
 
-// mock LLM：先 call_tool 再 reply；空 RunID 观察不落 Message
+// 模拟大模型先调工具再回复；空运行编号的观察不落会话消息
 func TestTowerLLMCallToolThenReply(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -419,14 +455,14 @@ func TestTowerLLMCallToolThenReply(t *testing.T) {
 	})
 
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
 	specs := registry.Specs()
 
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, specs)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, specs)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -452,14 +488,14 @@ func TestTowerLLMCallToolThenReply(t *testing.T) {
 	}
 }
 
-// 非法 action 持续不合规 → ErrLLMOutputInconsistent
+// 非法动作持续不合规应返回模型输出不一致错误
 func TestTowerLLMInvalidActionRetries(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		writeChatCompletion(w, `{"action":"fly","content":"x"}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -471,22 +507,22 @@ func TestTowerLLMInvalidActionRetries(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("want ErrLLMOutputInconsistent, got %v", err)
+	if !errors.Is(err, agent.ErrLLMOutputInconsistent) {
+		t.Fatalf("want agent.ErrLLMOutputInconsistent, got %v", err)
 	}
 	if n := calls.Load(); n != maxTowerAttempts {
 		t.Fatalf("attempts: %d want %d", n, maxTowerAttempts)
 	}
 }
 
-// 非 JSON 正文应业务重试后失败（ErrLLMOutputInconsistent 链上带 ErrJSONParse）
+// 非结构化正文应业务重试后失败，错误链含解析失败
 func TestTowerLLMBadJSONRetries(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		writeChatCompletion(w, "not-json-at-all")
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -497,8 +533,8 @@ func TestTowerLLMBadJSONRetries(t *testing.T) {
 		SessionID: "sess_z",
 		UserText:  "hi",
 	})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("want ErrLLMOutputInconsistent, got %v", err)
+	if !errors.Is(err, agent.ErrLLMOutputInconsistent) {
+		t.Fatalf("want agent.ErrLLMOutputInconsistent, got %v", err)
 	}
 	if !errors.Is(err, llm.ErrJSONParse) {
 		t.Fatalf("want ErrJSONParse in chain, got %v", err)
@@ -511,7 +547,7 @@ func TestTowerLLMBadJSONRetries(t *testing.T) {
 	}
 }
 
-// 坏 JSON 后成功应返回 reply
+// 坏结构后恢复成功应返回回复内容
 func TestTowerLLMBadJSONThenOK(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -521,7 +557,7 @@ func TestTowerLLMBadJSONThenOK(t *testing.T) {
 		}
 		writeChatCompletion(w, `{"action":"reply","content":"recovered"}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -537,12 +573,12 @@ func TestTowerLLMBadJSONThenOK(t *testing.T) {
 	}
 }
 
-// reply 空 content 应业务重试后失败
+// 回复动作为空正文应业务重试后失败
 func TestTowerLLMEmptyReplyContent(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"reply","content":"  "}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -550,17 +586,17 @@ func TestTowerLLMEmptyReplyContent(t *testing.T) {
 		SessionID: "sess_z",
 		UserText:  "hi",
 	})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("want ErrLLMOutputInconsistent, got %v", err)
+	if !errors.Is(err, agent.ErrLLMOutputInconsistent) {
+		t.Fatalf("want agent.ErrLLMOutputInconsistent, got %v", err)
 	}
 }
 
-// 无 dispatcher 时 call_tool 应业务重试失败
+// 无调度器时调用工具应业务重试失败
 func TestTowerLLMCallToolWithoutDispatcher(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"x"}}`)
 	})
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, []tools.ToolSpec{{
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, []tools.ToolSpec{{
 		Name:        "fake.list_pods",
 		Description: "d",
 		InputSchema: json.RawMessage(`{"type":"object"}`),
@@ -572,8 +608,8 @@ func TestTowerLLMCallToolWithoutDispatcher(t *testing.T) {
 		SessionID: "sess_z",
 		UserText:  "hi",
 	})
-	if !errors.Is(err, ErrLLMOutputInconsistent) {
-		t.Fatalf("want ErrLLMOutputInconsistent, got %v", err)
+	if !errors.Is(err, agent.ErrLLMOutputInconsistent) {
+		t.Fatalf("want agent.ErrLLMOutputInconsistent, got %v", err)
 	}
 }
 
@@ -584,21 +620,21 @@ func TestNewTowerResponderRequiresDeps(t *testing.T) {
 	factory := newTestFactory(t)
 	exec := &fakeRunExecutor{}
 
-	if _, err := NewTowerResponder(nil, factory, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(nil, factory, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
 		t.Fatal("expected nil client error")
 	}
-	if _, err := NewTowerResponder(client, nil, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(client, nil, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
 		t.Fatal("expected nil factory error")
 	}
-	if _, err := NewTowerResponder(client, factory, nil, store.NewMemoryRunLedger(), nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(client, factory, nil, store.NewMemoryRunLedger(), nil, nil); err == nil {
 		t.Fatal("expected nil executor error")
 	}
-	if _, err := NewTowerResponder(client, factory, exec, nil, nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(client, factory, exec, nil, nil, nil); err == nil {
 		t.Fatal("expected nil ledger error")
 	}
 }
 
-// Summary 无业务标记、Raw 含唯一串时，第二轮 user JSON 必须回喂该串
+// 摘要无业务标记而原始输出含唯一串时，第二轮用户载荷必须回喂该串
 func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	const mark = "NS_MARK_raw_feed_42"
 	var secondUser string
@@ -631,7 +667,7 @@ func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
 	specs := registry.Specs()
 
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, specs)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, specs)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -652,13 +688,13 @@ func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	if !strings.Contains(secondUser, `"raw"`) {
 		t.Fatalf("payload should include raw field: %s", secondUser)
 	}
-	// Summary 故意无 mark，确保不是从 summary 漏进
+	// 摘要故意无标记，确保不是从摘要漏进
 	if strings.Contains(secondUser, `"summary":"NS_MARK`) {
 		t.Fatal("mark must not appear only via summary")
 	}
 }
 
-// k8s 可用时基线每 Turn 一次 api-resources，payload 含 cluster_resources（含 CRD）
+// 集群工具可用时基线每轮一次资源清单侦察，载荷含集群资源（含自定义资源）
 func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
 	var firstUser string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -686,7 +722,7 @@ func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -707,13 +743,13 @@ func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
 	if !strings.Contains(firstUser, "IngressRoute") {
 		t.Fatalf("payload missing CRD kind IngressRoute: %s", firstUser)
 	}
-	// 正式 escalate 未跑；recon 不落 Run
+	// 正式升格未跑；侦察不落运行
 	if out.RunID != "" {
 		t.Fatalf("baseline recon must not create run: %q", out.RunID)
 	}
 }
 
-// 无 k8s 工具时不尝试侦察，payload 无 cluster_resources
+// 无集群工具时不尝试侦察，载荷无集群资源
 func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 	var userPayload string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -733,11 +769,11 @@ func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 	})
 
 	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -753,7 +789,7 @@ func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 	}
 }
 
-// 侦察工具失败时降级空列表，仍可 reply
+// 侦察工具失败时降级空列表，仍可直接回复
 func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 	var userPayload string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -777,7 +813,7 @@ func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -797,87 +833,7 @@ func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 	}
 }
 
-// fetchBaselineClusterResources 在无 dispatcher 时返回 nil
-func TestFetchBaselineClusterResourcesNoDispatcher(t *testing.T) {
-	tower := &TowerResponder{
-		factory: newTestFactory(t),
-		specs:   []tools.ToolSpec{{Name: "k8s"}},
-	}
-	if got := tower.fetchBaselineClusterResources(context.Background()); got != nil {
-		t.Fatalf("got %+v, want nil", got)
-	}
-}
-
-// 单条超预算时注入副本截断并标记；环内权威 raw 不变
-// 预算充足时保持全文，证明不是无条件截断
-func TestPrepareTowerObservationsTruncates(t *testing.T) {
-	// 远超 10 token 预算，迫使走截断路径
-	raw := json.RawMessage(`{"stdout":"` + strings.Repeat("A", 500) + `"}`)
-	auth := []towerObservation{{
-		TaskID:   "t_1",
-		ToolName: "k8s",
-		Summary:  "exitCode=0",
-		Raw:      append(json.RawMessage(nil), raw...),
-	}}
-
-	view := prepareTowerObservationsForPrompt(auth, 10)
-	if len(view) != 1 || !view[0].RawTruncated {
-		t.Fatalf("want truncated injection, got len=%d trunc=%v", len(view), len(view) > 0 && view[0].RawTruncated)
-	}
-	if !strings.Contains(string(view[0].Raw), "truncated") {
-		t.Fatalf("injection raw missing truncate mark: %s", view[0].Raw)
-	}
-	if auth[0].RawTruncated || string(auth[0].Raw) != string(raw) {
-		t.Fatal("authoritative observation must stay full")
-	}
-
-	small := []towerObservation{{
-		ToolName: "k8s",
-		Raw:      json.RawMessage(`{"stdout":"hi","exitCode":0}`),
-	}}
-	full := prepareTowerObservationsForPrompt(small, 8_000)
-	if full[0].RawTruncated || string(full[0].Raw) != string(small[0].Raw) {
-		t.Fatalf("small raw should stay full: trunc=%v raw=%s", full[0].RawTruncated, full[0].Raw)
-	}
-}
-
-// 多条共享预算时优先保留较新观察全文；旧条截断或占位，权威切片不变
-func TestPrepareTowerObservationsBudget(t *testing.T) {
-	oldMark := "OLD_RAW_MARK_zzz"
-	newMark := "NEW_RAW_MARK_yyy"
-	// 单条均大于预算份额，迫使新条吃满、旧条退让
-	oldRaw := json.RawMessage(`{"stdout":"` + oldMark + strings.Repeat("o", 200) + `"}`)
-	newRaw := json.RawMessage(`{"stdout":"` + newMark + strings.Repeat("n", 200) + `"}`)
-	auth := []towerObservation{
-		{TaskID: "t_old", ToolName: "k8s", Summary: "old", Raw: append(json.RawMessage(nil), oldRaw...)},
-		{TaskID: "t_new", ToolName: "k8s", Summary: "new", Raw: append(json.RawMessage(nil), newRaw...)},
-	}
-
-	view := prepareTowerObservationsForPrompt(auth, 60)
-	if view[1].RawTruncated || string(view[1].Raw) != string(newRaw) {
-		t.Fatalf("newest must stay full: trunc=%v raw=%s", view[1].RawTruncated, view[1].Raw)
-	}
-	if !view[0].RawTruncated {
-		t.Fatal("oldest must yield when shared budget is tight")
-	}
-	if auth[0].RawTruncated || auth[1].RawTruncated {
-		t.Fatal("authoritative observations must not set rawTruncated")
-	}
-	if string(auth[0].Raw) != string(oldRaw) || string(auth[1].Raw) != string(newRaw) {
-		t.Fatal("authoritative raw must not mutate")
-	}
-
-	// 预算刚好等于新条成本时，旧条只能占位
-	tiny := prepareTowerObservationsForPrompt(auth, estimateTokens(string(newRaw)))
-	if tiny[1].RawTruncated || string(tiny[1].Raw) != string(newRaw) {
-		t.Fatalf("newest must stay full when budget equals its cost: %s", tiny[1].Raw)
-	}
-	if !tiny[0].RawTruncated || !strings.Contains(string(tiny[0].Raw), "omitted for shared") {
-		t.Fatalf("oldest must omit when remaining is zero: %s", tiny[0].Raw)
-	}
-}
-
-// Summary 无业务标记；业务事实只在 Raw
+// 摘要无业务标记；业务事实只在原文
 type rawOnlyFakeTool struct {
 	mark string
 }
@@ -910,52 +866,4 @@ func (t *rawOnlyFakeTool) Execute(_ context.Context, _ json.RawMessage) (*core.E
 		Summary:     "tool completed, exitCode=0",
 		Raw:         raw,
 	}, nil
-}
-
-func TestValidateTowerDecision(t *testing.T) {
-	specs := []tools.ToolSpec{{
-		Name:        "fake.list_pods",
-		Description: "d",
-		InputSchema: json.RawMessage(`{"type":"object"}`),
-	}}
-	registry := tools.NewRegistry()
-	if err := registry.Register(tools.NewFakeListPodsTool()); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	tower := &TowerResponder{
-		dispatcher: tools.NewDispatcher(registry, nil),
-		specs:      specs,
-	}
-
-	if err := tower.validateTowerDecision(towerLLMOutput{Action: "reply", Content: "ok"}); err != nil {
-		t.Fatalf("valid reply: %v", err)
-	}
-	if err := tower.validateTowerDecision(towerLLMOutput{Action: "escalate"}); err != nil {
-		t.Fatalf("valid escalate: %v", err)
-	}
-	if err := tower.validateTowerDecision(towerLLMOutput{
-		Action: "call_tool",
-		ToolCall: &towerToolCallJSON{
-			ToolName:  "fake.list_pods",
-			Arguments: json.RawMessage(`{}`),
-			Purpose:   "查",
-		},
-	}); err != nil {
-		t.Fatalf("valid call_tool: %v", err)
-	}
-	if err := tower.validateTowerDecision(towerLLMOutput{Action: "reply"}); err == nil {
-		t.Fatal("empty reply content should fail")
-	}
-	if err := tower.validateTowerDecision(towerLLMOutput{Action: "other"}); err == nil {
-		t.Fatal("invalid action should fail")
-	}
-	if err := tower.validateTowerDecision(towerLLMOutput{
-		Action: "call_tool",
-		ToolCall: &towerToolCallJSON{
-			ToolName:  "not.registered",
-			Arguments: json.RawMessage(`{}`),
-		},
-	}); err == nil {
-		t.Fatal("unknown tool should fail")
-	}
 }

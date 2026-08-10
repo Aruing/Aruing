@@ -1,12 +1,14 @@
-package tools
+package tools_test
 
 import (
+	"aruing/internal/tools"
 	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"aruing/internal/core"
+	"aruing/internal/tools/toolstest"
 )
 
 // -------------------------- 模拟一个工具 --------------------------
@@ -19,8 +21,8 @@ type testEvidenceTool struct {
 }
 
 // 使用独立名称避免与正常假工具的注册项冲突
-func (testEvidenceTool) Spec() ToolSpec {
-	return ToolSpec{
+func (testEvidenceTool) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
 		Name:        TestToolName,
 		Description: "返回预先配置的测试证据",
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
@@ -36,8 +38,8 @@ func (tool testEvidenceTool) Execute(context.Context, json.RawMessage) (*core.Ev
 type emptyNameTool struct{}
 
 // 返回空名称以触发注册表的名称校验
-func (emptyNameTool) Spec() ToolSpec {
-	return ToolSpec{
+func (emptyNameTool) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
 		Name:        "",
 		Description: "模拟缺少名称的工具",
 		InputSchema: json.RawMessage(`{"type":"object"}`),
@@ -49,13 +51,13 @@ func (emptyNameTool) Execute(context.Context, json.RawMessage) (*core.Evidence, 
 	return nil, nil
 }
 
-// 模拟 Schema 非法的工具，用于验证注册阶段的 Schema 编译
+// 模拟参数规格非法的工具，用于验证注册阶段的规格编译
 type invalidSchemaTool struct {
 	schema json.RawMessage
 }
 
-func (t invalidSchemaTool) Spec() ToolSpec {
-	return ToolSpec{
+func (t invalidSchemaTool) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
 		Name:        "bad.schema",
 		Description: "模拟非法输入 Schema",
 		InputSchema: t.schema,
@@ -92,7 +94,7 @@ func requireErrorContains(t *testing.T, err error, want string) {
 
 // 注册表必须保留唯一工具名称，避免后注册的工具覆盖已有执行能力
 func TestRegistryRegister(t *testing.T) {
-	registry := NewRegistry()
+	registry := tools.NewRegistry()
 	tool := testEvidenceTool{}
 
 	if err := registry.Register(tool); err != nil {
@@ -107,10 +109,10 @@ func TestRegistryRegister(t *testing.T) {
 
 // 无效工具应在注册阶段被拒绝，避免空名称污染注册表或空对象触发崩溃
 func TestRegistryValidate(t *testing.T) {
-	// 代表校验：nil、空名、坏 schema（JSON Schema 语义）
+	// 代表校验：空引用、空名、坏参数规格
 	tests := []struct {
 		name      string
-		tool      Tool
+		tool      tools.Tool
 		wantError string
 	}{
 		{name: "nil tool", tool: nil, wantError: "tool is required"},
@@ -124,19 +126,19 @@ func TestRegistryValidate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			err := NewRegistry().Register(test.tool)
+			err := tools.NewRegistry().Register(test.tool)
 			requireErrorContains(t, err, test.wantError)
 		})
 	}
 }
 
-// Specs 应按名称稳定排序，并返回可独立修改的副本
+// 规格列表应按名称稳定排序，并返回可独立修改的副本
 func TestRegistrySpecs(t *testing.T) {
-	registry := NewRegistry()
-	for _, tool := range []Tool{
+	registry := tools.NewRegistry()
+	for _, tool := range []tools.Tool{
 		namedSpecTool{name: "z.tool"},
 		namedSpecTool{name: "a.tool"},
-		NewFakeListPodsTool(),
+		toolstest.NewFakeListPodsTool(),
 	} {
 		if err := registry.Register(tool); err != nil {
 			t.Fatalf("register %s: %v", tool.Spec().Name, err)
@@ -151,7 +153,7 @@ func TestRegistrySpecs(t *testing.T) {
 		t.Fatalf("specs order = %q, %q, %q", specs[0].Name, specs[1].Name, specs[2].Name)
 	}
 
-	// 修改返回切片中的 Schema 不应污染注册表
+	// 修改返回切片中的参数规格不应污染注册表
 	specs[0].InputSchema[0] = 'X'
 	again := registry.Specs()
 	if again[0].InputSchema[0] == 'X' {
@@ -161,7 +163,7 @@ func TestRegistrySpecs(t *testing.T) {
 
 // 归属字段必须由调度器根据任务和注册工具填写，避免工具返回的数据破坏证据链
 func TestDispatcherExecute(t *testing.T) {
-	registry := NewRegistry()
+	registry := tools.NewRegistry()
 	tool := testEvidenceTool{
 		evidence: &core.Evidence{ToolName: "untrusted"},
 	}
@@ -170,7 +172,7 @@ func TestDispatcherExecute(t *testing.T) {
 	}
 
 	task := newTestTask()
-	evidence, err := NewDispatcher(registry, nil).Execute(context.Background(), task)
+	evidence, err := tools.NewDispatcher(registry, nil).Execute(context.Background(), task)
 	if err != nil {
 		t.Fatalf("execute task: %v", err)
 	}
@@ -185,9 +187,9 @@ func TestDispatcherExecute(t *testing.T) {
 	}
 }
 
-// 空 RunID 表示基线非诊断观察，调度器应允许执行并原样拷贝到证据
+// 空运行编号表示基线非诊断观察，调度器应允许执行并原样拷贝到证据
 func TestDispatcherExecuteEmptyRunID(t *testing.T) {
-	registry := NewRegistry()
+	registry := tools.NewRegistry()
 	tool := testEvidenceTool{
 		evidence: &core.Evidence{Summary: "baseline obs"},
 	}
@@ -200,7 +202,7 @@ func TestDispatcherExecuteEmptyRunID(t *testing.T) {
 		RunID:    "",
 		ToolName: TestToolName,
 	}
-	evidence, err := NewDispatcher(registry, nil).Execute(context.Background(), task)
+	evidence, err := tools.NewDispatcher(registry, nil).Execute(context.Background(), task)
 	if err != nil {
 		t.Fatalf("execute task: %v", err)
 	}
@@ -217,15 +219,15 @@ func TestDispatcherExecuteEmptyRunID(t *testing.T) {
 
 // 缺少调度依赖或任务关联字段时应返回明确错误，避免执行阶段生成无法回溯的证据
 func TestDispatcherValidate(t *testing.T) {
-	registry := NewRegistry()
-	if err := registry.Register(NewFakeListPodsTool()); err != nil {
+	registry := tools.NewRegistry()
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register fake tool: %v", err)
 	}
 
-	// 代表校验：调度器无 registry、任务缺关键身份字段
+	// 代表校验：调度器无注册表、任务缺关键身份字段
 	tests := []struct {
 		name       string
-		dispatcher *Dispatcher
+		dispatcher *tools.Dispatcher
 		task       core.Task
 		wantError  string
 	}{
@@ -237,13 +239,13 @@ func TestDispatcherValidate(t *testing.T) {
 		},
 		{
 			name:       "missing task ID",
-			dispatcher: NewDispatcher(registry, nil),
+			dispatcher: tools.NewDispatcher(registry, nil),
 			task:       core.Task{RunID: "run_test", ToolName: "fake.list_pods"},
 			wantError:  "requires an ID",
 		},
 		{
 			name:       "missing tool name",
-			dispatcher: NewDispatcher(registry, nil),
+			dispatcher: tools.NewDispatcher(registry, nil),
 			task:       core.Task{ID: "t_test", RunID: "run_test"},
 			wantError:  "requires a tool name",
 		},
@@ -259,22 +261,22 @@ func TestDispatcherValidate(t *testing.T) {
 
 // 工具未返回证据属于接口契约错误，调度器应拒绝空结果而不是解引用导致崩溃
 func TestDispatcherNilEvidence(t *testing.T) {
-	registry := NewRegistry()
+	registry := tools.NewRegistry()
 	if err := registry.Register(testEvidenceTool{}); err != nil {
 		t.Fatalf("register test tool: %v", err)
 	}
 
-	_, err := NewDispatcher(registry, nil).Execute(context.Background(), newTestTask())
+	_, err := tools.NewDispatcher(registry, nil).Execute(context.Background(), newTestTask())
 	requireErrorContains(t, err, "returned nil evidence")
 }
 
-// 仅用于 Specs 排序测试的最小工具
+// 仅用于规格排序测试的最小工具
 type namedSpecTool struct {
 	name string
 }
 
-func (t namedSpecTool) Spec() ToolSpec {
-	return ToolSpec{
+func (t namedSpecTool) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
 		Name:        t.name,
 		Description: "specs sort fixture",
 		InputSchema: json.RawMessage(`{"type":"object"}`),

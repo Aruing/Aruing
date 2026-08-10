@@ -10,14 +10,14 @@ import (
 	"aruing/internal/session"
 )
 
-// 进程内正式诊断账本，实现 session.RunLedger
-// 不写磁盘；并发安全；同 RunID 覆盖；进程退出即丢
+// 进程内正式诊断账本，实现会话诊断账本接口
+// 不写磁盘；并发安全；同运行编号覆盖；进程退出即丢
 type MemoryRunLedger struct {
-	// 保护 byRun 与 bySession 的互斥锁
+	// 保护按运行与按会话索引的互斥锁
 	mu sync.Mutex
-	// RunID → 记录（值拷贝）
+	// 运行编号 → 记录（值拷贝）
 	byRun map[string]session.DiagnosticRecord
-	// SessionID → 该会话写入过的 RunID 顺序（覆盖时不重复追加）
+	// 会话编号 → 该会话写入过的运行编号顺序（覆盖时不重复追加）
 	bySession map[string][]string
 }
 
@@ -29,7 +29,7 @@ func NewMemoryRunLedger() *MemoryRunLedger {
 	}
 }
 
-// 写入或覆盖；RunID 为空时返回错误
+// 写入或覆盖；运行编号为空时返回错误
 func (l *MemoryRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -50,7 +50,7 @@ func (l *MemoryRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord)
 	return nil
 }
 
-// 按 RunID 返回拷贝；不存在时返回 session.ErrRunNotFound
+// 按运行编号返回拷贝；不存在时返回未找到错误
 func (l *MemoryRunLedger) Get(ctx context.Context, runID string) (session.DiagnosticRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return session.DiagnosticRecord{}, err
@@ -69,7 +69,7 @@ func (l *MemoryRunLedger) Get(ctx context.Context, runID string) (session.Diagno
 	return cloneDiagnosticRecord(rec), nil
 }
 
-// 按会话返回记录拷贝；无记录时返回空切片（不是 nil 错误）
+// 按会话返回记录拷贝；无记录时返回空切片（不是空指针错误）
 func (l *MemoryRunLedger) ListBySession(ctx context.Context, sessionID string) ([]session.DiagnosticRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

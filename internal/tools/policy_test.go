@@ -1,17 +1,19 @@
-package tools
+package tools_test
 
 import (
+	"aruing/internal/tools"
 	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
 	"aruing/internal/core"
+	"aruing/internal/tools/toolstest"
 )
 
-// 只读策略必须放行常见只读 kubectl 子命令
+// 只读策略必须放行常见只读集群子命令
 func TestReadonlyPolicyAllowK8s(t *testing.T) {
-	policy := NewReadonlyPolicy()
+	policy := tools.NewReadonlyPolicy()
 	cases := [][]string{
 		{"get", "pods", "-n", "default"},
 		{"describe", "pod", "x"},
@@ -32,7 +34,7 @@ func TestReadonlyPolicyAllowK8s(t *testing.T) {
 	for _, argv := range cases {
 		t.Run(strings.Join(argv, " "), func(t *testing.T) {
 			decision, reason := policy.Check("k8s", mustJSONArgs(t, argv))
-			if decision != DecisionAllow {
+			if decision != tools.DecisionAllow {
 				t.Fatalf("decision = %v (%s), want allow", decision, reason)
 			}
 		})
@@ -41,7 +43,7 @@ func TestReadonlyPolicyAllowK8s(t *testing.T) {
 
 // 写操作与未知子命令必须被拒绝，且不依赖工具实现
 func TestReadonlyPolicyDenyK8s(t *testing.T) {
-	policy := NewReadonlyPolicy()
+	policy := tools.NewReadonlyPolicy()
 	cases := []struct {
 		name string
 		args json.RawMessage
@@ -60,7 +62,7 @@ func TestReadonlyPolicyDenyK8s(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			decision, reason := policy.Check("k8s", test.args)
-			if decision != DecisionDeny {
+			if decision != tools.DecisionDeny {
 				t.Fatalf("decision = %v (%s), want deny", decision, reason)
 			}
 			if !strings.Contains(reason, test.want) {
@@ -72,24 +74,24 @@ func TestReadonlyPolicyDenyK8s(t *testing.T) {
 
 // 假工具应被只读策略放行，避免破坏默认闭环
 func TestReadonlyPolicyAllowFakeTool(t *testing.T) {
-	decision, reason := NewReadonlyPolicy().Check("fake.list_pods", json.RawMessage(`{}`))
-	if decision != DecisionAllow {
+	decision, reason := tools.NewReadonlyPolicy().Check("fake.list_pods", json.RawMessage(`{}`))
+	if decision != tools.DecisionAllow {
 		t.Fatalf("decision = %v (%s), want allow", decision, reason)
 	}
 }
 
-// 调度器在 Deny 时不得调用工具
+// 调度器在拒绝时不得调用工具
 func TestDispatcherPolicyDeny(t *testing.T) {
-	registry := NewRegistry()
-	if err := registry.Register(NewFakeListPodsTool()); err != nil {
+	registry := tools.NewRegistry()
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	// 用只读策略 + 伪装成 k8s 的任务名会先 Deny；这里注册一个会 panic 的工具验证未执行
+	// 用只读策略加伪装成集群的任务名会先拒绝；这里注册一个会崩溃的工具验证未执行
 	if err := registry.Register(panicTool{}); err != nil {
 		t.Fatalf("register panic tool: %v", err)
 	}
 
-	dispatcher := NewDispatcher(registry, NewReadonlyPolicy())
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
 	_, err := dispatcher.Execute(context.Background(), core.Task{
 		ID:        "t1",
 		RunID:     "run1",
@@ -99,13 +101,13 @@ func TestDispatcherPolicyDeny(t *testing.T) {
 	requireErrorContains(t, err, "denied by policy")
 }
 
-// 调度器在 Allow 时仍走原有执行路径
+// 调度器在允许时仍走原有执行路径
 func TestDispatcherPolicyAllow(t *testing.T) {
-	registry := NewRegistry()
-	if err := registry.Register(NewFakeListPodsTool()); err != nil {
+	registry := tools.NewRegistry()
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	dispatcher := NewDispatcher(registry, NewReadonlyPolicy())
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
 	evidence, err := dispatcher.Execute(context.Background(), core.Task{
 		ID:       "t1",
 		RunID:    "run1",
@@ -119,13 +121,13 @@ func TestDispatcherPolicyAllow(t *testing.T) {
 	}
 }
 
-// nil policy 退化为全部允许
+// 策略为空时退化为全部允许
 func TestDispatcherNilPolicyAllowAll(t *testing.T) {
-	registry := NewRegistry()
-	if err := registry.Register(NewFakeListPodsTool()); err != nil {
+	registry := tools.NewRegistry()
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	dispatcher := NewDispatcher(registry, nil)
+	dispatcher := tools.NewDispatcher(registry, nil)
 	if _, err := dispatcher.Execute(context.Background(), core.Task{
 		ID:       "t1",
 		RunID:    "run1",
@@ -144,11 +146,11 @@ func mustJSONArgs(t *testing.T, argv []string) json.RawMessage {
 	return raw
 }
 
-// 若被误调用则失败测试，用于证明 Deny 短路
+// 若被误调用则失败测试，用于证明拒绝短路
 type panicTool struct{}
 
-func (panicTool) Spec() ToolSpec {
-	return ToolSpec{
+func (panicTool) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
 		Name:        "k8s",
 		Description: "panic if executed",
 		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),

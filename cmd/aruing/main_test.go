@@ -3,7 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -13,62 +13,25 @@ import (
 	"aruing/internal/store"
 )
 
-// 默认输出应为 Markdown：含标题、结论段、证据编号，而非 JSON
-func TestDispatchRun(t *testing.T) {
+// 单次运行在无大模型配置时应明确失败，不再走假实现
+func TestDispatchRunRequiresLLM(t *testing.T) {
+	cfgPath := emptyConfigPath(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	err := dispatch([]string{"run", "demo-api", "为什么访问不了"}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("dispatch run: %v", err)
+	err := dispatch([]string{"run", "--config", cfgPath, "demo-api", "为什么访问不了"}, &stdout, &stderr)
+	if err == nil {
+		t.Fatal("want error when LLM is not configured")
 	}
-	// 进度日志默认走 stderr；验证流程跑通且不含错误噪声
-	if !strings.Contains(stderr.String(), "生成报告") {
-		t.Errorf("stderr missing progress marker, got: %q", stderr.String())
-	}
-	out := stdout.String()
-	if strings.Contains(out, "skeleton") {
-		t.Fatalf("stdout still contains skeleton output: %q", out)
-	}
-	if strings.HasPrefix(strings.TrimSpace(out), "{") {
-		t.Fatalf("default output should be markdown, got JSON: %q", out)
-	}
-	// 假报告标题固定含「诊断报告」，证据编号以 e_ 开头应出现在 Markdown 中
-	if !strings.Contains(out, "诊断报告") {
-		t.Errorf("missing title in markdown:\n%s", out)
-	}
-	if !strings.Contains(out, "`e_") {
-		t.Errorf("missing evidence id in markdown:\n%s", out)
+	msg := err.Error()
+	if !strings.Contains(msg, "LLM") && !strings.Contains(msg, "ARUING_LLM") && !strings.Contains(msg, "llm.") {
+		t.Fatalf("error should mention LLM config, got: %v", err)
 	}
 }
 
-// --format json 应输出可解析的结构化报告，证据链完整
-func TestDispatchRunJSON(t *testing.T) {
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-
-	err := dispatch([]string{"run", "--format", "json", "demo-api", "为什么访问不了"}, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("dispatch run: %v", err)
-	}
-
-	var report core.Report
-	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
-		t.Fatalf("unmarshal report: %v", err)
-	}
-	if !strings.HasPrefix(report.ID, "rep_") || !strings.HasPrefix(report.RunID, "run_") {
-		t.Errorf("report identity was not generated: %#v", report)
-	}
-	if len(report.Conclusions) != 1 || len(report.Conclusions[0].EvidenceIDs) != 1 {
-		t.Fatalf("report evidence chain is incomplete: %#v", report.Conclusions)
-	}
-	if !strings.HasPrefix(report.Conclusions[0].EvidenceIDs[0], "e_") {
-		t.Errorf("evidence ID = %q, want e_ prefix", report.Conclusions[0].EvidenceIDs[0])
-	}
-}
-
-// 非法 format 应报错
+// 单次运行非法输出格式应报错
 func TestDispatchRunBadFormat(t *testing.T) {
+	clearLLMEnv(t)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
@@ -81,7 +44,7 @@ func TestDispatchRunBadFormat(t *testing.T) {
 	}
 }
 
-// usage 与分发应识别 chat 子命令
+// 用法说明与分发应识别多轮对话子命令
 func TestDispatchChatRecognized(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -93,14 +56,14 @@ func TestDispatchChatRecognized(t *testing.T) {
 		t.Fatalf("usage missing chat:\n%s", stdout.String())
 	}
 
-	// 无 LLM 时单句 chat 应明确失败，而不是 unknown command
-	clearLLMEnv(t)
-	err := dispatch([]string{"chat", "hello"}, &stdout, &stderr)
+	// 无大模型时单句对话应明确失败，而不是未知命令
+	cfgPath := emptyConfigPath(t)
+	err := dispatch([]string{"chat", "--config", cfgPath, "hello"}, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("want error when LLM is not configured")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "ARUING_LLM") {
+	if !strings.Contains(msg, "LLM") && !strings.Contains(msg, "ARUING_LLM") && !strings.Contains(msg, "llm.") {
 		t.Fatalf("error should mention LLM env vars, got: %v", err)
 	}
 	if strings.Contains(msg, "unknown command") {
@@ -108,7 +71,7 @@ func TestDispatchChatRecognized(t *testing.T) {
 	}
 }
 
-// chat 非法 format 应报错
+// 多轮对话非法输出格式应报错
 func TestDispatchChatBadFormat(t *testing.T) {
 	clearLLMEnv(t)
 	var stdout bytes.Buffer
@@ -118,25 +81,37 @@ func TestDispatchChatBadFormat(t *testing.T) {
 	if err == nil {
 		t.Fatal("want error for unknown format")
 	}
-	// format 校验在 stack 组装前，不依赖 LLM
+	// 格式校验在栈组装前，不依赖大模型
 	if !strings.Contains(err.Error(), "unknown format") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-// newSessionStack 无 LLM 应硬失败，不用 Fake 冒充产品路径
+// 组装会话栈在无大模型配置时应硬失败
 func TestNewSessionStackRequiresLLM(t *testing.T) {
 	cfg := config.Config{}
 	_, err := newSessionStack(core.NewFactory(), cfg, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("want error without LLM")
 	}
-	if !strings.Contains(err.Error(), "ARUING_LLM") {
+	if !strings.Contains(err.Error(), "LLM") && !strings.Contains(err.Error(), "llm.") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
-// baseline 轮只写 Content；diagnostic 附加报告块
+// 组装编排器在无大模型配置时应硬失败，无假实现回退
+func TestNewOrchestratorRequiresLLM(t *testing.T) {
+	cfg := config.Config{}
+	_, err := newOrchestrator(core.NewFactory(), cfg, &bytes.Buffer{})
+	if err == nil {
+		t.Fatal("want error without LLM")
+	}
+	if !strings.Contains(err.Error(), "LLM") && !strings.Contains(err.Error(), "llm.") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// 基线轮只写助手正文；诊断轮附加报告块
 func TestWriteTurnResult(t *testing.T) {
 	t.Run("baseline", func(t *testing.T) {
 		var out bytes.Buffer
@@ -186,7 +161,7 @@ func TestWriteTurnResult(t *testing.T) {
 	})
 }
 
-// 注入 Echo 的 Service 证明 chatTurn 接线形状：两轮后 ListMessages 4 条交错
+// 注入回显响应器证明对话接线：两轮后应有四条用户与助手交错消息
 func TestChatTurnEchoStack(t *testing.T) {
 	factory := core.NewFactory()
 	mem := store.NewMemoryStore()
@@ -220,10 +195,24 @@ func TestChatTurnEchoStack(t *testing.T) {
 	}
 }
 
-// 清空 LLM 相关 env，保证 chat 无凭据路径可测
+// 清空大模型相关环境变量，保证无凭据路径可测
 func clearLLMEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("ARUING_LLM_BASE_URL", "")
 	t.Setenv("ARUING_LLM_API_KEY", "")
 	t.Setenv("ARUING_LLM_MODEL", "")
+}
+
+// 写入无大模型字段的配置文件，并阻断环境配置与默认搜索路径
+func emptyConfigPath(t *testing.T) string {
+	t.Helper()
+	clearLLMEnv(t)
+	dir := t.TempDir()
+	path := dir + "/config.yaml"
+	if err := os.WriteFile(path, []byte("debug: false\n"), 0o600); err != nil {
+		t.Fatalf("write empty config: %v", err)
+	}
+	// 避免进程环境里已有配置路径环境变量指向完整配置
+	t.Setenv("ARUING_CONFIG", path)
+	return path
 }

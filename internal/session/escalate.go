@@ -8,8 +8,8 @@ import (
 	"aruing/internal/core"
 )
 
-// 建 Run 并执行正式诊断，成功时写入 RunLedger，组装 diagnostic 模式的 RespondOutput
-// Tower escalate 与临时 DiagnoseResponder 共用，避免两套建 Run 逻辑
+// 建运行并执行正式诊断，成功时写入诊断账本，组装诊断模式的应答输出
+// 基线塔升格与临时诊断应答器共用，避免两套建运行逻辑
 func Escalate(
 	ctx context.Context,
 	factory *core.Factory,
@@ -73,8 +73,8 @@ func Escalate(
 	}, nil
 }
 
-// 将 Report 展开为可落库的诊断摘要（供后续会话解释引用，#18 不人为砍字段条数）
-// 单条 Message 体积由 Tower 上下文预算治理，不在此用固定 N 截肢
+// 将报告展开为可落库的诊断摘要（供后续会话解释引用，不人为砍字段条数）
+// 单条消息体积由基线塔上下文预算治理，不在此用固定条数截肢
 func formatDiagnosticReply(report core.Report) string {
 	var b strings.Builder
 

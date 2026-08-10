@@ -9,9 +9,9 @@ import (
 	"aruing/internal/llm"
 )
 
-// 为 run 失败补充可操作的人话提示（L-8 最小版）
+// 为单次运行失败补充可操作的人话提示
 //
-// 保留原始错误链，仅在识别到 LLM 配置/输出类问题时追加建议
+// 保留原始错误链，仅在识别到大模型配置或输出类问题时追加建议
 // 无法分类时原样返回，避免误导
 func formatRunError(err error) error {
 	if err == nil {
@@ -39,8 +39,9 @@ func runErrorHint(err error) string {
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "build llm client"),
-		strings.Contains(msg, "llm config"):
-		return "检查 ARUING_LLM_BASE_URL / ARUING_LLM_API_KEY / ARUING_LLM_MODEL 是否齐全（见 .env.example）"
+		strings.Contains(msg, "llm config"),
+		strings.Contains(msg, "llm configuration incomplete"):
+		return "检查配置文件 llm.* 或 ARUING_LLM_BASE_URL / API_KEY / MODEL（见 aruing.example.yaml）"
 	case strings.Contains(msg, "invalid api key"),
 		strings.Contains(msg, "authentication"),
 		strings.Contains(msg, "unauthorized"),

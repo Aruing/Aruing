@@ -1,12 +1,12 @@
-// 会话总控：实现 session.Responder，在基线回复与正式诊断之间做有限动作决策
+// 会话总控：实现会话应答器，在基线回复与正式诊断之间做有限动作决策
 //
-// 支持 reply / call_tool / escalate：
-// - reply：直接自然语言，Mode=baseline，无 Run
-// - call_tool：经 Dispatcher 取观察（Task.RunID 空），回喂后再决策，不落 Message
-// - escalate：Factory 建 Run，经 RunExecutor 走诊断管道，成功后写入 RunLedger
+// 支持直接回复、调工具、升格诊断：
+// - 直接回复：自然语言，模式为基线，无诊断运行
+// - 调工具：经调度器取观察（任务无运行编号），回喂后再决策，不落会话消息
+// - 升格：编号工厂建运行，经执行器走诊断管道，成功后写入诊断账本
 //
-// 轮内 tool 中间态仅在本轮内存；call_tool 依赖可选 Dispatcher，nil 时禁止该动作
-// 业务级重试：单次决策最多 3 次；工具失败不计入业务重试，观察回喂后再决策
+// 轮内工具中间态仅在本轮内存；调工具依赖可选调度器，为空时禁止该动作
+// 业务级重试：单次决策最多三次；工具失败不计入业务重试，观察回喂后再决策
 package agent
 
 import (
@@ -29,12 +29,12 @@ import (
 var towerPromptTemplate string
 
 const (
-	// 单次决策业务级重试上限（非法 action / 空 content / 非法 tool 等）
+	// 单次决策业务级重试上限（非法动作、空正文、非法工具等）
 	maxTowerAttempts = 3
-	// 基线 tool 环默认上限：防死环熔断，须够用复杂多步观察；触顶后自动 escalate，禁止对用户报预算错误（#18）
+	// 基线工具环默认上限：防死环熔断，须够用复杂多步观察；触顶后自动升格，禁止对用户报预算错误
 	defaultBaselineMaxToolRounds = 12
-	// 本轮全部 observations 的 raw 注入合计预算（自上下文总预算分出）
-	// 多条共享、优先保新；轮内内存仍全量 Evidence.Raw；禁止用固定字数当业务能力墙（#18）
+	// 本轮全部观察的原始输出注入合计预算（自上下文总预算分出）
+	// 多条共享、优先保新；轮内内存仍全量保留原始输出；禁止用固定字数当业务能力墙
 	defaultTowerObservationsBudgetTokens = 8_000
 
 	towerActionReply    = "reply"
@@ -42,33 +42,33 @@ const (
 	towerActionEscalate = "escalate"
 )
 
-// 会话总控：实现 session.Responder
-// 有限动作：reply / call_tool / escalate
-// 不持有跨 Turn 可变状态；每次 Respond 独立决策
+// 会话总控：实现会话应答器
+// 有限动作：直接回复、调工具、升格诊断
+// 不持有跨轮可变状态；每次应答独立决策
 type TowerResponder struct {
-	// 大模型客户端，用于结构化决策（GenerateJSON）
+	// 大模型客户端，用于结构化决策
 	client llm.Client
-	// 领域编号工厂，升格建 Run 与基线 Task 编号
+	// 领域编号工厂，升格建运行与基线任务编号
 	factory *core.Factory
-	// 正式诊断执行器，escalate 时调用
+	// 正式诊断执行器，升格时调用
 	executor session.RunExecutor
-	// 正式诊断结果账本；escalate 成功路径写入
+	// 正式诊断结果账本；升格成功路径写入
 	ledger session.RunLedger
-	// 基线 tool 环调度器；nil 时不允许 call_tool
+	// 基线工具环调度器；为空时不允许调工具
 	dispatcher *tools.Dispatcher
-	// 注入 prompt 的工具规格快照（可空切片）
+	// 注入提示词的工具规格快照（可空切片）
 	specs []tools.ToolSpec
 	// 已渲染系统提示（含工具规格摘要）
 	systemPrompt string
-	// 本轮最多 call_tool 次数，默认 defaultBaselineMaxToolRounds；触顶自动 escalate
+	// 本轮最多调工具次数；触顶自动升格
 	baselineMaxToolRounds int
-	// 可选进度/调试输出（默认 Discard）；verbose 时 CLI 传入 stderr
+	// 可选进度与调试输出（默认丢弃）；详细模式时命令行传入标准错误
 	progress io.Writer
 }
 
-// 组装总控；client / factory / executor / ledger 必填，dispatcher 与 specs 可选
-// dispatcher == nil 时校验拒绝 call_tool，便于无工具单测
-// specs 为 nil 时按空列表处理；构造时复制切片，调用方后续修改不影响本实例
+// 组装总控；客户端、编号工厂、执行器、账本必填，调度器与工具规格可选
+// 调度器为空时校验拒绝调工具，便于无工具单测
+// 工具规格为空时按空列表处理；构造时复制切片，调用方后续修改不影响本实例
 func NewTowerResponder(
 	client llm.Client,
 	factory *core.Factory,
@@ -113,7 +113,7 @@ func NewTowerResponder(
 	}, nil
 }
 
-// 覆盖基线 tool 环预算；n <= 0 时恢复默认值
+// 覆盖基线工具环预算；非正数时恢复默认值
 func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
 	if n <= 0 {
 		t.baselineMaxToolRounds = defaultBaselineMaxToolRounds
@@ -122,7 +122,7 @@ func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
 	t.baselineMaxToolRounds = n
 }
 
-// 设置进度/调试输出；nil 时回退 Discard
+// 设置进度与调试输出；空时回退丢弃
 func (t *TowerResponder) SetProgress(w io.Writer) {
 	if t == nil {
 		return
@@ -142,11 +142,11 @@ func (t *TowerResponder) progressf(format string, args ...any) {
 	fmt.Fprintf(t.progress, format+"\n", args...)
 }
 
-// 看历史与当前句，在 reply / call_tool / escalate 间决策；写库由 session.Service.Turn 负责
-// call_tool 在本方法内循环执行，中间观察不落 Message
-// 入口 prepareTowerContext 一次（L0/L1/L2）；tool 环复用同一视图
-// 每个 Turn 最多一次轻量集群资源侦察（context，非 Verdict 证据）；失败降级为空
-// reply / escalate 时把 view.CheckpointContent 带回，供 Turn 落 ModeCheckpoint
+// 看历史与当前句，在直接回复、调工具、升格诊断间决策；写库由会话服务负责
+// 调工具在本方法内循环执行，中间观察不落会话消息
+// 入口准备上下文一次；工具环复用同一视图
+// 每轮最多一次轻量集群资源侦察（上下文用，非正式判决证据）；失败降级为空
+// 直接回复或升格时带回检查点正文，供会话轮次落检查点消息
 func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
@@ -176,8 +176,8 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}
 	t.progressf("tower: context_ready hist=%d checkpoint=%v", len(view.Hist), view.CheckpointContent != "")
 
-	// 压缩后按范围回灌：视图丢失旧文时，定位相关区间从权威 Store 取原文注入（PR-C，#18）
-	// locate 规则优先、LLM 兜底；命中后 compactRange 压进子预算，作为 rehydrated_messages 注入
+	// 压缩后按范围回灌：视图丢失旧文时，定位相关区间从权威存储取原文注入
+	// 定位规则优先、大模型兜底；命中后窗内压缩压进子预算，作为回灌消息注入
 	var rehydrated []rehydratedMsg
 	if viewCompactedAwayDetail(view) {
 		if lo, hi, ok := locateRange(ctx, t.client, in.UserText, in.History); ok {
@@ -186,7 +186,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		}
 	}
 
-	// 本会话正式诊断深材料（Report + Evidence）；权威源 RunLedger，非 Message 摘要
+	// 本会话正式诊断深材料（报告加证据）；权威源为诊断账本，非消息摘要
 	records, listErr := t.ledger.ListBySession(ctx, in.SessionID)
 	if listErr != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower list diagnostic runs: %w", listErr)
@@ -194,7 +194,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	priorRuns := buildPriorRunDetails(records, defaultPriorEvidenceBudgetTokens)
 	t.progressf("tower: prior_run_details=%d", len(priorRuns))
 
-	// 每 Turn 一次；与正式管道 recon 同源解析；空 RunID，不进 Evidence 账本
+	// 每轮一次；与正式管道侦察同源解析；无运行编号，不进证据账本
 	clusterResources := t.fetchBaselineClusterResources(ctx)
 	t.progressf("tower: cluster_resources=%d", len(clusterResources))
 
@@ -261,28 +261,28 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 
 // 单轮决策结果（校验后）
 type towerDecision struct {
-	// 动作：reply、call_tool 或 escalate
+	// 动作：直接回复、调工具或升格诊断
 	Action string
-	// reply 时的助手正文，其它动作可空
+	// 直接回复时的助手正文，其它动作可空
 	Content string
-	// escalate 时写入 Run 的诊断问题；空则回退为用户原文
+	// 升格时写入运行的诊断问题；空则回退为用户原文
 	Question string
-	// call_tool 时的工具提议
+	// 调工具时的工具提议
 	ToolCall towerToolCall
 }
 
 // 模型提议的一次工具调用（恰好一条）
 type towerToolCall struct {
-	// 白名单工具名，须在 specs 内
+	// 白名单工具名，须在工具规格内
 	ToolName string
-	// 工具参数 JSON 对象；空则执行时用 {}
+	// 工具参数对象；空则执行时用空对象
 	Arguments json.RawMessage
-	// 调用目的说明，写入 Task 与观察
+	// 调用目的说明，写入任务与观察
 	Purpose string
 }
 
-// 轮内 tool 观察，仅进程内存，对齐 Evidence 可回放子集
-// 内存侧 Raw 全量；注入模型前经 prepareTowerObservationsForPrompt 按预算截断
+// 轮内工具观察，仅进程内存，对齐证据可回放子集
+// 内存侧原始输出全量；注入模型前按预算截断
 type towerObservation struct {
 	// 本轮任务编号
 	TaskID string `json:"taskId"`
@@ -296,37 +296,37 @@ type towerObservation struct {
 	CommandView string `json:"commandView,omitempty"`
 	// 工具或策略失败时非空
 	Error string `json:"error,omitempty"`
-	// 工具 Evidence.Raw 全量拷贝（k8s 含 stdout/stderr/exitCode 等）
+	// 工具原始输出全量拷贝（集群工具含标准输出、标准错误、退出码等）
 	Raw json.RawMessage `json:"raw,omitempty"`
-	// 仅当注入副本对 raw 做了预算截断时为 true；权威内存观察不置位
+	// 仅当注入副本对原始输出做了预算截断时为真；权威内存观察不置位
 	RawTruncated bool `json:"rawTruncated,omitempty"`
 }
 
-// 模型每轮输出契约（GenerateJSON 反序列化目标）
+// 模型每轮输出契约（结构化生成反序列化目标）
 type towerLLMOutput struct {
-	// 动作：reply、call_tool 或 escalate
+	// 动作：直接回复、调工具或升格诊断
 	Action string `json:"action"`
-	// reply 时的助手正文
+	// 直接回复时的助手正文
 	Content string `json:"content"`
-	// escalate 时的诊断问题
+	// 升格时的诊断问题
 	Question string `json:"question"`
-	// call_tool 时的工具字段
+	// 调工具时的工具字段
 	ToolCall *towerToolCallJSON `json:"tool_call"`
 }
 
-// 模型 tool_call JSON 形状
+// 模型工具调用结构化形状
 type towerToolCallJSON struct {
 	// 工具名
 	ToolName string `json:"tool_name"`
-	// 参数对象；允许任意 JSON，校验时要求对象类型
+	// 参数对象；允许任意结构，校验时要求对象类型
 	Arguments json.RawMessage `json:"arguments"`
 	// 目的说明
 	Purpose string `json:"purpose"`
 }
 
 // 调用模型直至得到合法决策或业务重试耗尽
-// priorRuns 为本会话 RunLedger 深材料；clusterResources 为本 Turn 轻量侦察（可空）
-// rehydrated 为压缩后按范围回灌的原文窗（可空）；三者仅注入 prompt，不写入观察账本
+// 先前运行材料为本会话诊断账本深材料；集群资源为本轮轻量侦察（可空）
+// 回灌为压缩后按范围回灌的原文窗（可空）；三者仅注入提示词，不写入观察账本
 func (t *TowerResponder) decide(
 	ctx context.Context,
 	in session.RespondInput,
@@ -353,7 +353,7 @@ func (t *TowerResponder) decide(
 		}
 		var out towerLLMOutput
 		if gErr := t.client.GenerateJSON(ctx, req, &out); gErr != nil {
-			// 空正文与 JSON 解析失败可业务重试（兼容网关偶发坏包）；其它错误直接失败
+			// 空正文与结构化解析失败可业务重试（兼容网关偶发坏包）；其它错误直接失败
 			if errors.Is(gErr, llm.ErrJSONParse) || errors.Is(gErr, llm.ErrEmptyResponse) {
 				lastValidateErr = gErr
 				t.progressf("tower: decide attempt %d/%d: recoverable LLM error: %v",
@@ -372,14 +372,14 @@ func (t *TowerResponder) decide(
 		return t.mapTowerDecision(out), nil
 	}
 	if lastValidateErr != nil {
-		// 双 %w：上层可 Is(ErrLLMOutputInconsistent) 与 Is(ErrJSONParse/ErrEmptyResponse)
+		// 双错误包装：上层可同时识别模型输出不一致与解析失败或空响应
 		return towerDecision{}, fmt.Errorf("%w: last error: %w, last output: %+v",
 			ErrLLMOutputInconsistent, lastValidateErr, lastOut)
 	}
 	return towerDecision{}, fmt.Errorf("%w: last output: %+v", ErrLLMOutputInconsistent, lastOut)
 }
 
-// 校验决策：依赖本实例的 dispatcher / specs
+// 校验决策：依赖本实例的调度器与工具规格
 func (t *TowerResponder) validateTowerDecision(out towerLLMOutput) error {
 	action := strings.TrimSpace(strings.ToLower(out.Action))
 	switch action {
@@ -434,10 +434,10 @@ func (t *TowerResponder) mapTowerDecision(out towerLLMOutput) towerDecision {
 	return decision
 }
 
-// 轻量集群资源类型侦察：每 Turn 由 Respond 调用至多一次
-// 条件：dispatcher 非空且 specs 含 k8s；否则返回 nil（不尝试）
-// 成功：解析 api-resources 为 ClusterResource 清单；失败/空 stdout：nil，不挡基线
-// Task.RunID 空；结果仅作模型 context，不得当 Verdict 证据
+// 轻量集群资源类型侦察：每轮由应答调用至多一次
+// 条件：调度器非空且工具规格含集群工具；否则返回空（不尝试）
+// 成功：解析资源清单；失败或空输出返回空，不挡基线
+// 任务无运行编号；结果仅作模型上下文，不得当判决证据
 func (t *TowerResponder) fetchBaselineClusterResources(ctx context.Context) []ClusterResource {
 	if t == nil || t.dispatcher == nil || t.factory == nil {
 		return nil
@@ -471,8 +471,8 @@ func (t *TowerResponder) fetchBaselineClusterResources(ctx context.Context) []Cl
 	return resources
 }
 
-// 经 Dispatcher 执行一次基线工具调用，成功或失败都返回 observation
-// 仅在无法发号或 ctx 取消时返回 error 中断环
+// 经调度器执行一次基线工具调用，成功或失败都返回观察
+// 仅在无法发号或上下文取消时返回错误中断环
 func (t *TowerResponder) executeBaselineTool(ctx context.Context, call towerToolCall) (towerObservation, error) {
 	obs := towerObservation{
 		ToolName: call.ToolName,
@@ -516,7 +516,7 @@ func (t *TowerResponder) executeBaselineTool(ctx context.Context, call towerTool
 		return obs, nil
 	}
 
-	// Dispatcher 已写入归属字段；观察取可回放子集，含完整 Raw（#18 内存不阉割）
+	// 调度器已写入归属字段；观察取可回放子集，含完整原始输出（内存不阉割）
 	obs.Summary = item.Summary
 	obs.CommandView = item.CommandView
 	if item.Error != "" {
@@ -528,9 +528,9 @@ func (t *TowerResponder) executeBaselineTool(ctx context.Context, call towerTool
 	return obs, nil
 }
 
-// 生成写入 prompt 的 observations 副本，不修改环内权威切片
-// 全部 raw 共享一份预算；从最新向旧分配，优先保留较新观察的全文
-// budgetTokens <= 0 时使用默认合计预算
+// 生成写入提示词的观察副本，不修改环内权威切片
+// 全部原始输出共享一份预算；从最新向旧分配，优先保留较新观察的全文
+// 预算非正时使用默认合计预算
 func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int) []towerObservation {
 	if len(obs) == 0 {
 		return obs
@@ -539,7 +539,7 @@ func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int)
 		budgetTokens = defaultTowerObservationsBudgetTokens
 	}
 
-	// 深拷贝 raw，避免后续截断写穿权威切片
+	// 深拷贝原始输出，避免后续截断写穿权威切片
 	out := make([]towerObservation, len(obs))
 	for i, o := range obs {
 		out[i] = o
@@ -574,8 +574,8 @@ func prepareTowerObservationsForPrompt(obs []towerObservation, budgetTokens int)
 	return out
 }
 
-// 将超预算 raw 收成合法 JSON，附 truncated 预览；完整结果仍在轮内内存
-// budgetTokens 按估算单位换算为预览 rune 上限（约 4 rune / token）
+// 将超预算原始输出收成合法对象，附截断预览；完整结果仍在轮内内存
+// 预算按估算单位换算为预览字符上限
 func truncateObservationRaw(raw json.RawMessage, budgetTokens int) json.RawMessage {
 	runes := []rune(string(raw))
 	maxRunes := budgetTokens * 4
@@ -606,15 +606,15 @@ func truncateObservationRaw(raw json.RawMessage, budgetTokens int) json.RawMessa
 	return wrapped
 }
 
-// 共享预算已耗尽时写入的 raw 占位 JSON
-// summary 与 commandView 仍注入模型，完整 raw 仍在轮内内存
+// 共享预算已耗尽时写入的原始输出占位对象
+// 摘要与命令视图仍注入模型，完整原始输出仍在轮内内存
 func omitObservationRawForBudget() json.RawMessage {
 	return json.RawMessage(
 		`{"truncated":true,"preview":"","note":"omitted for shared model budget; newer observations prioritized; full result retained in-turn"}`,
 	)
 }
 
-// 将 prompt 中的工具规格占位符替换为名称与描述摘要（截断 schema，避免撑爆上下文）
+// 将提示词中的工具规格占位符替换为名称与描述摘要（截断参数模式，避免撑爆上下文）
 func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, error) {
 	if !strings.Contains(template, "{{TOOL_SPECS}}") {
 		return "", errors.New("tower prompt missing {{TOOL_SPECS}} placeholder")
@@ -636,10 +636,10 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 组装 user JSON：当前句、历史视图、prior 摘要/深材料、本轮观察、工具列表、可选集群资源类型、可选回灌窗
-// 禁止 last-N 静默截断（#18）；历史超预算见 prepareTowerContext；
-// 观察 raw 见 prepareTowerObservationsForPrompt；prior 证据 raw 见 buildPriorRunDetails；
-// 回灌窗见 locateRange/rehydrateRange/compactRange（仅 compact 丢细节时注入）
+// 组装用户载荷：当前句、历史视图、先前诊断摘要与深材料、本轮观察、工具列表、可选集群资源、可选回灌窗
+// 禁止按固定条数静默截断；历史超预算见上下文准备；
+// 观察原始输出见预算治理；先前证据原始输出见深材料组装；
+// 回灌窗仅在压缩丢细节且定位命中时注入
 func buildTowerUserPayload(
 	in session.RespondInput,
 	view towerContextView,
@@ -658,17 +658,17 @@ func buildTowerUserPayload(
 	type payload struct {
 		// 本轮用户原文
 		UserText string `json:"user_text"`
-		// 会话历史视图（预算内全文；超预算 L0/L1/L2 compact）
+		// 会话历史视图（预算内全文；超预算分层压缩）
 		History []towerHistMsg `json:"history"`
-		// 本会话既有诊断摘要（Message 侧；无条数 cap，由预算统一治理）
+		// 本会话既有诊断摘要（消息侧；无条数上限，由预算统一治理）
 		PriorDiagnostics []towerPriorDiagnostic `json:"prior_diagnostics"`
-		// 本会话正式诊断深材料（RunLedger：结论 + 证据；raw 共享预算）
+		// 本会话正式诊断深材料（诊断账本：结论加证据；原始输出共享预算）
 		PriorRunDetails []towerPriorRunDetail `json:"prior_run_details"`
-		// 本轮 tool 观察（raw 经预算治理后的注入副本）
+		// 本轮工具观察（原始输出经预算治理后的注入副本）
 		Observations []towerObservation `json:"observations"`
 		// 可用工具名与描述
 		Tools []toolItem `json:"tools"`
-		// 本集群实际可用资源类型（含 CRD）；基线 context，非正式 Evidence
+		// 本集群实际可用资源类型（含自定义资源）；基线上下文，非正式证据
 		ClusterResources []ClusterResource `json:"cluster_resources,omitempty"`
 		// 压缩后按范围回灌的原文窗（仅当默认视图丢失旧文且定位命中时存在）
 		// 步骤级细节优先依据本字段，不得编造未出现的步骤
@@ -684,7 +684,7 @@ func buildTowerUserPayload(
 	if observations == nil {
 		observations = []towerObservation{}
 	}
-	// 注入副本：多观察共享预算、优先保新；超预算带 rawTruncated（权威切片不变）
+	// 注入副本：多观察共享预算、优先保新；超预算带截断标记（权威切片不变）
 	observations = prepareTowerObservationsForPrompt(
 		observations, defaultTowerObservationsBudgetTokens)
 	if priors == nil {
@@ -719,7 +719,7 @@ func buildTowerUserPayload(
 	return string(raw), nil
 }
 
-// 检查工具名是否在 specs 白名单
+// 检查工具名是否在规格白名单
 func towerToolNameAllowed(name string, specs []tools.ToolSpec) bool {
 	for _, s := range specs {
 		if s.Name == name {
@@ -729,7 +729,7 @@ func towerToolNameAllowed(name string, specs []tools.ToolSpec) bool {
 	return false
 }
 
-// arguments 须为 JSON 对象或空（空表示 {}）
+// 参数须为对象或空（空表示空对象）
 func validateTowerToolArguments(args json.RawMessage) error {
 	if len(args) == 0 {
 		return nil

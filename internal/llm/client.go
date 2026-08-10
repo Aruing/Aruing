@@ -1,7 +1,7 @@
-// 适配实现：把厂商无关的 Client 接口桥接到 OpenAI 兼容协议
+// 适配实现：把厂商无关的客户端接口桥接到常见聊天补全兼容协议
 //
-// 本文件是唯一 import sashabaranov/go-openai 的位置，供应商细节被锁在这里
-// 将来新增原生协议适配器（如直连 Gemini / Anthropic 原生 API）时，新增一个文件实现同一 Client 接口即可，不改动本文件主体逻辑
+// 本文件是唯一导入兼容开发包的位置，供应商细节被锁在这里
+// 将来新增原生协议适配器时，新增一个文件实现同一客户端接口即可，不改动本文件主体逻辑
 package llm
 
 import (
@@ -20,7 +20,7 @@ import (
 
 // 检查配置并创建一个可复用的客户端实例
 //
-// 返回的 Client 在多次诊断运行之间应被复用，而非每次请求新建
+// 返回的客户端在多次诊断运行之间应被复用，而非每次请求新建
 // 配置非法时返回错误，避免运行期才暴露初始化问题
 func NewClient(cfg Config) (Client, error) {
 	normalized, err := cfg.normalize()
@@ -28,11 +28,11 @@ func NewClient(cfg Config) (Client, error) {
 		return nil, err
 	}
 
-	// DefaultConfig 已填入默认 BaseURL 和 HTTPClient，这里按用户配置覆盖
-	// HTTPClient 套 forceNonStreamTransport：go-openai 的 Stream 字段带 omitempty，
-	// false 不会出现在 JSON 里；部分兼容网关把「缺省 stream」当成 true，回 SSE
-	// （body 以 data: 开头）→ SDK 按整包 JSON 解析时报 invalid character 'd'。
-	// 官方 OpenAI 缺省为非流式；这里显式注入 "stream":false 对齐官方语义。
+	// 默认配置已填入默认基址与超文本客户端，这里按用户配置覆盖
+	// 超文本客户端套强制非流式传输：兼容开发包的流式字段带省略空值，
+	// 假不会出现在请求体里；部分兼容网关把「缺省流式」当成真，回服务器推送事件
+	// （正文以事件前缀开头）→ 开发包按整包对象解析时报非法字符
+	// 官方缺省为非流式；这里显式注入流式为假对齐官方语义
 	ocfg := openai.DefaultConfig(normalized.APIKey)
 	ocfg.BaseURL = normalized.BaseURL
 	ocfg.HTTPClient = &http.Client{
@@ -47,16 +47,16 @@ func NewClient(cfg Config) (Client, error) {
 	}, nil
 }
 
-// 在 chat/completions 请求体缺省 stream 时写入 false，避免兼容网关默认开流式
+// 在对话补全请求体缺省流式时写入假，避免兼容网关默认开流式
 //
-// 仅改写 JSON object 请求；已显式带 stream 的请求原样转发
-// 不依赖具体 path 前缀以外的约定，兼容 /v1 与自定义 base
+// 仅改写对象请求体；已显式带流式的请求原样转发
+// 不依赖具体路径前缀以外的约定，兼容默认版本前缀与自定义基址
 type forceNonStreamTransport struct {
-	// 实际转发请求的底层 Transport，nil 时回退 http.DefaultTransport
+	// 实际转发请求的底层传输，空时回退默认传输
 	base http.RoundTripper
 }
 
-// 对 chat/completions POST 补齐 stream=false 后转发
+// 对对话补全提交请求补齐流式为假后转发
 func (t forceNonStreamTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	base := t.base
 	if base == nil {
@@ -79,10 +79,10 @@ func (t forceNonStreamTransport) RoundTrip(req *http.Request) (*http.Response, e
 	return base.RoundTrip(req)
 }
 
-// 若 JSON 对象未设置 stream，则补 "stream":false；解析失败则原样返回
+// 若对象未设置流式字段，则补为假；解析失败则原样返回
 //
-// 用 map[string]json.RawMessage 承载其余字段，避免 unmarshal 到 any 时数字被转成
-// float64 造成大整数（如 seed）丢精度，同时保留原始字节不改变序列化形态
+// 用原始消息映射承载其余字段，避免反序列化到任意类型时数字被转成浮点
+// 造成大整数（如随机种子）丢精度，同时保留原始字节不改变序列化形态
 func ensureStreamFalse(body []byte) []byte {
 	var m map[string]json.RawMessage
 	if err := json.Unmarshal(body, &m); err != nil {
@@ -99,12 +99,12 @@ func ensureStreamFalse(body []byte) []byte {
 	return out
 }
 
-// OpenAI 兼容协议的适配器实现
+// 常见聊天补全兼容协议的适配器实现
 //
-// 仅持有不可变依赖（sashabaranov 客户端、模型名、重试上限），可被多个 goroutine 复用
+// 仅持有不可变依赖（兼容客户端、模型名、重试上限），可被多个协程复用
 // 重试退避时间在每次调用内独立计算，不存在跨请求共享状态
 type client struct {
-	// sashabaranov OpenAI 兼容客户端
+	// 兼容协议客户端
 	api *openai.Client
 	// 请求使用的模型名
 	model string
@@ -121,10 +121,10 @@ func (c *client) Generate(ctx context.Context, req Request) (Response, error) {
 	return Response{Content: content}, nil
 }
 
-// 请求一次结构化生成，把模型输出的 JSON 反序列化进 out
+// 请求一次结构化生成，把模型输出反序列化进输出参数
 //
-// out 必须是可写指针；模型输出被 ```json 围栏包裹或前后带说明文字时也会尝试提取最外层对象
-// 提取后仍无法解析为 JSON 时返回 ErrJSONParse（可 errors.Is），并附预览便于定位
+// 输出参数必须是可写指针；模型输出被围栏包裹或前后带说明文字时也会尝试提取最外层对象
+// 提取后仍无法解析时返回结构化解析哨兵错误（可按错误相等识别），并附预览便于定位
 func (c *client) GenerateJSON(ctx context.Context, req Request, out any) error {
 	if out == nil {
 		return errors.New("llm GenerateJSON: out must be a non-nil pointer")
@@ -149,9 +149,9 @@ func (c *client) GenerateJSON(ctx context.Context, req Request, out any) error {
 
 // 执行一次带重试的生成请求，返回模型正文
 //
-// jsonMode 为 true 时要求供应商返回 JSON 对象（response_format=json_object）；
-// 为 false 时由模型自由返回文本
-// 重试仅针对可恢复错误（网络错误、429、5xx），调用方取消或整体超时不重试
+// 结构化模式为真时要求供应商返回对象；
+// 为假时由模型自由返回文本
+// 重试仅针对可恢复错误（网络错误、限流、服务端错误），调用方取消或整体超时不重试
 func (c *client) do(ctx context.Context, req Request, jsonMode bool) (string, error) {
 	request := openai.ChatCompletionRequest{
 		Model: c.model,
@@ -178,7 +178,7 @@ func (c *client) do(ctx context.Context, req Request, jsonMode bool) (string, er
 		resp, err := c.api.CreateChatCompletion(ctx, request)
 		if err == nil {
 			if len(resp.Choices) == 0 {
-				// 无 choices 与空 content 同类：可恢复时退避重试
+				// 无候选项与空正文同类：可恢复时退避重试
 				lastErr = fmt.Errorf("%w: response has no choices", ErrEmptyResponse)
 				if attempt < c.maxRetries {
 					if waitErr := sleep(ctx, backoff(attempt)); waitErr != nil {
@@ -219,10 +219,10 @@ func (c *client) do(ctx context.Context, req Request, jsonMode bool) (string, er
 
 // 判断一次失败是否值得重试
 //
-// 调用方主动取消或整体 deadline 到达时不重试，否则退避只会白白浪费时间
-// 供应商返回的错误按状态码分类：429 和 5xx 视为临时故障可重试，其余 4xx 直接放弃
-// sashabaranov 依据响应体格式返回 *APIError 或 *RequestError，两者都带 HTTPStatusCode，需要分别匹配
-// 非供应商错误（连接被重置、DNS 抖动等网络层错误）按可重试处理
+// 调用方主动取消或整体截止时间到达时不重试，否则退避只会白白浪费时间
+// 供应商返回的错误按状态码分类：限流与服务端错误视为临时故障可重试，其余客户端错误直接放弃
+// 兼容开发包依据响应体格式返回接口错误或请求错误，两者都带状态码，需要分别匹配
+// 非供应商错误（连接被重置、域名解析抖动等网络层错误）按可重试处理
 func retryable(ctx context.Context, err error) bool {
 	if ctx.Err() != nil {
 		return false
@@ -241,9 +241,9 @@ func retryable(ctx context.Context, err error) bool {
 	return true
 }
 
-// 从 sashabaranov 的错误链里提取 HTTP 状态码
+// 从兼容开发包的错误链里提取超文本状态码
 //
-// 供应商按响应体是否为标准 {"error":{...}} 决定返回 *APIError 还是 *RequestError
+// 供应商按响应体是否为标准错误对象决定返回接口错误还是请求错误
 // 调用方不应关心是哪一种，这里统一抽取状态码供重试判断
 func statusCodeOf(err error) (int, bool) {
 	var apiErr *openai.APIError
@@ -257,7 +257,7 @@ func statusCodeOf(err error) (int, bool) {
 	return 0, false
 }
 
-// 计算第 attempt 次失败后的退避时长（attempt 从 0 开始）
+// 计算第几次失败后的退避时长（次数从零开始）
 //
 // 指数增长并设上限，避免在长时间故障下退避到分钟级
 func backoff(attempt int) time.Duration {
@@ -280,15 +280,15 @@ func sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// 从模型输出中提取可解析的 JSON 文本
+// 从模型输出中提取可解析的结构化文本
 //
-// 模型偶尔会把 JSON 包在 ```json 围栏里，或前后加上说明文字
-// 这里依次处理：去围栏 → 取最外层花括号内容，保证 Unmarshal 能拿到完整对象
-// 找不到花括号时原样返回，让 Unmarshal 报出可读的解析错误
+// 模型偶尔会把对象包在代码围栏里，或前后加上说明文字
+// 这里依次处理：去围栏 → 取最外层花括号内容，保证反序列化能拿到完整对象
+// 找不到花括号时原样返回，让反序列化报出可读的解析错误
 func extractJSON(content string) string {
 	s := strings.TrimSpace(content)
 
-	// 去除 markdown 代码围栏：去掉首行的 ```json 或 ```，再去掉结尾的 ```
+	// 去除标记语言代码围栏：去掉首行的围栏标记，再去掉结尾围栏
 	if strings.HasPrefix(s, "```") {
 		if nl := strings.Index(s, "\n"); nl >= 0 {
 			s = strings.TrimSpace(s[nl+1:])
@@ -298,7 +298,7 @@ func extractJSON(content string) string {
 		}
 	}
 
-	// 即便残留说明文字，也取最外层 { ... } 之间的内容
+	// 即便残留说明文字，也取最外层花括号之间的内容
 	start := strings.Index(s, "{")
 	end := strings.LastIndex(s, "}")
 	if start >= 0 && end > start {

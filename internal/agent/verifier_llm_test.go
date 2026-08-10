@@ -79,7 +79,7 @@ func TestLLMVerifierVerify(t *testing.T) {
 	}
 }
 
-// 多猜想须各一条 verdict
+// 多猜想须各一条判决
 func TestLLMVerifierMultiHypothesis(t *testing.T) {
 	hyps := []core.Hypothesis{
 		{ID: "h_1", RunID: "run_1", Statement: "A"},
@@ -118,9 +118,9 @@ func TestLLMVerifierNewRequiresDeps(t *testing.T) {
 	}
 }
 
-// 非法模型输出触发业务重试并最终 ErrLLMOutputInconsistent
+// 非法模型输出触发业务重试并最终报输出不一致
 func TestLLMVerifierInvalidOutput(t *testing.T) {
-	// 代表几类校验：未知证据、漏判、非法 result、空 evidence_ids
+	// 代表几类校验：未知证据、漏判、非法结果、空证据编号
 	tests := []struct {
 		name string
 		body string
@@ -186,7 +186,7 @@ func TestLLMVerifierRetryThenSuccess(t *testing.T) {
 	}
 }
 
-// Verify 的 user payload 必须含 query/goal，让模型看到用户问题
+// 验证的用户载荷必须含问题与目标，让模型看到用户问题
 func TestLLMVerifierPayloadHasQuery(t *testing.T) {
 	var captured string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {

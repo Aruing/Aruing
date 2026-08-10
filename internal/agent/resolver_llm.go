@@ -1,8 +1,8 @@
 // 真实定位器通过大模型提议工具调用或提交已确认目标
 //
-// 与 FakeResolver 共享 ResolveDriver 边界：只返回意图，不执行工具、不发放领域编号
-// 工具规格来自 Registry.Specs 注入，禁止在 prompt 手写第二份工具清单
-// Target 内容字段由模型产出，Target ID 由编排在 submit 时发放
+// 与假定位器共享定位驱动边界：只返回意图，不执行工具、不发放领域编号
+// 工具规格来自注册表规格列表注入，禁止在提示词手写第二份工具清单
+// 目标内容字段由模型产出，目标编号由编排在提交时发放
 package agent
 
 import (
@@ -21,33 +21,33 @@ import (
 //go:embed prompts/resolver.md
 var resolverPrompt string
 
-// 定位驱动业务级重试次数：JSON 合法但语义违规时重新请求
+// 定位驱动业务级重试次数：结构合法但语义违规时重新请求
 const maxResolveAttempts = 3
 
-// 定位阶段注入模型的 evidence raw 合计预算（估算 token）
-// 环内 Evidence.Raw 仍全量；禁止用固定字数当业务墙（#18）
+// 定位阶段注入模型的证据原始输出合计预算（估算词元）
+// 环内证据原始输出仍全量；禁止用固定字数当业务墙
 const defaultResolverEvidenceBudgetTokens = 8_000
 
 // 用大模型驱动定位循环的实现
 //
-// 持有不可变依赖（客户端、工具规格快照、prompt），可被多次运行复用
-// 不持有跨运行可变状态；每轮 Next 独立发 GenerateJSON
+// 持有不可变依赖（客户端、工具规格快照、提示词），可被多次运行复用
+// 不持有跨运行可变状态；每轮下一步独立发结构化生成
 type LLMResolver struct {
-	// 大模型客户端，每轮 Next 发一次 GenerateJSON
+	// 大模型客户端，每轮下一步发一次结构化生成
 	client llm.Client
-	// 注册表工具规格快照，用于拼 system prompt 与校验 tool_name
+	// 注册表工具规格快照，用于拼系统提示词与校验工具名
 	specs []tools.ToolSpec
 	// 已注入工具规格的系统提示词全文，构造后只读
 	prompt string
 }
 
 // 创建基于大模型的定位驱动
-// specs 应为 Registry.Specs() 快照；空列表时仍可构造，但 call_tool 将无法通过校验
+// 规格应为注册表规格列表快照；空列表时仍可构造，但调用工具将无法通过校验
 func NewLLMResolver(client llm.Client, specs []tools.ToolSpec) (*LLMResolver, error) {
 	if client == nil {
 		return nil, errors.New("LLM resolver requires an llm client")
 	}
-	// 复制 specs，避免调用方后续修改注册表快照影响已构造实例
+	// 复制规格，避免调用方后续修改注册表快照影响已构造实例
 	copied := make([]tools.ToolSpec, len(specs))
 	copy(copied, specs)
 	for i := range copied {
@@ -107,7 +107,7 @@ func (r *LLMResolver) Next(ctx context.Context, state ResolveState) (ResolveActi
 		ErrLLMOutputInconsistent, lastValidateErr, lastOut)
 }
 
-// 将嵌入 prompt 中的工具规格占位符替换为 JSON 文本
+// 将嵌入提示词中的工具规格占位符替换为结构化文本
 func buildResolverSystemPrompt(template string, specs []tools.ToolSpec) (string, error) {
 	raw, err := json.MarshalIndent(specs, "", "  ")
 	if err != nil {
@@ -119,8 +119,8 @@ func buildResolverSystemPrompt(template string, specs []tools.ToolSpec) (string,
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 序列化回喂状态：证据带摘要与按预算治理的 raw 预览，避免撑爆上下文
-// 权威 state.Evidence 不修改；完整 Raw 仍在定位环内存
+// 序列化回喂状态：证据带摘要与按预算治理的原始预览，避免撑爆上下文
+// 权威状态中的证据不修改；完整原始输出仍在定位环内存
 func buildResolverUserPayload(state ResolveState) (string, error) {
 	// 喂给模型的证据视图
 	type evidenceView struct {
@@ -134,11 +134,11 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 		Summary string `json:"summary"`
 		// 工具失败时的错误文案，成功时可空
 		Error string `json:"error,omitempty"`
-		// 可展示的命令视图（如 argv 拼串）
+		// 可展示的命令视图（如参数列表拼串）
 		CommandView string `json:"commandView,omitempty"`
 		// 原始输出预览；预算内全文，超预算截断或占位
 		RawPreview string `json:"rawPreview,omitempty"`
-		// 注入时对 raw 做了预算截断或占位时为 true
+		// 注入时对原始输出做了预算截断或占位时为真
 		RawTruncated bool `json:"rawTruncated,omitempty"`
 	}
 	// 喂给模型的本轮已发起任务视图
@@ -149,12 +149,12 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 		ToolName string `json:"toolName"`
 		// 取证目的说明
 		Purpose string `json:"purpose,omitempty"`
-		// 关联的 Node/Target 等通用引用
+		// 关联的节点、目标等通用引用
 		Refs []string `json:"refs,omitempty"`
-		// 工具入参 JSON
+		// 工具入参
 		Arguments json.RawMessage `json:"arguments,omitempty"`
 	}
-	// 定位轮次完整 user payload
+	// 定位轮次完整用户载荷
 	type payload struct {
 		// 当前问题的开放线索图
 		Query core.Query `json:"query"`
@@ -206,7 +206,7 @@ func buildResolverUserPayload(state ResolveState) (string, error) {
 	return string(b), nil
 }
 
-// 注入模型用的单条 raw 预览结果
+// 注入模型用的单条原始输出预览结果
 type resolverRawPreview struct {
 	// 预算内全文，或截断预览 / 占位说明
 	Preview string
@@ -214,9 +214,9 @@ type resolverRawPreview struct {
 	Truncated bool
 }
 
-// 生成注入模型的 raw 预览，不修改权威 Evidence 切片
-// 全部 raw 共享一份预算；从最新向旧分配，优先保留较新证据的全文
-// budgetTokens <= 0 时使用默认合计预算
+// 生成注入模型的原始输出预览，不修改权威证据切片
+// 全部原始输出共享一份预算；从最新向旧分配，优先保留较新证据的全文
+// 预算小于等于零时使用默认合计预算
 func prepareResolverRawPreviews(items []core.Evidence, budgetTokens int) []resolverRawPreview {
 	out := make([]resolverRawPreview, len(items))
 	if len(items) == 0 {
@@ -251,8 +251,8 @@ func prepareResolverRawPreviews(items []core.Evidence, budgetTokens int) []resol
 	return out
 }
 
-// 将超预算 raw 收成带 truncated 标记的预览文本
-// budgetTokens 按估算单位换算为预览 rune 上限（约 4 rune / token）
+// 将超预算原始输出收成带截断标记的预览文本
+// 预算按估算单位换算为预览字符上限（约四个字符单元一词元）
 func truncateResolverRawPreview(raw string, budgetTokens int) string {
 	runes := []rune(raw)
 	maxRunes := budgetTokens * 4
@@ -271,31 +271,31 @@ func truncateResolverRawPreview(raw string, budgetTokens int) string {
 	)
 }
 
-// 共享预算已耗尽时的 raw 占位文案
-// summary 与 commandView 仍注入模型，完整 raw 仍在定位环内存
+// 共享预算已耗尽时的原始输出占位文案
+// 摘要与命令视图仍注入模型，完整原始输出仍在定位环内存
 func omitResolverRawPreview() string {
 	return "[omitted for shared model budget; newer evidence prioritized; full result retained in resolve state]"
 }
 
-// 模型输出中间结构，映射为 ResolveAction 前须校验
+// 模型输出中间结构，映射为定位动作前须校验
 type resolverLLMOutput struct {
-	// 动作：call_tool / submit_targets / fail
+	// 动作：调用工具 / 提交目标 / 失败
 	Action string `json:"action"`
 	// 选择该动作的理由，供编排与排障阅读
 	Reason string `json:"reason"`
-	// call_tool 时的工具提议列表，契约上本步仅允许恰好一条
+	// 调用工具时的工具提议列表，契约上本步仅允许恰好一条
 	ToolCalls []resolverToolCall `json:"tool_calls"`
-	// submit_targets 时提交的目标内容（无系统 Target.ID）
+	// 提交目标时的目标内容（无系统目标编号）
 	Targets []resolverTargetOut `json:"targets"`
-	// fail 时的错误说明
+	// 失败时的错误说明
 	Error string `json:"error"`
 }
 
-// 模型提议的一次工具调用，不含 Task.ID（由编排发放）
+// 模型提议的一次工具调用，不含任务编号（由编排发放）
 type resolverToolCall struct {
 	// 注册表中的工具名
 	ToolName string `json:"tool_name"`
-	// 符合对应 ToolSpec 的参数 JSON
+	// 符合对应工具规格的参数
 	Arguments json.RawMessage `json:"arguments"`
 	// 本步取证目的
 	Purpose string `json:"purpose"`
@@ -303,19 +303,19 @@ type resolverToolCall struct {
 	Refs []string `json:"refs"`
 }
 
-// 模型提交的已确认目标内容，Target.ID 由编排在 submit 时发放
+// 模型提交的已确认目标内容，目标编号由编排在提交时发放
 type resolverTargetOut struct {
-	// 对应 Query 中节点的系统编号
+	// 对应问题结构中节点的系统编号
 	NodeID string `json:"node_id"`
-	// 目标类型，如 k8s.resource
+	// 目标类型，如集群资源
 	Type string `json:"type"`
-	// 环境中确认的属性（命名空间、kind、name 等）
+	// 环境中确认的属性（命名空间、种类、名称等）
 	Attrs map[string]string `json:"attrs"`
 	// 支撑该目标的证据编号列表
 	EvidenceIDs []string `json:"evidence_ids"`
 }
 
-// 校验并映射为编排使用的 ResolveAction
+// 校验并映射为编排使用的定位动作
 func mapResolverOutput(out resolverLLMOutput, state ResolveState, specs []tools.ToolSpec) (ResolveAction, error) {
 	action := ResolveActionKind(strings.TrimSpace(out.Action))
 	switch action {
@@ -362,14 +362,14 @@ func mapResolverOutput(out resolverLLMOutput, state ResolveState, specs []tools.
 		if len(call.Arguments) == 0 {
 			return ResolveAction{}, errors.New("tool arguments are required")
 		}
-		// 确保 arguments 是 JSON 对象
+		// 确保参数是对象
 		var probe any
 		if err := json.Unmarshal(call.Arguments, &probe); err != nil {
 			return ResolveAction{}, fmt.Errorf("tool arguments: %w", err)
 		}
 		for _, ref := range call.Refs {
 			if _, ok := nodeIDs[ref]; !ok {
-				// refs 允许引用节点；未知 ref 视为违规以便重试
+				// 引用允许指向节点；未知引用视为违规以便重试
 				return ResolveAction{}, fmt.Errorf("tool call refs unknown node %q", ref)
 			}
 		}

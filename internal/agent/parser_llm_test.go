@@ -14,7 +14,7 @@ import (
 	"aruing/internal/llm"
 )
 
-// 按测试需要把任意正文包装成 OpenAI 兼容的 chat completion 响应
+// 按测试需要把任意正文包装成兼容对话补全响应
 func writeChatCompletion(w http.ResponseWriter, content string) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
@@ -28,7 +28,7 @@ func writeChatCompletion(w http.ResponseWriter, content string) {
 	})
 }
 
-// 创建指向 mock 服务端的 LLM 客户端，服务端随测试结束自动关闭
+// 创建指向模拟服务端的大模型客户端，服务端随测试结束自动关闭
 func newMockLLMClient(t *testing.T, handler http.HandlerFunc) llm.Client {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -46,7 +46,7 @@ func newTestFactory(t *testing.T) *core.Factory {
 	return core.NewFactory()
 }
 
-// 单节点问题应回填编号、绑定 Run，并保留关键线索
+// 单节点问题应回填编号、绑定运行，并保留关键线索
 func TestLLMParserParse(t *testing.T) {
 	body := `{"goal":"定位 demo-api 访问失败的原因","nodes":[{"ref":"n1","type":"resource","text":"demo-api","attrs":{"k8s.namespace":"default","k8s.name":"demo-api"}}],"edges":[],"since":"30m"}`
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func TestLLMParserParse(t *testing.T) {
 	}
 }
 
-// 多节点带边：ref→id 映射正确建立
+// 多节点带边：局部引用到系统编号映射正确建立
 func TestLLMParserMultiNode(t *testing.T) {
 	body := `{"goal":"定位 checkout 延迟升高","nodes":[{"ref":"n1","type":"resource","text":"checkout"},{"ref":"n2","type":"resource","text":"postgres"}],"edges":[{"from":"n1","to":"n2","type":"depends_on","attrs":{}}],"since":""}`
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +127,7 @@ func TestLLMParserValidate(t *testing.T) {
 	})
 }
 
-// 非法模型输出触发业务重试并最终 ErrLLMOutputInconsistent
+// 非法模型输出触发业务重试并最终报输出不一致
 func TestLLMParserInvalidOutput(t *testing.T) {
 	tests := []struct {
 		name string
@@ -190,7 +190,7 @@ func TestLLMParserRetry(t *testing.T) {
 		}
 	})
 
-	// 400 为协议层不可重试错误，Parser 不得把它当业务校验重试
+	// 协议层四百类不可重试错误，解析器不得把它当业务校验重试
 	t.Run("transport not retried", func(t *testing.T) {
 		var calls atomic.Int32
 		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +226,7 @@ func TestLLMParserContextCancel(t *testing.T) {
 		}
 	})
 
-	// 第一次返回脏输出后 cancel，应在下次循环开头停住
+	// 第一次返回脏输出后取消，应在下次循环开头停住
 	t.Run("mid retry", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		dirty := `{"goal":"x","nodes":[{"ref":"n1","type":"r","text":"a"},{"ref":"n1","type":"r","text":"b"}]}`
@@ -247,7 +247,7 @@ func TestLLMParserContextCancel(t *testing.T) {
 	})
 }
 
-// 工具：构造一个保证可用的 LLMParser
+// 工具：构造一个保证可用的大模型解析器
 func mustNewLLMParser(t *testing.T, client llm.Client) *LLMParser {
 	t.Helper()
 	parser, err := NewLLMParser(client, core.NewFactory())

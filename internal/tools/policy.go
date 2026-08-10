@@ -5,14 +5,14 @@ import (
 	"fmt"
 )
 
-// 授权决策结果。能力开放由 Tool/Registry 表达，是否允许调用由 Policy 决定。
-// RequireApproval 预留给后续产品路径，本阶段只实现 Allow / Deny。
+// 授权决策结果。能力开放由工具与注册表表达，是否允许调用由策略决定。
+// 需确认预留给后续产品路径，本阶段只实现允许与拒绝。
 type Decision int
 
 const (
 	// 允许执行工具
 	DecisionAllow Decision = iota
-	// 拒绝执行工具，不调用 Tool.Execute
+	// 拒绝执行工具，不调用工具执行
 	DecisionDeny
 	// 需要用户确认后再执行（本阶段未接线，枚举预留）
 	DecisionRequireApproval
@@ -33,16 +33,16 @@ func (d Decision) String() string {
 }
 
 // 在调度器执行工具前做授权判断
-// 输入为工具名称与原始参数 JSON；Policy 不负责枚举资源类型，只判断是否允许本次调用
+// 输入为工具名称与原始参数；策略不负责枚举资源类型，只判断是否允许本次调用
 type Policy interface {
-	// 返回决策与可读原因；Deny 时 reason 应说明拒绝依据
+	// 返回决策与可读原因；拒绝时原因应说明拒绝依据
 	Check(toolName string, args json.RawMessage) (Decision, string)
 }
 
 // 始终允许，用于测试或明确关闭策略的场景
 type AllowAllPolicy struct{}
 
-// 对任意工具与参数返回 Allow
+// 对任意工具与参数返回允许
 func (AllowAllPolicy) Check(string, json.RawMessage) (Decision, string) {
 	return DecisionAllow, "allow-all policy"
 }

@@ -1,8 +1,8 @@
-// 真实验证器把猜想、任务与已登记证据交给大模型，回填系统编号后产出 Verdict
+// 真实验证器把猜想、任务与已登记证据交给大模型，回填系统编号后产出判决
 //
-// 与 FakeVerifier 共享同一 Verify 边界：一次调用返回完整判断列表，不在角色内多轮调工具
-// 判断只能引用输入中已存在的 Evidence 编号；Hypothesis / Task 仅作上下文
-// Verdict 的系统编号与创建时间由本模块经 Factory 发放（对齐 LLMParser / LLMPlanner）
+// 与假验证器共享同一验证边界：一次调用返回完整判断列表，不在角色内多轮调工具
+// 判断只能引用输入中已存在的证据编号；猜想与任务仅作上下文
+// 判决的系统编号与创建时间由本模块经工厂发放（对齐解析器与规划器）
 package agent
 
 import (
@@ -20,23 +20,23 @@ import (
 //go:embed prompts/verifier.md
 var verifierPrompt string
 
-// 验证业务级重试次数：JSON 合法但语义违规时重新请求
+// 验证业务级重试次数：结构合法但语义违规时重新请求
 const maxVerifyAttempts = 3
 
 // 用大模型基于已登记证据判断猜想的验证器
 //
-// 持有不可变依赖（客户端、工厂、prompt），可被多次运行复用
-// 不持有跨运行可变状态；每次 Verify 独立发 GenerateJSON
+// 持有不可变依赖（客户端、工厂、提示词），可被多次运行复用
+// 不持有跨运行可变状态；每次验证独立发结构化生成
 type LLMVerifier struct {
-	// 大模型客户端，每次 Verify 发一次 GenerateJSON
+	// 大模型客户端，每次验证发一次结构化生成
 	client llm.Client
-	// 领域编号与创建时间工厂，回填 Verdict 时使用
+	// 领域编号与创建时间工厂，回填判决时使用
 	factory *core.Factory
 	// 嵌入的系统提示词全文，构造后只读
 	prompt string
 }
 
-// 创建基于大模型的验证器，prompt 从包内嵌入文件加载
+// 创建基于大模型的验证器，提示词从包内嵌入文件加载
 // 任一依赖缺失直接返回错误，避免运行期才暴露初始化问题
 func NewLLMVerifier(client llm.Client, factory *core.Factory) (*LLMVerifier, error) {
 	if client == nil {
@@ -51,7 +51,7 @@ func NewLLMVerifier(client llm.Client, factory *core.Factory) (*LLMVerifier, err
 // 请求模型对每条猜想给出判断，校验后回填系统编号与运行绑定
 //
 // 模型若返回结构合法但语义违规的输出（未知证据、漏判猜想等），在业务级重试内重新请求；
-// 重试 maxVerifyAttempts 次仍不合规则返回 ErrLLMOutputInconsistent
+// 重试上限次仍不合规则返回模型输出不一致错误
 func (v *LLMVerifier) Verify(
 	ctx context.Context,
 	query core.Query,
@@ -126,16 +126,16 @@ func (v *LLMVerifier) Verify(
 		ErrLLMOutputInconsistent, lastValidateErr, lastOut)
 }
 
-// 序列化验证输入：用户原始问题（Query）、猜想、任务与已登记证据
-// Query 让判断角色能比对证据与用户实际提问的现象/对象（如域名、症状）
-// 只暴露判断所需字段，避免把无关运行元数据塞进 prompt
+// 序列化验证输入：用户原始问题、猜想、任务与已登记证据
+// 问题结构让判断角色能比对证据与用户实际提问的现象或对象（如域名、症状）
+// 只暴露判断所需字段，避免把无关运行元数据塞进提示词
 func buildVerifierUserPayload(
 	query core.Query,
 	hypotheses []core.Hypothesis,
 	tasks []core.Task,
 	evidence []core.Evidence,
 ) (string, error) {
-	// 问题视图：goal 已拼入节点文本，便于对照现象
+	// 问题视图：目标已拼入节点文本，便于对照现象
 	type queryView struct {
 		// 问题结构编号
 		ID string `json:"id,omitempty"`
@@ -166,7 +166,7 @@ func buildVerifierUserPayload(
 		// 取证目的
 		Purpose string `json:"purpose,omitempty"`
 	}
-	// 已登记证据视图，判断只能引用其中的 id
+	// 已登记证据视图，判断只能引用其中的编号
 	type evidenceView struct {
 		// 证据系统编号
 		ID string `json:"id"`
@@ -183,7 +183,7 @@ func buildVerifierUserPayload(
 		// 原始输出片段
 		Raw json.RawMessage `json:"raw,omitempty"`
 	}
-	// 验证角色完整 user payload
+	// 验证角色完整用户载荷
 	type payload struct {
 		// 用户问题上下文
 		Query queryView `json:"query"`
@@ -195,7 +195,7 @@ func buildVerifierUserPayload(
 		Evidence []evidenceView `json:"evidence"`
 	}
 
-	// 节点文本拼进 goal，让 LLM 看到用户问题的完整结构（域名、症状、资源名等）
+	// 节点文本拼进目标，让大模型看到用户问题的完整结构（域名、症状、资源名等）
 	parts := []string{query.Goal}
 	for _, n := range query.Nodes {
 		if strings.TrimSpace(n.Text) != "" {
@@ -253,15 +253,15 @@ type verifierLLMOutput struct {
 	Verdicts []verifierVerdictOut `json:"verdicts"`
 }
 
-// 模型侧一条判断，Verdict.ID 由 fill 时经 Factory 发放
+// 模型侧一条判断，判决编号由回填时经工厂发放
 type verifierVerdictOut struct {
 	// 对应输入猜想的系统编号
 	HypothesisID string `json:"hypothesis_id"`
-	// 结果：supported / refuted / insufficient
+	// 结果：支持、排除或证据不足
 	Result string `json:"result"`
 	// 判断理由，须可追溯到证据
 	Reason string `json:"reason"`
-	// 支撑本判断的证据编号，须全部属于输入 Evidence
+	// 支撑本判断的证据编号，须全部属于输入证据
 	EvidenceIDs []string `json:"evidence_ids"`
 }
 
@@ -269,9 +269,9 @@ type verifierVerdictOut struct {
 //
 // 校验项：
 //   - 每条输入猜想恰好一条判断
-//   - result 枚举合法
-//   - reason 非空
-//   - evidence_ids 非空且全部属于输入 evidence
+//   - 判定结果枚举合法
+//   - 理由非空
+//   - 证据编号非空且全部属于输入证据
 func validateVerifierOutput(
 	out verifierLLMOutput,
 	hypotheses []core.Hypothesis,
@@ -335,7 +335,7 @@ func validateVerifierOutput(
 	return nil
 }
 
-// 判断 result 是否为领域允许的枚举值
+// 判断判定结果是否为领域允许的枚举值
 func isValidVerdictResult(result string) bool {
 	switch core.VerdictResult(strings.TrimSpace(result)) {
 	case core.VerdictSupported, core.VerdictRefuted, core.VerdictInsufficient:
@@ -345,7 +345,7 @@ func isValidVerdictResult(result string) bool {
 	}
 }
 
-// 将校验通过的模型输出回填为绑定当前运行的 Verdict 列表
+// 将校验通过的模型输出回填为绑定当前运行的判决列表
 func (v *LLMVerifier) fillVerdicts(runID string, out verifierLLMOutput) ([]core.Verdict, error) {
 	now := v.factory.Now()
 	verdicts := make([]core.Verdict, 0, len(out.Verdicts))

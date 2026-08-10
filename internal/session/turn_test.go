@@ -15,7 +15,7 @@ func newTestFactory() *core.Factory {
 	return core.NewFactory()
 }
 
-// 两轮 Echo：消息顺序为 user/assistant/user/assistant；内容与 Mode 符合基线约定
+// 两轮回声：消息顺序为用户/助手/用户/助手；内容与模式符合基线约定
 func TestTurnEchoMessageOrder(t *testing.T) {
 	ctx := context.Background()
 	mem := store.NewMemoryStore()
@@ -54,7 +54,7 @@ func TestTurnEchoMessageOrder(t *testing.T) {
 	if len(msgs) != 4 {
 		t.Fatalf("want 4 messages, got %d", len(msgs))
 	}
-	// 顺序与内容足以证明两轮 Echo 落库；不逐条扫 id/session 绑定
+	// 顺序与内容足以证明两轮回声落库；不逐条扫编号与会话绑定
 	wantRoles := []string{session.RoleUser, session.RoleAssistant, session.RoleUser, session.RoleAssistant}
 	wantContent := []string{"a", "收到：a", "b", "收到：b"}
 	for i := range msgs {
@@ -64,7 +64,7 @@ func TestTurnEchoMessageOrder(t *testing.T) {
 	}
 }
 
-// 不存在的 sessionId 应返回明确错误
+// 不存在的会话编号应返回明确错误
 func TestTurnMissingSession(t *testing.T) {
 	ctx := context.Background()
 	svc := session.NewService(store.NewMemoryStore(), newTestFactory(), session.EchoResponder{})
@@ -78,7 +78,7 @@ func TestTurnMissingSession(t *testing.T) {
 	}
 }
 
-// 假诊断管道：记录收到的 Run，并返回固定报告
+// 假诊断管道：记录收到的运行，并返回固定报告
 type fakeExecutor struct {
 	lastRun core.Run
 	report  core.Report
@@ -95,7 +95,7 @@ func (f *fakeExecutor) Execute(_ context.Context, run core.Run) (core.Report, []
 	return rep, nil, nil
 }
 
-// Diagnose + Fake：assistant 有 RunID，且 Execute 收到的 Run.SessionID 等于当前会话
+// 临时诊断加假执行器：助手消息应有运行编号，且执行时会话编号与当前会话一致
 func TestTurnDiagnoseSessionID(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory()
@@ -142,7 +142,7 @@ func TestTurnDiagnoseSessionID(t *testing.T) {
 	if result.Report == nil || result.Report.Summary != "后端异常" {
 		t.Fatalf("report: %+v", result.Report)
 	}
-	// escalate 成功后 RunLedger 可按 RunID 读回
+	// 升级成功后台账可按运行编号读回
 	rec, err := ledger.Get(ctx, result.RunID)
 	if err != nil {
 		t.Fatalf("ledger get: %v", err)
@@ -152,7 +152,7 @@ func TestTurnDiagnoseSessionID(t *testing.T) {
 	}
 }
 
-// Responder 收到的 History 不含本轮 user
+// 应答器收到的历史不含本轮用户
 func TestTurnHistoryExcludesCurrentUser(t *testing.T) {
 	ctx := context.Background()
 	factory := newTestFactory()
@@ -184,7 +184,7 @@ func TestTurnHistoryExcludesCurrentUser(t *testing.T) {
 	}
 }
 
-// 记录最后一次 RespondInput，并回 Echo 风格回复
+// 记录最后一次应答输入，并回回声风格回复
 type historySpyResponder struct {
 	last session.RespondInput
 }
@@ -197,7 +197,7 @@ func (s *historySpyResponder) Respond(_ context.Context, in session.RespondInput
 	}, nil
 }
 
-// CheckpointContent 非空时写序：user → checkpoint → assistant；user 原文不丢
+// 检查点正文非空时写序：用户 → 检查点 → 助手；用户原文不丢
 func TestTurnCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	mem := store.NewMemoryStore()
@@ -231,7 +231,7 @@ func TestTurnCheckpoint(t *testing.T) {
 	if msgs[2].Role != session.RoleAssistant || msgs[2].Mode != session.ModeBaseline {
 		t.Fatalf("msg2: %+v", msgs[2])
 	}
-	// Store 全量：checkpoint 不替代 user 原文
+	// 存储全量：检查点不替代用户原文
 	if msgs[0].Content != "hello" {
 		t.Fatal("user message must remain")
 	}

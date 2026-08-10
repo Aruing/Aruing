@@ -46,7 +46,7 @@ func testPlanTargets() []core.Target {
 	}}
 }
 
-// 标准路径：猜想与任务回填系统编号，局部 hypothesis ref 映射到任务 Refs
+// 标准路径：猜想与任务回填系统编号，局部猜想引用映射到任务引用
 func TestLLMPlannerPlan(t *testing.T) {
 	body := `{
 		"hypotheses":[{
@@ -86,7 +86,7 @@ func TestLLMPlannerPlan(t *testing.T) {
 	if !strings.HasPrefix(task.ID, "t_") || task.ToolName != "fake.list_pods" {
 		t.Errorf("task = %+v", task)
 	}
-	// h1 应被替换为系统 h_ id
+	// 局部猜想引用应被替换为系统猜想编号
 	foundH := false
 	for _, ref := range task.Refs {
 		if ref == h.ID {
@@ -101,7 +101,7 @@ func TestLLMPlannerPlan(t *testing.T) {
 	}
 }
 
-// depends_on 局部 task ref 应映射为系统 task id
+// 依赖关系中的局部任务引用应映射为系统任务编号
 func TestLLMPlannerDependsOn(t *testing.T) {
 	body := `{
 		"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],
@@ -129,9 +129,9 @@ func TestLLMPlannerDependsOn(t *testing.T) {
 	}
 }
 
-// 非法模型输出触发业务重试并最终 ErrLLMOutputInconsistent
+// 非法模型输出触发业务重试并最终报输出不一致
 func TestLLMPlannerInvalidOutput(t *testing.T) {
-	// 代表几类校验：未知工具、未知 ref、重复 hyp ref、外键 Target
+	// 代表几类校验：未知工具、未知引用、重复猜想引用、外键目标
 	tests := []struct {
 		name    string
 		body    string
@@ -225,7 +225,7 @@ func TestLLMPlannerRetry(t *testing.T) {
 	})
 }
 
-// 系统 prompt 必须注入 Specs，且 New 时复制快照
+// 系统提示词必须注入工具规格，且新建时复制快照
 func TestLLMPlannerSpecsInPrompt(t *testing.T) {
 	specs := testPlannerSpecs()
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
@@ -238,7 +238,7 @@ func TestLLMPlannerSpecsInPrompt(t *testing.T) {
 	if !strings.Contains(planner.prompt, "fake.list_pods") || !strings.Contains(planner.prompt, "k8s") {
 		t.Errorf("prompt missing tool names")
 	}
-	// 修改调用方 specs 不应影响已构造实例的校验集合
+	// 修改调用方规格表不应影响已构造实例的校验集合
 	specs[0].Name = "mutated"
 	if _, err := planner.Plan(context.Background(), PlanState{Query: testPlanQuery(), Targets: testPlanTargets()}); err != nil {
 		t.Fatalf("plan after mutate: %v", err)
@@ -258,7 +258,7 @@ func TestNewLLMPlannerRequiresDeps(t *testing.T) {
 	}
 }
 
-// 首轮不得在 payload 中带 evidence/verdicts；空任务仅后续轮合法
+// 首轮不得在载荷中带证据与判决；空任务仅后续轮合法
 func TestLLMPlannerRoundSemantics(t *testing.T) {
 	t.Run("first round omits history", func(t *testing.T) {
 		body := `{"hypotheses":[{"ref":"h1","statement":"x","reason":"y","expected_signals":[]}],"tasks":[{"ref":"t1","tool_name":"k8s","arguments":{},"purpose":"p","refs":["h1"],"depends_on":[]}]}`

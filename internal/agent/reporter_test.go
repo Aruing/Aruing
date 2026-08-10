@@ -1,15 +1,16 @@
-package agent
+package agent_test
 
 import (
 	"context"
 	"testing"
 
+	"aruing/internal/agent/agenttest"
 	"aruing/internal/core"
 )
 
 // 报告必须绑定当前运行并保留有效结论引用，才能向用户展示可核查结果
 func TestFakeReporterReport(t *testing.T) {
-	reporter := NewFakeReporter(core.Report{
+	reporter := agenttest.NewFakeReporter(core.Report{
 		ID:      "report_demo",
 		RunID:   "stale_run",
 		Title:   "demo 诊断报告",
@@ -57,7 +58,7 @@ func TestFakeReporterReport(t *testing.T) {
 // 报告只能整理一致且可追溯的判断与证据，不能生成悬空或跨运行结论
 func TestFakeReporterValidate(t *testing.T) {
 	run := core.Run{ID: "run_test"}
-	// 代表校验：未知结论、result 与 verdict 不一致、跨运行证据
+	// 代表校验：未知结论、结果与判决不一致、跨运行证据
 	tests := []struct {
 		name     string
 		report   core.Report
@@ -98,7 +99,7 @@ func TestFakeReporterValidate(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, err := NewFakeReporter(test.report).Report(context.Background(), run, test.verdicts, test.evidence)
+			_, err := agenttest.NewFakeReporter(test.report).Report(context.Background(), run, test.verdicts, test.evidence)
 			if err == nil {
 				t.Fatal("build report: error = nil")
 			}
