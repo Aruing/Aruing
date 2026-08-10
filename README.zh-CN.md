@@ -27,8 +27,9 @@ Aruing 现在已能端到端跑通，但仍处于早期：
 
 当前能力（版本 `0.1.0` 进行中）：
 
+- `aruing run` / `chat` — 须 LLM；YAML 配置和/或 `ARUING_*`（`--config`，见 `aruing.example.yaml`）
 - `aruing run` — 单轮诊断（线性 Orchestrator）
-- `aruing chat` — 多轮 Session + Tower（须 LLM；需根因时 escalate；`RunLedger` + `prior_run_details`；compact 后按范围回灌 `rehydrated_messages`）
+- `aruing chat` — 多轮 Session + Tower；需根因时 escalate；`RunLedger` + `prior_run_details`；compact 后按范围回灌
 
 详见 [`docs/project-state.md`](docs/project-state.md)。
 
@@ -59,22 +60,23 @@ make check              # 完整 CI 检查（test-ci + vet + lint + fmt + tidy +
 ./bin/aruing chat --session sess_xxx 再查一下 redis
 ```
 
-### 本地 LLM 调试（推荐）
+### 配置与本地 LLM
 
-不必每次手动 `export`。仓库已 ignore `.env`；用模板生成后由 Make 自动加载：
+`run` / `chat` **必须** LLM 三件套齐全（文件和/或环境变量）。优先级：CLI（如 `--verbose`）> env（`ARUING_*`）> YAML 文件 > 零值。
+
+```bash
+cp aruing.example.yaml playground/config.yaml   # 填 llm.*；playground/ 已 gitignore
+./bin/aruing run --config playground/config.yaml default 里的 demo-api 为什么访问不了
+# 或：ARUING_CONFIG=... / 搜索 playground → $XDG_CONFIG_HOME/aruing → /etc/aruing
+```
+
+Make + `.env` 仍可用（仓库 ignore `.env`；config 包本身不解析该文件）：
 
 ```bash
 cp .env.example .env    # 填入 BaseURL / APIKey / Model
-make print-env          # 确认已加载（不打印 key 全文）
+make print-env
 make run-llm
 make run-llm QUESTION='default 里的 demo-api 为什么访问不了'
-# make run-llm ENV_FILE=.env.ollama
-```
-
-三个 LLM 变量都非空时走真角色；任一缺失或没有 `.env` 时与现行为一致（全 fake）。  
-`aruing chat` / `make chat` 必须三件套齐全；无 LLM 时硬失败，不会走 fake。
-
-```bash
 make chat
 make chat CHAT_MSG='hello'
 ```

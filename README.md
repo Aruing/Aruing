@@ -27,8 +27,9 @@ Aruing runs end-to-end today, but it's still early:
 
 What works today (version `0.1.0`, in progress):
 
+- `aruing run` / `chat` — LLM required; YAML config and/or `ARUING_*` env (`--config`, see `aruing.example.yaml`)
 - `aruing run` — single-shot diagnosis via linear Orchestrator
-- `aruing chat` — multi-turn Session + Tower (LLM required); escalate when root cause is needed; `RunLedger` + `prior_run_details`; after compaction, range rehydrate restores Store text into `rehydrated_messages`
+- `aruing chat` — multi-turn Session + Tower; escalate when root cause is needed; `RunLedger` + `prior_run_details`; after compaction, range rehydrate
 
 Details: [`docs/project-state.md`](docs/project-state.md).
 
@@ -59,22 +60,23 @@ make check              # full CI (test-ci + vet + lint + fmt + tidy + vuln)
 ./bin/aruing chat --session sess_xxx check redis again
 ```
 
-### Local LLM (recommended)
+### Configuration & local LLM
 
-Repo ignores `.env`. Copy the template; Make loads it:
+`run` / `chat` **require** a complete LLM config (file and/or env). Priority: CLI flags (e.g. `--verbose`) > env (`ARUING_*`) > YAML file > zeros.
+
+```bash
+cp aruing.example.yaml playground/config.yaml   # fill llm.*; gitignored under playground/
+./bin/aruing run --config playground/config.yaml why is demo-api unreachable
+# or: ARUING_CONFIG=... / search playground → $XDG_CONFIG_HOME/aruing → /etc/aruing
+```
+
+Make + `.env` still works (repo ignores `.env`; package does not parse the file itself):
 
 ```bash
 cp .env.example .env    # BaseURL / APIKey / Model
 make print-env
 make run-llm
 make run-llm QUESTION='why is demo-api in default unreachable'
-# make run-llm ENV_FILE=.env.ollama
-```
-
-All three LLM vars set → real agent roles; any missing → fakes (same as no `.env`).  
-`aruing chat` / `make chat` require all three; no silent fake path.
-
-```bash
 make chat
 make chat CHAT_MSG='hello'
 ```
