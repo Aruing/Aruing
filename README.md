@@ -28,8 +28,8 @@ Aruing runs end-to-end today, but it's still early:
 What works today (version `0.1.0`, in progress):
 
 - `aruing run` / `chat` — LLM required; YAML config and/or `ARUING_*` env (`--config`, see `aruing.example.yaml`)
-- `aruing run` — single-shot diagnosis via linear Orchestrator
-- `aruing chat` — multi-turn Session + Tower; escalate when root cause is needed; `RunLedger` + `prior_run_details`; after compaction, range rehydrate
+- `aruing run` — single-shot diagnosis via linear Orchestrator (ambiguity → clarify message + non-zero exit; no resume)
+- `aruing chat` — multi-turn Session + Tower; escalate when root cause is needed; resolve clarify suspend/resume; `RunLedger` + `prior_run_details`; after compaction, range rehydrate
 
 Details: [`docs/project-state.md`](docs/project-state.md).
 
@@ -59,6 +59,18 @@ make check              # full CI (test-ci + vet + lint + fmt + tidy + vuln)
 ./bin/aruing chat hello                                    # multi-turn (LLM required; session id on stderr)
 ./bin/aruing chat --session sess_xxx check redis again
 ```
+
+### Reproducible scenarios (kind)
+
+One-shot fault clusters for manual smoke. Verification targets `chat` (see [`scenarios/README.md`](scenarios/README.md)):
+
+```bash
+make lab-up   NAME=crashloop-bad-image   # kind cluster + fault manifests
+make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting"
+make lab-down NAME=crashloop-bad-image
+```
+
+`lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
 
 ### Configuration & local LLM
 

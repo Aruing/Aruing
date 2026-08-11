@@ -109,6 +109,42 @@ check: tidy-check build test-ci fmt-check vet lint vuln
 clean:
 	rm -rf "$(BIN_DIR)"
 
+# ---------------- scenarios (lab-*) -----------------
+# kind 故障场景台架（不进 make test / check）。
+# 验收以 `aruing chat` 为主对象；详见 scenarios/README.md。
+# 用户命令前缀 lab-*；脚本实现仍在 scripts/scenario-*.sh（内部）。
+
+.PHONY: lab-up lab-down lab-list lab-chat lab-kube
+
+# NAME=crashloop-bad-image
+lab-up:
+	bash scripts/scenario-up.sh "$(NAME)"
+
+lab-down:
+	bash scripts/scenario-down.sh "$(NAME)"
+
+lab-list:
+	@bash scripts/scenario-list.sh
+
+# 对场景集群跑 aruing chat：KUBECONFIG 已在同一行 shell 注入，无需手动 export。
+# NAME=必填；MSG=可选（填了=单轮诊断，不填=进交互式多轮）。须先 make build 与 lab-up。
+lab-chat:
+	@test -n "$(NAME)" || { echo "NAME= required (known: make lab-list)"; exit 1; }
+	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make lab-up NAME=$(NAME)"; exit 1; }
+	@test -x ./bin/aruing || { echo "first: make build"; exit 1; }
+ifneq ($(strip $(MSG)),)
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat "$(MSG)"
+else
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat
+endif
+
+# 对场景集群跑任意 kubectl：KUBECONFIG 已注入。NAME=必填，CMD=kubectl 参数。
+# 例: make lab-kube NAME=crashloop-bad-image CMD="get po -A"
+lab-kube:
+	@test -n "$(NAME)" || { echo "NAME= required"; exit 1; }
+	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make lab-up NAME=$(NAME)"; exit 1; }
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml kubectl $(CMD)
+
 # ---------------- skills -----------------
 
 AGENTS_DIR := .agents

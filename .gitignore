@@ -36,3 +36,6 @@ go.work.sum
 /.agents/
 /agent/
 /skills-lock.json
+
+# Scenario harness: ephemeral kind kubeconfigs (written by scripts/scenario-up.sh)
+/scenarios/.kube/
