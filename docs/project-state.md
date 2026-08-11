@@ -49,7 +49,7 @@
 | beta7-1～2 | 压缩后按范围回灌 + smoke | ✅ | #59–#60 |
 | beta8 | 配置文件化 | ✅ | #61 YAML/路径链/merge；#62 banner；Fake* → agenttest/toolstest；CLI 无假闭环 |
 | beta9 | 澄清挂起（waiting_user） | ✅ | #63 `Suspension`/`Outcome`/`RunStatusWaitingUser`；`ResolveActionClarify`；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口优先 Resume；CLI run 遇挂起退出 |
-| beta10 | 可复现场景 harness（kind） | ⏳ | 步骤 1 已落：`scenarios/` + `scripts/scenario-{up,down,list}.sh` + Make 目标 + 三场景 + README；验收**以 `chat` 为主**。待步骤 2：LLM smoke + 关里程碑。不进 `make test` |
+| beta10 | 可复现场景 harness（kind） | ⏳ | 步骤 1+2 完成：`scenarios/` + `scripts/` + `lab-*` Make 目标（up/down/list/chat/kube）+ 三场景；LLM chat smoke 通过（crashloop / same-name-multi-ns）；验收**以 `chat` 为主**。待合并后归档 plan。不进 `make test` |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -57,13 +57,14 @@
 
 ## 下一步
 
-**下一项**：**`0.1.0-beta10` 步骤 2** — 手工 LLM `chat` smoke（≥1 场景跑通并记结果）+ 关里程碑归档。步骤 1（harness 骨架 + 三场景 + up/down/list + Make + 文档）已落，待本机 kind 环境验收。
+**下一项**：关 `0.1.0-beta10` 里程碑（本 PR 合并后归档 `plan/0.1.0-beta10/` → `plan/archive/`）+ 从候选选下一项。
 
 **0.1.0 候选**（本里程碑之后）：
 
-1. **T-obs-3**（k8s Summary 人读，可选 polish）
-2. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
-3. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
+1. **CLI banner 加 kubectl/kubeconfig 路径**（小 polish；beta10 smoke 期间提出：在 `writeConfigBanner` 加打印 `cfg.Tools.KubectlPath`（空则 LookPath）与 `$KUBECONFIG`（空则 `~/.kube/config`），改 `cmd/aruing` + `main_test.go`，独立小 PR）
+2. **T-obs-3**（k8s Summary 人读，可选 polish）
+3. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
+4. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
 
 **已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）。  
 **进行中、勿当开放候选**：场景 harness（beta10）。
