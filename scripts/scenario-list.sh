@@ -4,7 +4,7 @@
 # 列出已知场景（scenarios/ 下含 manifests/ 的目录）及其 kind 集群状态。
 # 不强制 kind 已安装：缺 kind 时仅列出目录，集群状态显示为「?」。
 #
-# 用法: scripts/scenario-list.sh   或   make scenario-list
+# 用法: scripts/scenario-list.sh   或   make lab-list
 
 set -euo pipefail
 

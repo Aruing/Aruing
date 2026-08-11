@@ -17,12 +17,12 @@ LLM 配置：`playground/config.yaml`（见根 README 与 `aruing.example.yaml`�
 ## 三命令
 
 ```bash
-make scenario-list                          # 列已知场景 + kind 集群状态
-make scenario-up   NAME=crashloop-bad-image # 起集群 + apply 故障清单 + 导出 kubeconfig
-make scenario-down NAME=crashloop-bad-image # 拆集群 + 清理 kubeconfig
+make lab-list                          # 列已知场景 + kind 集群状态
+make lab-up   NAME=crashloop-bad-image # 起集群 + apply 故障清单 + 导出 kubeconfig
+make lab-down NAME=crashloop-bad-image # 拆集群 + 清理 kubeconfig
 ```
 
-`scenario-up` 完成后会打印：
+`lab-up` 完成后会打印：
 
 - 临时 kubeconfig 路径：`scenarios/.kube/<NAME>.yaml`（已 gitignore，不入库）
 - 下一步的 `export KUBECONFIG=...` 与 `aruing chat` 命令
@@ -43,24 +43,24 @@ make scenario-down NAME=crashloop-bad-image # 拆集群 + 清理 kubeconfig
 | `manifests/` | 故障清单（kubectl apply） |
 | `scenario.yaml` | 场景元数据（给人读；脚本不解析，命名按约定 `aruing-sc-<name>`） |
 
-标准流程（`scenario-chat` / `scenario-kube` 已自动注入 KUBECONFIG，无需手动 export）：
+标准流程（`lab-chat` / `lab-kube` 已自动注入 KUBECONFIG，无需手动 export）：
 
 ```bash
 make build
-make scenario-up NAME=crashloop-bad-image
-make scenario-chat NAME=crashloop-bad-image MSG="demo 命名空间里的 demo-api 为什么起不来"
+make lab-up NAME=crashloop-bad-image
+make lab-chat NAME=crashloop-bad-image MSG="demo 命名空间里的 demo-api 为什么起不来"
 # 对照 scenarios/crashloop-bad-image/expect.md 勾选
-make scenario-down NAME=crashloop-bad-image
+make lab-down NAME=crashloop-bad-image
 ```
 
 查集群细节（同样不用手动 export）：
 
 ```bash
-make scenario-kube NAME=crashloop-bad-image CMD="get po -A"
-make scenario-kube NAME=crashloop-bad-image CMD="describe pod -n demo -l app=demo-api"
+make lab-kube NAME=crashloop-bad-image CMD="get po -A"
+make lab-kube NAME=crashloop-bad-image CMD="describe pod -n demo -l app=demo-api"
 ```
 
-> 不想用包装、想自己控制环境变量也行：`make scenario-up` 结尾会打印 `export KUBECONFIG=...` 路径，自己执行后即可直接用 `./bin/aruing chat ...` 和 `kubectl ...`。多轮交互式 chat：`make scenario-chat NAME=<name>`（不带 MSG）。
+> 不想用包装、想自己控制环境变量也行：`make lab-up` 结尾会打印 `export KUBECONFIG=...` 路径，自己执行后即可直接用 `./bin/aruing chat ...` 和 `kubectl ...`。多轮交互式 chat：`make lab-chat NAME=<name>`（不带 MSG）。
 
 **通过** = `expect.md` 中「应」基本满足且无严重「不应」。LLM 措辞不要求逐字匹配。
 

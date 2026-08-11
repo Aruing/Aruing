@@ -109,27 +109,28 @@ check: tidy-check build test-ci fmt-check vet lint vuln
 clean:
 	rm -rf "$(BIN_DIR)"
 
-# ---------------- scenarios -----------------
+# ---------------- scenarios (lab-*) -----------------
 # kind 故障场景台架（不进 make test / check）。
 # 验收以 `aruing chat` 为主对象；详见 scenarios/README.md。
+# 用户命令前缀 lab-*；脚本实现仍在 scripts/scenario-*.sh（内部）。
 
-.PHONY: scenario-up scenario-down scenario-list scenario-chat scenario-kube
+.PHONY: lab-up lab-down lab-list lab-chat lab-kube
 
 # NAME=crashloop-bad-image
-scenario-up:
+lab-up:
 	bash scripts/scenario-up.sh "$(NAME)"
 
-scenario-down:
+lab-down:
 	bash scripts/scenario-down.sh "$(NAME)"
 
-scenario-list:
+lab-list:
 	@bash scripts/scenario-list.sh
 
 # 对场景集群跑 aruing chat：KUBECONFIG 已在同一行 shell 注入，无需手动 export。
-# NAME=必填；MSG=可选（填了=单轮诊断，不填=进交互式多轮）。须先 make build 与 scenario-up。
-scenario-chat:
-	@test -n "$(NAME)" || { echo "NAME= required (known: make scenario-list)"; exit 1; }
-	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make scenario-up NAME=$(NAME)"; exit 1; }
+# NAME=必填；MSG=可选（填了=单轮诊断，不填=进交互式多轮）。须先 make build 与 lab-up。
+lab-chat:
+	@test -n "$(NAME)" || { echo "NAME= required (known: make lab-list)"; exit 1; }
+	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make lab-up NAME=$(NAME)"; exit 1; }
 	@test -x ./bin/aruing || { echo "first: make build"; exit 1; }
 ifneq ($(strip $(MSG)),)
 	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat "$(MSG)"
@@ -138,10 +139,10 @@ else
 endif
 
 # 对场景集群跑任意 kubectl：KUBECONFIG 已注入。NAME=必填，CMD=kubectl 参数。
-# 例: make scenario-kube NAME=crashloop-bad-image CMD="get po -A"
-scenario-kube:
+# 例: make lab-kube NAME=crashloop-bad-image CMD="get po -A"
+lab-kube:
 	@test -n "$(NAME)" || { echo "NAME= required"; exit 1; }
-	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make scenario-up NAME=$(NAME)"; exit 1; }
+	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make lab-up NAME=$(NAME)"; exit 1; }
 	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml kubectl $(CMD)
 
 # ---------------- skills -----------------

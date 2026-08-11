@@ -65,12 +65,12 @@ make check              # 完整 CI 检查（test-ci + vet + lint + fmt + tidy +
 一键起故障集群用于手工 smoke。验收**以 `chat` 为主对象**（见 [`scenarios/README.md`](scenarios/README.md)）：
 
 ```bash
-make scenario-up   NAME=crashloop-bad-image   # 起集群 + 故障清单
-make scenario-chat NAME=crashloop-bad-image MSG="demo 里的 demo-api 为什么起不来"
-make scenario-down NAME=crashloop-bad-image
+make lab-up   NAME=crashloop-bad-image   # 起集群 + 故障清单
+make lab-chat NAME=crashloop-bad-image MSG="demo 里的 demo-api 为什么起不来"
+make lab-down NAME=crashloop-bad-image
 ```
 
-`scenario-chat` / `scenario-kube` 自动注入 KUBECONFIG，无需手动 export。不进 `make test` / CI；需本机有 Docker + kind + kubectl。
+`lab-chat` / `lab-kube` 自动注入 KUBECONFIG，无需手动 export。不进 `make test` / CI；需本机有 Docker + kind + kubectl。
 
 ### 配置与本地 LLM
 

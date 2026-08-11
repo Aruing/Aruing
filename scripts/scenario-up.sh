@@ -4,7 +4,7 @@
 # 起一个命名的 kind 场景集群并应用其故障清单。
 # 已存在则复用并重新 apply（不删除他进程的集群）。
 #
-# 用法: scripts/scenario-up.sh <name>   或   make scenario-up NAME=<name>
+# 用法: scripts/scenario-up.sh <name>   或   make lab-up NAME=<name>
 
 set -euo pipefail
 
@@ -58,4 +58,4 @@ echo "    export KUBECONFIG=$kubeconfig"
 echo "    ./bin/aruing chat --config playground/config.yaml \"<提示词>\""
 echo "  提示词:   $ARUING_SCN_DIR/$name/prompts.md"
 echo "  验收标准: $ARUING_SCN_DIR/$name/expect.md"
-echo "  拆集群:   make scenario-down NAME=$name"
+echo "  拆集群:   make lab-down NAME=$name"

@@ -3,7 +3,7 @@
 #
 # 删除命名的 kind 场景集群及其临时 kubeconfig。
 #
-# 用法: scripts/scenario-down.sh <name>   或   make scenario-down NAME=<name>
+# 用法: scripts/scenario-down.sh <name>   或   make lab-down NAME=<name>
 
 set -euo pipefail
 

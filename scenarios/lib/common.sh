@@ -40,9 +40,9 @@ scn_check_tools() {
 # scn_resolve_name <arg> → 校验并打印场景名；确认场景目录与 manifests/ 存在
 scn_resolve_name() {
 	local name="${1:-}"
-	[ -n "$name" ] || scn_die "scenario name required. Usage: make scenario-up NAME=<id> (known: make scenario-list)."
+	[ -n "$name" ] || scn_die "scenario name required. Usage: make lab-up NAME=<id> (known: make lab-list)."
 	local dir="$ARUING_SCN_DIR/$name"
-	[ -d "$dir/manifests" ] || scn_die "scenario '$name' not found (no manifests/ under $dir). Known: run 'make scenario-list'."
+	[ -d "$dir/manifests" ] || scn_die "scenario '$name' not found (no manifests/ under $dir). Known: run 'make lab-list'."
 	echo "$name"
 }
 

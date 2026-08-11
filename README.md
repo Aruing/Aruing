@@ -65,12 +65,12 @@ make check              # full CI (test-ci + vet + lint + fmt + tidy + vuln)
 One-shot fault clusters for manual smoke. Verification targets `chat` (see [`scenarios/README.md`](scenarios/README.md)):
 
 ```bash
-make scenario-up   NAME=crashloop-bad-image   # kind cluster + fault manifests
-make scenario-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting"
-make scenario-down NAME=crashloop-bad-image
+make lab-up   NAME=crashloop-bad-image   # kind cluster + fault manifests
+make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting"
+make lab-down NAME=crashloop-bad-image
 ```
 
-`scenario-chat` / `scenario-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
+`lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
 
 ### Configuration & local LLM
 
