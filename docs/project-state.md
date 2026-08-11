@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-11（**0.1.0-beta10 已归档** #64：kind 可复现场景 harness；新增跨版本技术全景层 arc + 硬约束 #19；首份 arc《工具输出导航》，T-obs-3 升格为其 Step 1-2 = 候选 beta11）
+> 最后更新：2026-08-11（**0.1.0-beta11 进行中** step 1 已交付：结构化工具输出 L0–L2 落地硬约束 #19；新增 `internal/tools/k8s/summary.go` 表格投影 + narrow-first Spec，core/agent 零改动。step 2 = beta10 harness LLM smoke + 关里程碑。前序：**0.1.0-beta10 已归档** #64：kind 可复现场景 harness；新增跨版本技术全景层 arc + 硬约束 #19；首份 arc《工具输出导航》，T-obs-3 升格为其 Step 1-2 = beta11）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta11` / 结构化工具输出（L0–L2）** 🔨 进行中（2026-08-11 起；step 1 已交付）：arc《工具输出导航》Step 1-2。k8s 工具对 `get` 类表格（默认文本表 + `-o json` `Table`）产出紧凑 `Summary`（类型/条数/列/行），大表标注头尾 + 引导 narrow（#18）；`Raw` 不可变原带不变（#19）；`ToolSpec.Description` 改 narrow-first（删「优先 -o json」，教 `--field-selector`/label/`-o jsonpath`）。只动 `internal/tools/k8s`，`core`/`agent` 零改动。step 2 = beta10 harness LLM smoke 验收 + 关里程碑归档 plan。plan 在笔记 `plan/0.1.0-beta11/`；arc 在 `plan/arc/tool-output-navigation.md`。
 
 **`0.1.0-beta10` / 可复现场景 harness（kind）** ✅ 完成并归档（2026-08-11；#64）：`scenarios/` + `scripts/` + `lab-*` Make 目标（up/down/list/chat/kube）+ 三场景（crashloop-bad-image / svc-wrong-selector / same-name-multi-ns）；验收**以 `chat` 为主**（`run` 不单独验收）；LLM chat smoke 通过（crashloop / same-name-multi-ns）。不进 `make test`。plan 在笔记 `plan/archive/0.1.0-beta10/`；历程《可复现的故障台架》。
 
@@ -50,6 +52,7 @@
 | beta8 | 配置文件化 | ✅ | #61 YAML/路径链/merge；#62 banner；Fake* → agenttest/toolstest；CLI 无假闭环 |
 | beta9 | 澄清挂起（waiting_user） | ✅ | #63 `Suspension`/`Outcome`/`RunStatusWaitingUser`；`ResolveActionClarify`；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口优先 Resume；CLI run 遇挂起退出 |
 | beta10 | 可复现场景 harness（kind） | ✅ | #64 `scenarios/` + `scripts/` + `lab-*`（up/down/list/chat/kube）+ 三场景；验收以 `chat` 为主；LLM smoke 通过；不进 `make test` |
+| beta11 | 结构化工具输出（L0–L2） | 🔨 | step 1 交付：`summary.go` 表格投影（文本表 + JSON Table + fallback + 大表标注）+ narrow-first `Spec`；step 2 = smoke + 关里程碑待跑 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -57,13 +60,13 @@
 
 ## 下一步
 
-**下一项**：`0.1.0` 接近收尾——从下面候选选一项做，或评估开 `0.2.0` 远景（磁盘持久化等与「仍内存」冲突的项宜放 0.2+）。首项候选是 CLI banner 小 polish。
+**下一项**：`0.1.0-beta11` 收尾——step 1 已交付并 commit（`feat/beta11-structured-tool-output` `0b443e6`，`make check` 全绿）；beta10 harness（`crashloop-bad-image`）真 LLM smoke 通过（`kubectl get pods` 的 Summary 实为结构化投影，`describe pod` 走 fallback，2 轮工具出报告对照 `expect.md` 满足）。剩：开 PR 合并 → 关里程碑归档 `plan/0.1.0-beta11/`，然后从候选选下一项或评估开 `0.2.0`。
 
 **0.1.0 候选**（本里程碑之后）：
 
 1. **CLI banner 加 kubectl/kubeconfig 路径**（小 polish；beta10 smoke 期间提出：在 `writeConfigBanner` 加打印 `cfg.Tools.KubectlPath`（空则 LookPath）与 `$KUBECONFIG`（空则 `~/.kube/config`），改 `cmd/aruing` + `main_test.go`，独立小 PR）
 2. **chat 交互循环容错**（`cmd/aruing/main.go:269-271` 单轮 `chatTurn` 报错即 `return err` 退出整个会话；应继续下一轮而非杀会话。beta10 smoke 发现，暂不修）
-3. **结构化工具输出**（= T-obs-3 升格；arc《工具输出导航》Step 1-2：k8s 工具产机读 `Summary` + narrow-first prompt；候选下一里程碑 `0.1.0-beta11`）→ `plan/arc/tool-output-navigation.md`
+3. **结构化工具输出**（= T-obs-3 升格；arc《工具输出导航》Step 1-2） 🔨 **进行中（beta11 step 1 已交付）**：k8s 工具产机读 `Summary` + narrow-first Spec；step 2 smoke 待跑 → `plan/arc/tool-output-navigation.md`
 4. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
 5. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
 

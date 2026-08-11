@@ -69,6 +69,30 @@ exit 0
 	}
 }
 
+// get 类表格输出应被投影成结构化摘要（类型/行数/列/行），不再是无用的「执行完成」字符串
+func TestToolExecuteProjectsTable(t *testing.T) {
+	kubectl := writeFakeKubectl(t, `#!/bin/sh
+printf 'NAME   READY   STATUS\nweb    1/1     Running\napi    0/1     CrashLoopBackOff\n'
+exit 0
+`)
+	tool := mustNewTool(t, Config{KubectlPath: kubectl})
+
+	evidence, err := tool.Execute(context.Background(), mustArgs(t, map[string]any{
+		"argv": []string{"get", "pods"},
+	}))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for _, want := range []string{"pods · 2 行", "NAME READY STATUS", "CrashLoopBackOff", "web"} {
+		if !strings.Contains(evidence.Summary, want) {
+			t.Errorf("Summary missing %q, got:\n%s", want, evidence.Summary)
+		}
+	}
+	if strings.Contains(evidence.Summary, "执行完成") {
+		t.Errorf("Summary should drop the old placeholder, got:\n%s", evidence.Summary)
+	}
+}
+
 // 非零退出码应写入证据而不是变成语言错误，便于上层纠错
 func TestToolExecuteNonZeroExit(t *testing.T) {
 	kubectl := writeFakeKubectl(t, `#!/bin/sh
