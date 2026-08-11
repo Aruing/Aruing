@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-08-10（**beta10 活跃**：kind 可复现场景 harness；plan → `plan/0.1.0-beta10/`）
+> 最后更新：2026-08-11（**beta10 活跃**：kind 可复现场景 harness；plan → `plan/0.1.0-beta10/`；PR #64 待合并）
 
 ## 当前阶段
 
@@ -62,9 +62,10 @@
 **0.1.0 候选**（本里程碑之后）：
 
 1. **CLI banner 加 kubectl/kubeconfig 路径**（小 polish；beta10 smoke 期间提出：在 `writeConfigBanner` 加打印 `cfg.Tools.KubectlPath`（空则 LookPath）与 `$KUBECONFIG`（空则 `~/.kube/config`），改 `cmd/aruing` + `main_test.go`，独立小 PR）
-2. **T-obs-3**（k8s Summary 人读，可选 polish）
-3. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
-4. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
+2. **chat 交互循环容错**（`cmd/aruing/main.go:269-271` 单轮 `chatTurn` 报错即 `return err` 退出整个会话；应继续下一轮而非杀会话。beta10 smoke 发现，暂不修）
+3. **T-obs-3**（k8s Summary 人读，可选 polish）
+4. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
+5. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
 
 **已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）。  
 **进行中、勿当开放候选**：场景 harness（beta10）。
