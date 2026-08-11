@@ -60,7 +60,15 @@ make lab-kube NAME=crashloop-bad-image CMD="get po -A"
 make lab-kube NAME=crashloop-bad-image CMD="describe pod -n demo -l app=demo-api"
 ```
 
-> 不想用包装、想自己控制环境变量也行：`make lab-up` 结尾会打印 `export KUBECONFIG=...` 路径，自己执行后即可直接用 `./bin/aruing chat ...` 和 `kubectl ...`。多轮交互式 chat：`make lab-chat NAME=<name>`（不带 MSG）。
+> 不想用包装、想自己控制环境变量也行：`make lab-up` 结尾会打印 `export KUBECONFIG=...` 路径，自己执行后即可直接用 `./bin/aruing chat ...` 和 `kubectl ...`。
+
+**多轮对话**：`lab-chat` 带 `MSG=` 就是单轮诊断后退出。想多轮续聊就**不带 MSG**，进交互模式（一行一轮，`exit`/`quit`/Ctrl-D 退出）：
+
+```bash
+make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
+```
+
+> 注：aruing 当前 session 是**进程内内存**（进程退出即丢），所以跨两次 `make lab-chat` 调用**接不回**上一次会话——多轮必须在一次进程里完成（即上面的交互模式）。磁盘持久化是后续版本候选。
 
 **通过** = `expect.md` 中「应」基本满足且无严重「不应」。LLM 措辞不要求逐字匹配。
 
