@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-11（**beta10 活跃**：kind 可复现场景 harness；plan → `plan/0.1.0-beta10/`；PR #64 待合并）
+> 最后更新：2026-08-11（**0.1.0-beta10 已归档** #64：kind 可复现场景 harness；0.1.0 接近收尾，待选下一项）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta10` / 可复现场景 harness（kind）** ⏳ 进行中：按需 `kind` up/down；声明式故障场景 + 固定提示词 + 人/AI 对照验收（**非**自动 golden/评估体系）。plan 在笔记 `plan/0.1.0-beta10/`。
+**`0.1.0-beta10` / 可复现场景 harness（kind）** ✅ 完成并归档（2026-08-11；#64）：`scenarios/` + `scripts/` + `lab-*` Make 目标（up/down/list/chat/kube）+ 三场景（crashloop-bad-image / svc-wrong-selector / same-name-multi-ns）；验收**以 `chat` 为主**（`run` 不单独验收）；LLM chat smoke 通过（crashloop / same-name-multi-ns）。不进 `make test`。plan 在笔记 `plan/archive/0.1.0-beta10/`；历程《可复现的故障台架》。
 
 **`0.1.0-beta9` / 澄清挂起（waiting_user）** ✅ 完成并归档（2026-08-10；#63）：`core.Suspension`/`Outcome` 通用抽象；`ResolveActionClarify` + `Clarifications`；`Orchestrator.Execute` 返 `Outcome` + `Resume`/`FindSuspended`；`session.SuspendedRunner`（可选）+ `session.Resume` + `ModeClarify`；Tower 入口挂起恢复优先；CLI `run` 遇挂起打印问题并退出。plan 在笔记 `plan/archive/0.1.0-beta9/`；历程《挂起与恢复的第一锤》。#15–#17 兑现的第一锤。
 
@@ -49,7 +49,7 @@
 | beta7-1～2 | 压缩后按范围回灌 + smoke | ✅ | #59–#60 |
 | beta8 | 配置文件化 | ✅ | #61 YAML/路径链/merge；#62 banner；Fake* → agenttest/toolstest；CLI 无假闭环 |
 | beta9 | 澄清挂起（waiting_user） | ✅ | #63 `Suspension`/`Outcome`/`RunStatusWaitingUser`；`ResolveActionClarify`；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口优先 Resume；CLI run 遇挂起退出 |
-| beta10 | 可复现场景 harness（kind） | ⏳ | 步骤 1+2 完成：`scenarios/` + `scripts/` + `lab-*` Make 目标（up/down/list/chat/kube）+ 三场景；LLM chat smoke 通过（crashloop / same-name-multi-ns）；验收**以 `chat` 为主**。待合并后归档 plan。不进 `make test` |
+| beta10 | 可复现场景 harness（kind） | ✅ | #64 `scenarios/` + `scripts/` + `lab-*`（up/down/list/chat/kube）+ 三场景；验收以 `chat` 为主；LLM smoke 通过；不进 `make test` |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -57,7 +57,7 @@
 
 ## 下一步
 
-**下一项**：关 `0.1.0-beta10` 里程碑（本 PR 合并后归档 `plan/0.1.0-beta10/` → `plan/archive/`）+ 从候选选下一项。
+**下一项**：`0.1.0` 接近收尾——从下面候选选一项做，或评估开 `0.2.0` 远景（磁盘持久化等与「仍内存」冲突的项宜放 0.2+）。首项候选是 CLI banner 小 polish。
 
 **0.1.0 候选**（本里程碑之后）：
 
@@ -67,8 +67,7 @@
 4. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
 5. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
 
-**已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）。  
-**进行中、勿当开放候选**：场景 harness（beta10）。
+**已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）、场景 harness（beta10）。
 
 已确认（beta5–9 交付后仍有效）：
 
