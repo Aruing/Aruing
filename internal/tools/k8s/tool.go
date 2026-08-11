@@ -114,8 +114,9 @@ func (t *Tool) Spec() tools.ToolSpec {
 	return tools.ToolSpec{
 		Name: toolName,
 		Description: "通过集群命令访问 Kubernetes 集群。" +
-			"参数 argv 为不含命令自身的参数列表，例如 [\"get\",\"pods\",\"-n\",\"default\",\"-o\",\"json\"]。" +
-			"使用进程直调，不经 shell。优先 -o json 以便后续解析。" +
+			"参数 argv 为不含命令自身的参数列表，例如 [\"get\",\"pods\",\"-n\",\"default\"]。" +
+			"使用进程直调，不经 shell；默认表格输出会被自动投影为摘要（类型/条数/列/行）。" +
+			"大结果集先用 --field-selector / label selector 收窄，或 -o jsonpath={...} 抽取具体字段；需要完整对象时再 -o json。" +
 			"可选 stdin 与 timeoutSeconds。",
 		InputSchema: append(json.RawMessage(nil), t.specJSON...),
 	}
@@ -199,9 +200,10 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 		return nil, fmt.Errorf("marshal evidence raw: %w", err)
 	}
 
-	summary := fmt.Sprintf("kubectl 执行完成，exitCode=%d", exitCode)
+	summary := projectSummary(invoke.Argv, stdout.String(), stderr.String(), exitCode)
 	if stdout.truncated || stderr.truncated {
-		summary += "，输出已截断"
+		// 输出超出保留上限被截断：原带不全，追加明确提示，区别于按行数的大表截断
+		summary += "\n（原始输出已超过保留上限被截断，请缩小查询范围；残缺原文见 raw）"
 	}
 
 	evidence := &core.Evidence{
