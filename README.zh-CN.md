@@ -102,7 +102,7 @@ make chat CHAT_MSG='hello'
 - 工具接口不限定读写；当前阶段只注册读工具，后续「辅助修复」会加入需用户确认的写工具  
 - 入口：`aruing run` 直连线性 `Orchestrator`；`aruing chat` 经 `Session.Turn` + Tower。不推翻扁平领域模型与 Dispatcher  
 
-完整硬约束见 [`docs/architecture.md`](docs/architecture.md#硬约束)（含 #15–#18）。
+完整硬约束见 [`docs/architecture.md`](docs/architecture.md#硬约束)（含 #15–#19）。
 
 ## 文档入口
 

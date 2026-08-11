@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-08-11（**0.1.0-beta10 已归档** #64：kind 可复现场景 harness；0.1.0 接近收尾，待选下一项）
+> 最后更新：2026-08-11（**0.1.0-beta10 已归档** #64：kind 可复现场景 harness；新增跨版本技术全景层 arc + 硬约束 #19；首份 arc《工具输出导航》，T-obs-3 升格为其 Step 1-2 = 候选 beta11）
 
 ## 当前阶段
 
@@ -63,9 +63,15 @@
 
 1. **CLI banner 加 kubectl/kubeconfig 路径**（小 polish；beta10 smoke 期间提出：在 `writeConfigBanner` 加打印 `cfg.Tools.KubectlPath`（空则 LookPath）与 `$KUBECONFIG`（空则 `~/.kube/config`），改 `cmd/aruing` + `main_test.go`，独立小 PR）
 2. **chat 交互循环容错**（`cmd/aruing/main.go:269-271` 单轮 `chatTurn` 报错即 `return err` 退出整个会话；应继续下一轮而非杀会话。beta10 smoke 发现，暂不修）
-3. **T-obs-3**（k8s Summary 人读，可选 polish）
+3. **结构化工具输出**（= T-obs-3 升格；arc《工具输出导航》Step 1-2：k8s 工具产机读 `Summary` + narrow-first prompt；候选下一里程碑 `0.1.0-beta11`）→ `plan/arc/tool-output-navigation.md`
 4. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
 5. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
+
+**arc《工具输出导航》延后步骤**（跨 0.1.0 → 0.2+，详见 `plan/arc/tool-output-navigation.md`）：
+
+- Step 3 日志/事件游标翻页（0.1.0-beta12+，需日志扫描场景驱动）
+- Step 4 全覆盖 map-reduce 扫描（0.2+）
+- Step 5 子 agent 分治（0.2+，动编排 #15/#17）
 
 **已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）、场景 harness（beta10）。
 
@@ -121,6 +127,7 @@
 - prompt 从文件加载（`//go:embed`），不写死代码
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`
 - **#18**：不得用人为上限阉割正常产品能力；触顶用压缩 / 明确失败
+- **#19**：工具输出为可导航双结构（`Summary` 投影 + `Raw` 原带）；工具只做机械格式投影不做业务判断；模型经 Summary 看全貌按需 drill，不被逼猜（→ arc《工具输出导航》）
 - 线性 Orchestrator 是单轮临时驱动器 / 诊断升格实现；角色不私自多轮调 Tool（#15–#17）
 - 编号与执行：Tool 只经 Dispatcher；各阶段 ID 经 `Factory` 发放
 
