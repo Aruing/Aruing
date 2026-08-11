@@ -60,7 +60,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta11` step 2——beta10 harness（`make lab-up NAME=crashloop-bad-image`）真 LLM 跑一次，验收结构化 `Summary` 实效（不再是「kubectl 执行完成」，而是类型/条数/列/行投影），通过后关里程碑归档 `plan/0.1.0-beta11/`。step 1（表格投影 + narrow-first Spec）已交付，`make check` 全绿。
+**下一项**：`0.1.0-beta11` 收尾——step 1 已交付并 commit（`feat/beta11-structured-tool-output` `0b443e6`，`make check` 全绿）；beta10 harness（`crashloop-bad-image`）真 LLM smoke 通过（`kubectl get pods` 的 Summary 实为结构化投影，`describe pod` 走 fallback，2 轮工具出报告对照 `expect.md` 满足）。剩：开 PR 合并 → 关里程碑归档 `plan/0.1.0-beta11/`，然后从候选选下一项或评估开 `0.2.0`。
 
 **0.1.0 候选**（本里程碑之后）：
 
