@@ -9,7 +9,7 @@
 // 不引入业务语义：one-hot 是机械编码、PCA 是线性代数、T² 是统计度量。
 // 不识别列名、不解释取值含义（守住 #16/#19）。
 
-package k8s
+package summary
 
 import (
 	"math"
@@ -19,21 +19,19 @@ import (
 )
 
 // 异常检测的稳定性阈值：低于此行数时 PCA 与协方差都不可靠，调用方应走兜底
-const minRowsForAnomaly = 30
+const MinRowsForAnomaly = 30
 
 // 最大主成分数：T² 在前几个高方差维度上就够分辨异常，更多维度反而引入噪声
-const maxPCADims = 8
+const MaxPCADims = 8
 
-// T² 平滑项：方差为 0 的主成分会被剔除；若全部方差为 0 则返回 nil 触发兜底
-//
-// anomalyScores 返回与 rows 等长的切片；元素越大该行越异常
+// AnomalyScores 返回与 rows 等长的切片；元素越大该行越异常
 // 失败（行数不足、方差为零、协方差奇异）时返回 nil，调用方走纯分层抽样兜底
-func anomalyScores(rows [][]string, sigCols []int, hists []map[string]int) []float64 {
-	if len(rows) < minRowsForAnomaly || len(sigCols) == 0 {
+func AnomalyScores(rows [][]string, sigCols []int, hists []map[string]int) []float64 {
+	if len(rows) < MinRowsForAnomaly || len(sigCols) == 0 {
 		return nil
 	}
 
-	X := encodeOneHot(rows, sigCols, hists)
+	X := EncodeOneHot(rows, sigCols, hists)
 	if X == nil {
 		return nil
 	}
@@ -54,7 +52,7 @@ func anomalyScores(rows [][]string, sigCols []int, hists []map[string]int) []flo
 	}
 
 	// 选前 k 个方差 > 0 的主成分；剔除零方差（恒定列）方向避免除零
-	k := minInt(len(vars), maxPCADims)
+	k := minInt(len(vars), MaxPCADims)
 	for k > 0 && vars[k-1] <= 1e-12 {
 		k--
 	}
@@ -98,9 +96,9 @@ func anomalyScores(rows [][]string, sigCols []int, hists []map[string]int) []flo
 	return scores
 }
 
-// one-hot 编码：低基数列 sigCols 每个取值生成一列；该行该列取此值则 1 否则 0
+// EncodeOneHot one-hot 编码：低基数列 sigCols 每个取值生成一列；该行该列取此值则 1 否则 0
 // 空串视为单独取值（与频次段一致）；返回 nil 表示编码失败（如所有列都无取值）
-func encodeOneHot(rows [][]string, sigCols []int, hists []map[string]int) *mat.Dense {
+func EncodeOneHot(rows [][]string, sigCols []int, hists []map[string]int) *mat.Dense {
 	// 计算总列数 D 并为每个 (col, value) 分配列索引
 	type colKey struct {
 		colIdx int
@@ -134,13 +132,13 @@ func encodeOneHot(rows [][]string, sigCols []int, hists []map[string]int) *mat.D
 	return mat.NewDense(N, D, flat)
 }
 
-// 选「区分性列」索引：低基数（distinct ≤ maxDistinctForHist）且非清一色（dominant/N < 0.999）
+// SignificantColumns 选「区分性列」索引：低基数（distinct ≤ MaxDistinctForHist）且非清一色（dominant/N < 0.999）
 // 高基数列（如 NAME 100 distinct）对异常检测无意义——每行都独特，无「少数派」概念
-func significantColumns(hists []map[string]int) []int {
+func SignificantColumns(hists []map[string]int) []int {
 	var sig []int
 	for i := range hists {
 		h := hists[i]
-		if len(h) == 0 || len(h) > maxDistinctForHist {
+		if len(h) == 0 || len(h) > MaxDistinctForHist {
 			continue
 		}
 		var max int

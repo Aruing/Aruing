@@ -844,8 +844,7 @@ func TestOrchestratorReconEvidenceScope(t *testing.T) {
 	}
 	if reconInChain == nil {
 		t.Fatalf("returned chain missing recon evidence: %+v", evidence)
-	}
-	if !strings.Contains(reconInChain.Summary, "侦察") {
+	} else if !strings.Contains(reconInChain.Summary, "侦察") {
 		t.Errorf("recon evidence summary = %q, want recon note", reconInChain.Summary)
 	}
 
