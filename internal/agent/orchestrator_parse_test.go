@@ -29,11 +29,9 @@ func TestParseAPIResources(t *testing.T) {
 	ir := findResource(got, "IngressRoute")
 	if ir == nil {
 		t.Fatalf("IngressRoute not parsed: %+v", got)
-	}
-	if !ir.Namespaced {
+	} else if !ir.Namespaced {
 		t.Errorf("IngressRoute namespaced = false, want true")
-	}
-	if ir.APIGroup != "" {
+	} else if ir.APIGroup != "" {
 		t.Errorf("4-col IngressRoute apiGroup = %q, want empty", ir.APIGroup)
 	}
 	// 集群级资源节点应标记为非命名空间级

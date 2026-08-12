@@ -1127,7 +1127,7 @@ func TestTowerEvidenceReadNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("evidence.read: %v", err)
 	}
-	if err := registry.Register(evRead); err != nil {
+	if err = registry.Register(evRead); err != nil {
 		t.Fatalf("register evidence.read: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())

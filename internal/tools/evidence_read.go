@@ -182,7 +182,7 @@ func compileEvidenceReadSchema(schema json.RawMessage) (*jsonschema.Schema, erro
 	}
 	compiler := jsonschema.NewCompiler()
 	const schemaURL = "evidence-read-input-schema.json"
-	if err := compiler.AddResource(schemaURL, doc); err != nil {
+	if err = compiler.AddResource(schemaURL, doc); err != nil {
 		return nil, fmt.Errorf("input schema: %w", err)
 	}
 	compiled, err := compiler.Compile(schemaURL)
