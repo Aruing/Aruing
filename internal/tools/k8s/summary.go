@@ -2,6 +2,7 @@
 //
 // 本文件只做按格式的机械投影，不识别资源类型、不下健康判断（判断归模型 + 编排，见硬约束 #16/#19）
 // 原始完整输出仍由 tool.go 写入证据 Raw，不可变；此处产出的 Summary 是派生投影，不回写 Raw
+// 表格渲染与导航算法在 internal/tools/summary（工具无关）；本包只负责解析 kubectl 输出格式
 
 package k8s
 
@@ -10,18 +11,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
-)
 
-// 大表阈值：行数超过该值时 Summary 进入「列频次 + 头/稀有/尾抽样」模式
-// 全量行始终保留在 Raw，不静默丢行（#18）；展示只是派生投影，不替代 Raw
-const (
-	largeTableThreshold  = 64
-	largeTableHead       = 4
-	largeTableTail       = 4
-	largeTableShowBudget = 24 // 大表实例段总展示行硬顶，避免上下文爆炸
-	maxDistinctForHist   = 24 // 列取值数超过该值时只标 distinct 总数，不列直方图
+	"aruing/internal/tools/summary"
 )
 
 var (
@@ -51,10 +43,10 @@ func projectSummary(argv []string, stdout, stderr string, exitCode int) string {
 	}
 	label := tableLabel(argv)
 	if p, ok := parseJSONTable(stdout); ok {
-		return renderTable(label, p.columns, p.rows, false)
+		return summary.Render(label, p.columns, p.rows, false)
 	}
 	if p, ok := parseTextTable(stdout); ok {
-		return renderTable(label, p.columns, p.rows, p.hasMore)
+		return summary.Render(label, p.columns, p.rows, p.hasMore)
 	}
 	return fallbackSummary(stdout)
 }
@@ -244,298 +236,6 @@ func splitByStarts(line string, starts []int) []string {
 		cells[i] = strings.TrimSpace(seg)
 	}
 	return cells
-}
-
-// 渲染表格投影为紧凑多行文本：标签 · 行数 · 列名，其后每行两空格缩进
-// 小表全行写出；大表进入「列频次 + 头/稀有/尾抽样」模式，全量仍在 Raw（#18）
-// 不按列名（如 STATUS/READY）改变逻辑，不解释取值含义，纯机械统计（#16/#19）
-func renderTable(label string, columns []string, rows [][]string, hasMore bool) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s · %d 行 · 列: %s\n", label, len(rows), strings.Join(columns, " "))
-
-	if len(rows) > largeTableThreshold {
-		renderLargeTable(&b, columns, rows)
-	} else {
-		writeRows(&b, rows)
-	}
-
-	if hasMore {
-		b.WriteString("  （输出含更多段落，见 raw）\n")
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-// 渲染大表投影：列频次段给整体分布、异常段按 Hotelling T² 高低给出最偏离的代表行、覆盖段按分层抽样保中段可见
-// 异常段用 PCA + T²（见 anomaly.go）抓单列及多列组合异常；覆盖段保证每个非主流取值至少有 1 行代表 + 中段均匀步长补全
-// 同一物理行不重复出现在三段；T² 失败（数据不足、协方差奇异）时异常段为空，全靠覆盖段兜底
-func renderLargeTable(b *strings.Builder, columns []string, rows [][]string) {
-	b.WriteString("  （大表：PCA 异常排序 + 取值覆盖抽样；全量在 raw；可用 --field-selector / -o jsonpath 收窄）\n")
-
-	hists := columnHistograms(columns, rows)
-	for i, col := range columns {
-		if line := renderColumnFreq(col, hists[i]); line != "" {
-			b.WriteString("  ")
-			b.WriteString(line)
-			b.WriteByte('\n')
-		}
-	}
-
-	picks := pickLargeTableRows(columns, rows, hists)
-	if len(picks.anomaly) > 0 {
-		fmt.Fprintf(b, "  异常高 T² %d 行（PCA 主成分空间，最偏离在前）：\n", len(picks.anomaly))
-		writeAnomalyRows(b, rows, picks.anomaly, picks.anomalyScores)
-	}
-	fmt.Fprintf(b, "  头 %d 行：\n", largeTableHead)
-	writeRows(b, rowsByIndex(rows, picks.head))
-	b.WriteString("  …\n")
-	fmt.Fprintf(b, "  覆盖抽样 %d 行（取值代表 + 中段均匀步长）：\n", len(picks.cover))
-	writeRows(b, rowsByIndex(rows, picks.cover))
-	b.WriteString("  …\n")
-	fmt.Fprintf(b, "  尾 %d 行：\n", largeTableTail)
-	writeRows(b, rowsByIndex(rows, picks.tail))
-}
-
-// 渲染异常段：每行单元格后标 T² 量化分（让模型一眼看到「这行偏离多少 σ」）
-// scores 为与 rows 等长的全表 T² 数组，按 idx 查；缺失时退化成无标注
-func writeAnomalyRows(b *strings.Builder, rows [][]string, idxs []int, scores []float64) {
-	for _, i := range idxs {
-		if i < 0 || i >= len(rows) {
-			continue
-		}
-		b.WriteString("  ")
-		b.WriteString(strings.Join(rows[i], "  "))
-		if i < len(scores) {
-			fmt.Fprintf(b, "  ← T²=%.2f", scores[i])
-		}
-		b.WriteByte('\n')
-	}
-}
-
-// 列频次统计：每列返回 value → count；空串保留为单独 key，渲染时呈现为 (empty)
-func columnHistograms(columns []string, rows [][]string) []map[string]int {
-	hists := make([]map[string]int, len(columns))
-	for i := range columns {
-		hists[i] = make(map[string]int)
-	}
-	for _, r := range rows {
-		for i := 0; i < len(columns) && i < len(r); i++ {
-			hists[i][r[i]]++
-		}
-	}
-	return hists
-}
-
-// 单列频次行的紧凑渲染：低基数列列「值×次数」（按次数降序、并列按原值升序）；高基数列只标 distinct 数
-// 不解释值含义、不识别列名；返回空串表示该列全空（不渲染，避免噪音）
-func renderColumnFreq(col string, hist map[string]int) string {
-	if len(hist) == 0 {
-		return ""
-	}
-	if len(hist) > maxDistinctForHist {
-		return fmt.Sprintf("%s: %d distinct（略）", col, len(hist))
-	}
-	type entry struct {
-		val   string
-		count int
-	}
-	entries := make([]entry, 0, len(hist))
-	for v, c := range hist {
-		entries = append(entries, entry{v, c})
-	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].count != entries[j].count {
-			return entries[i].count > entries[j].count
-		}
-		return entries[i].val < entries[j].val
-	})
-	parts := make([]string, len(entries))
-	for i, e := range entries {
-		v := e.val
-		if v == "" {
-			v = "(empty)"
-		}
-		parts[i] = fmt.Sprintf("%s×%d", v, e.count)
-	}
-	return col + ": " + strings.Join(parts, " / ")
-}
-
-// 大表实例段抽样结果：anomaly / head / cover / tail 的行索引切片
-// anomaly 按 T² score 降序（最异常在前）；anomalyScores 与 rows 等长，nil 表示 PCA 未启用
-type largeTablePicks struct {
-	anomaly       []int
-	anomalyScores []float64
-	head          []int
-	cover         []int
-	tail          []int
-}
-
-// 大表实例段预算分配：异常段固定 + 头尾各固定 + 剩余给覆盖段
-const (
-	anomalyShowBudget = 8
-	coverShowBudget   = 12
-)
-
-// 大表实例段抽样：先固定头/尾，再用 PCA + T² 选异常段，最后用覆盖段（取值代表 + 均匀步长）填中段
-// 三段通过 used 索引集合去重；同一物理行不重复出现
-// 异常段在覆盖段之前选：异常行优先占异常段，避免覆盖段把名额花光
-func pickLargeTableRows(columns []string, rows [][]string, hists []map[string]int) largeTablePicks {
-	n := len(rows)
-	headEnd := minInt(largeTableHead, n)
-	tailStart := n - largeTableTail
-	if tailStart < headEnd {
-		tailStart = headEnd
-	}
-	used := make(map[int]struct{}, largeTableShowBudget+anomalyShowBudget)
-
-	head := make([]int, 0, headEnd)
-	for i := 0; i < headEnd; i++ {
-		head = append(head, i)
-		used[i] = struct{}{}
-	}
-	tail := make([]int, 0, n-tailStart)
-	for i := tailStart; i < n; i++ {
-		tail = append(tail, i)
-		used[i] = struct{}{}
-	}
-
-	anomaly := pickAnomalyRows(rows, hists, headEnd, tailStart, anomalyShowBudget, used)
-	cover := pickCoverRows(rows, hists, headEnd, tailStart, coverShowBudget, used)
-
-	anomalyScores := anomalyScoresForRender(rows, hists)
-	return largeTablePicks{anomaly: anomaly, anomalyScores: anomalyScores, head: head, cover: cover, tail: tail}
-}
-
-// anomalyScoresForRender 重新计算一次 T² 分数供渲染标注用
-// 与 pickAnomalyRows 内部调用一致；为保持函数职责单一，渲染所需 scores 单独算
-// 若 PCA 未启用（数据不足、协方差奇异）返回 nil
-func anomalyScoresForRender(rows [][]string, hists []map[string]int) []float64 {
-	sigCols := significantColumns(hists)
-	if len(sigCols) == 0 {
-		return nil
-	}
-	return anomalyScores(rows, sigCols, hists)
-}
-
-// 异常段：在 [from, to) 区间内按 PCA + Hotelling T² 排序选至多 budget 行
-// 失败（数据不足、协方差奇异等见 anomalyScores 兜底）时返回 nil
-// 选出的行立刻加入 used，避免被后续覆盖段重复挑中
-func pickAnomalyRows(rows [][]string, hists []map[string]int, from, to, budget int, used map[int]struct{}) []int {
-	if budget <= 0 || from >= to {
-		return nil
-	}
-	sigCols := significantColumns(hists)
-	if len(sigCols) == 0 {
-		return nil
-	}
-	scores := anomalyScores(rows, sigCols, hists)
-	if scores == nil {
-		return nil
-	}
-	type scored struct {
-		idx   int
-		score float64
-	}
-	cands := make([]scored, 0, to-from)
-	for i := from; i < to; i++ {
-		cands = append(cands, scored{i, scores[i]})
-	}
-	sort.Slice(cands, func(i, j int) bool {
-		if cands[i].score != cands[j].score {
-			return cands[i].score > cands[j].score
-		}
-		return cands[i].idx < cands[j].idx
-	})
-	picked := make([]int, 0, budget)
-	for _, c := range cands {
-		if len(picked) >= budget {
-			break
-		}
-		if _, ok := used[c.idx]; ok {
-			continue
-		}
-		picked = append(picked, c.idx)
-		used[c.idx] = struct{}{}
-	}
-	// 不做 sort.Ints：保留 score 降序，让最异常的行排在异常段顶部（产品语义）
-	return picked
-}
-
-// 覆盖段：先满足「每个区分性列的每个非主流取值至少 1 行代表」硬约束，剩余预算按中段均匀步长补
-// 区分性列 = 低基数（distinct ≤ maxDistinctForHist）且非清一色的列（见 significantColumns）
-// 同一物理行不重复出现（通过 used 去重）
-func pickCoverRows(rows [][]string, hists []map[string]int, from, to, budget int, used map[int]struct{}) []int {
-	if budget <= 0 || from >= to {
-		return nil
-	}
-	sigCols := significantColumns(hists)
-	picked := make([]int, 0, budget)
-	// 阶段 1：取值覆盖——每个区分性列的每个非主流取值选第一个出现的行
-	for _, c := range sigCols {
-		if c >= len(hists) {
-			continue
-		}
-		// 列内众数（count 最大）= 主流；其余为非主流，要保证代表
-		var dominantCount int
-		for _, cnt := range hists[c] {
-			if cnt > dominantCount {
-				dominantCount = cnt
-			}
-		}
-		seenValues := make(map[string]struct{})
-		for i := from; i < to && len(picked) < budget; i++ {
-			if _, ok := used[i]; ok {
-				continue
-			}
-			if c >= len(rows[i]) {
-				continue
-			}
-			v := rows[i][c]
-			cnt := hists[c][v]
-			if cnt == dominantCount {
-				continue // 主流取值由头尾覆盖，不在覆盖段重复
-			}
-			if _, dup := seenValues[v]; dup {
-				continue
-			}
-			seenValues[v] = struct{}{}
-			picked = append(picked, i)
-			used[i] = struct{}{}
-		}
-	}
-	// 阶段 2：中段均匀步长补全剩余预算
-	if len(picked) < budget {
-		gap := to - from
-		step := max(1, gap/(budget+1))
-		for i := from + step; i < to && len(picked) < budget; i += step {
-			if _, ok := used[i]; ok {
-				continue
-			}
-			picked = append(picked, i)
-			used[i] = struct{}{}
-		}
-	}
-	sort.Ints(picked)
-	return picked
-}
-
-// 把若干行索引对应的行按序挑出，供 writeRows 直接消费
-func rowsByIndex(rows [][]string, idxs []int) [][]string {
-	out := make([][]string, 0, len(idxs))
-	for _, i := range idxs {
-		if i >= 0 && i < len(rows) {
-			out = append(out, rows[i])
-		}
-	}
-	return out
-}
-
-// 把若干行单元格以两空格连接、两空格缩进写入构造器
-func writeRows(b *strings.Builder, rows [][]string) {
-	for _, r := range rows {
-		b.WriteString("  ")
-		b.WriteString(strings.Join(r, "  "))
-		b.WriteByte('\n')
-	}
 }
 
 // 非零退出码的摘要：退出码加 stderr 首行，便于上层从摘要即看到失败原因
