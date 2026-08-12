@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-08-11（**0.1.0-beta11 已归档** #65：结构化工具输出 L0–L2 落地硬约束 #19；beta10 harness smoke 通过。**维护者反馈：大资源量下诊断准确率为主线阻塞项，arc Step 3（L3）提升为下一里程碑 `0.1.0-beta12` 主目标**——见下「下一步」与 arc §优先级重排。前序：beta10 已归档 #64）
+> 最后更新：2026-08-12（**下一项：`0.1.0-beta12` L3 腿 A（大表中段可读）——已实现待审**：大表改为 PCA 异常段 + 取值覆盖段（引入 gonum）；plan 在笔记 `plan/0.1.0-beta12/`。beta11 #65 已归档；大资源量诊断准确率为主线阻塞，见 arc《工具输出导航》§优先级重排）
 
 ## 当前阶段
 
@@ -60,21 +60,22 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta12` / 工具输出 L3——**诊断主线阻塞项**（维护者 2026-08-11 反馈：大资源量下诊断准确率受严重限制，迫切程度高于其它小候选）。详见 `plan/arc/tool-output-navigation.md` §优先级重排。腿 A（大表中段可读，纯投影扩展，目标 beta12 单里程碑）优先；腿 B（non-narrow/non-time-cursorable 巨输出的载波分页，动协议，可能紧邻 fix/beta13）紧随，不无限期延后。CLI banner / chat 循环容错等小 polish 降级为穿插项。
+**下一项**：`0.1.0-beta12` / 工具输出 L3 **腿 A（大表中段可读）**——**诊断主线阻塞项**（维护者 2026-08-12：先做腿 A）。plan：笔记 `plan/0.1.0-beta12/`（头文件 + `2026-8-12-table-mid-drill.md`，已 grill 冻结）。范围：同一次 Summary 投影增强——大表（> 64 行）改为**三段式（列频次 + PCA 异常段 + 取值覆盖段）**，算法为 one-hot + PCA + Hotelling's T²（Pearson 1901 / Hotelling 1947 / MCA 简化形态），引入 `gonum.org/v1/gonum`；只动 `internal/tools/k8s`；core/agent 零改；不动 Evidence 协议。
 
-**0.1.0 候选**（本里程碑之后）：
+**0.1.0 候选**（本里程碑之后 / 穿插）：
 
-1. **[阻塞项] 工具输出 L3 / 大资源量诊断准确**（arc Step 3）：腿 A 大表 Summary 中段可读（> 阈值行时不再只头尾、按条件/状态原地 drill 表格）；腿 B non-narrow 巨输出（超大 `describe`/无锚 `logs`/`events` 大流）`Raw` 落页式存储 + `read offset/limit` 游标。→ `plan/arc/tool-output-navigation.md` §优先级重排
-2. **CLI banner 加 kubectl/kubeconfig 路径**（降级穿插；beta10 smoke 期间提出：`writeConfigBanner` 加打印 `cfg.Tools.KubectlPath`（空则 LookPath）与 `$KUBECONFIG`（空则 `~/.kube/config`），改 `cmd/aruing` + `main_test.go`，独立小 PR）
-3. **chat 交互循环容错**（降级穿插；`cmd/aruing/main.go:269-271` 单轮 `chatTurn` 报错即 `return err` 退出整个会话；应继续下一轮而非杀会话。beta10 smoke 发现）
-4. **磁盘持久化**（与 0.1.0 远景「仍内存」冲突，宜 0.2+ 或单独重开远景）
-5. 后续阶段挂起（investigate / parse 等复用 `Suspension`，按 `Stage` 派发）
+1. **L3 腿 B**（arc Step 3b）：non-narrow 巨输出 `Raw` 页式 + `read offset/limit`；logs 时间游标——动协议，紧随腿 A
+2. **CLI banner 加 kubectl/kubeconfig 路径**（穿插小 PR）
+3. **chat 交互循环容错**（穿插；`chatTurn` 单轮失败勿杀整会话）
+4. **磁盘持久化**（0.2+ 或重开远景）
+5. 后续阶段挂起（investigate / parse 复用 `Suspension`）
 
-**arc《工具输出导航》延后步骤**（跨 0.1.0 → 0.2+，详见 `plan/arc/tool-output-navigation.md`）：
+**arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
 
-- Step 3 日志/事件游标翻页 + **大表中段可读 + non-narrow 巨输出载波分页**（0.1.0-beta12 起，**诊断主线阻塞项，提升排期**）
-- Step 4 全覆盖 map-reduce 扫描（0.2+）
-- Step 5 子 agent 分治（0.2+，动编排 #15/#17）
+- Step **3a** 大表中段可读 → **`0.1.0-beta12`（当前 draft）**
+- Step **3b** 巨输出载波 / 日志游标 → 腿 A 之后
+- Step 4 map-reduce（0.2+）
+- Step 5 子 agent 分治（0.2+，#15/#17）
 
 **已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）、场景 harness（beta10）、结构化工具输出 L0–L2（beta11）。
 
