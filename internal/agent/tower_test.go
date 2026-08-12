@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -389,7 +390,7 @@ func TestTowerResumePriority(t *testing.T) {
 			Report: &core.Report{Title: "完成", Summary: "已恢复"},
 		},
 	}
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -426,7 +427,7 @@ func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 		report: core.Report{Title: "正式", Summary: "诊断完成"},
 	}
 
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, registry.Specs(), nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -457,7 +458,7 @@ func TestTowerLLMReply(t *testing.T) {
 		writeChatCompletion(w, body)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -500,7 +501,7 @@ func TestTowerLLMExplainPriorReplyNoEscalate(t *testing.T) {
 		writeChatCompletion(w, `{"action":"reply","content":"上次依据 ImagePullBackOff 判定镜像问题","question":""}`)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -543,7 +544,7 @@ func TestTowerLLMEscalate(t *testing.T) {
 	}
 	factory := newTestFactory(t)
 	ledger := store.NewMemoryRunLedger()
-	tower, err := agent.NewTowerResponder(client, factory, exec, ledger, nil, nil)
+	tower, err := agent.NewTowerResponder(client, factory, exec, ledger, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -593,7 +594,7 @@ func TestTowerLLMCallToolThenReply(t *testing.T) {
 	specs := registry.Specs()
 
 	exec := &fakeRunExecutor{}
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, specs)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), dispatcher, specs, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -626,7 +627,7 @@ func TestTowerLLMInvalidActionRetries(t *testing.T) {
 		calls.Add(1)
 		writeChatCompletion(w, `{"action":"fly","content":"x"}`)
 	})
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -653,7 +654,7 @@ func TestTowerLLMBadJSONRetries(t *testing.T) {
 		calls.Add(1)
 		writeChatCompletion(w, "not-json-at-all")
 	})
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -688,7 +689,7 @@ func TestTowerLLMBadJSONThenOK(t *testing.T) {
 		}
 		writeChatCompletion(w, `{"action":"reply","content":"recovered"}`)
 	})
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -709,7 +710,7 @@ func TestTowerLLMEmptyReplyContent(t *testing.T) {
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 		writeChatCompletion(w, `{"action":"reply","content":"  "}`)
 	})
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -731,7 +732,7 @@ func TestTowerLLMCallToolWithoutDispatcher(t *testing.T) {
 		Name:        "fake.list_pods",
 		Description: "d",
 		InputSchema: json.RawMessage(`{"type":"object"}`),
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -751,16 +752,16 @@ func TestNewTowerResponderRequiresDeps(t *testing.T) {
 	factory := newTestFactory(t)
 	exec := &fakeRunExecutor{}
 
-	if _, err := agent.NewTowerResponder(nil, factory, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(nil, factory, exec, store.NewMemoryRunLedger(), nil, nil, nil); err == nil {
 		t.Fatal("expected nil client error")
 	}
-	if _, err := agent.NewTowerResponder(client, nil, exec, store.NewMemoryRunLedger(), nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(client, nil, exec, store.NewMemoryRunLedger(), nil, nil, nil); err == nil {
 		t.Fatal("expected nil factory error")
 	}
-	if _, err := agent.NewTowerResponder(client, factory, nil, store.NewMemoryRunLedger(), nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(client, factory, nil, store.NewMemoryRunLedger(), nil, nil, nil); err == nil {
 		t.Fatal("expected nil executor error")
 	}
-	if _, err := agent.NewTowerResponder(client, factory, exec, nil, nil, nil); err == nil {
+	if _, err := agent.NewTowerResponder(client, factory, exec, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected nil ledger error")
 	}
 }
@@ -798,7 +799,7 @@ func TestTowerLLMCallToolFeedsRaw(t *testing.T) {
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
 	specs := registry.Specs()
 
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, specs)
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, specs, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -853,7 +854,7 @@ func TestTowerBaselineReconInjectsClusterResources(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs(), nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -904,7 +905,7 @@ func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs(), nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -944,7 +945,7 @@ func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
-	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs(), nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -997,4 +998,240 @@ func (t *rawOnlyFakeTool) Execute(_ context.Context, _ json.RawMessage) (*core.E
 		Summary:     "tool completed, exitCode=0",
 		Raw:         raw,
 	}, nil
+}
+
+// 基线工具成功写出 Raw 时观察带 evidenceId；轮末索引 Discard
+func TestTowerPutsEvidenceIDAndDiscards(t *testing.T) {
+	var secondUser string
+	var calls atomic.Int32
+	idx := tools.NewObservationIndex()
+
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		if n == 1 {
+			writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"fake.list_pods","arguments":{},"purpose":"列表"}}`)
+			return
+		}
+		var reqBody struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&reqBody)
+		for _, m := range reqBody.Messages {
+			if m.Role == "user" {
+				secondUser = m.Content
+			}
+		}
+		writeChatCompletion(w, `{"action":"reply","content":"done","question":""}`)
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs(), idx)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	if _, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_eid",
+		UserText:  "list pods",
+	}); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if !strings.Contains(secondUser, `"evidenceId"`) {
+		t.Fatalf("second-round payload must include evidenceId: %s", secondUser)
+	}
+	// 轮末 defer Discard：索引应已空（无法枚举全部，Put 过的 id 应 miss）
+	// 从载荷抽出 evidenceId 再 Get
+	var payload struct {
+		Observations []struct {
+			EvidenceID string `json:"evidenceId"`
+		} `json:"observations"`
+	}
+	// secondUser 是整段 user content，内嵌 JSON 对象
+	start := strings.Index(secondUser, "{")
+	if start < 0 {
+		t.Fatalf("no json in payload")
+	}
+	if err := json.Unmarshal([]byte(secondUser[start:]), &payload); err != nil {
+		// 可能 content 前后有包装，尝试找 observations
+		if !strings.Contains(secondUser, "evidenceId") {
+			t.Fatalf("unmarshal: %v content=%s", err, secondUser)
+		}
+	} else if len(payload.Observations) > 0 && payload.Observations[0].EvidenceID != "" {
+		if _, ok := idx.Get(payload.Observations[0].EvidenceID); ok {
+			t.Fatalf("evidenceId %q should be Discarded after Respond", payload.Observations[0].EvidenceID)
+		}
+	}
+}
+
+// evidence.read 可对上一跳 k8s 观察切片，且导航结果不再 Put 新 evidenceId
+func TestTowerEvidenceReadNavigation(t *testing.T) {
+	var thirdUser string
+	var calls atomic.Int32
+	idx := tools.NewObservationIndex()
+
+	// 可切片的假 k8s：Execute 写文本表 Raw，并实现 Slicer
+	k8sFake := &sliceableK8sFake{}
+	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		n := calls.Add(1)
+		switch n {
+		case 1:
+			writeChatCompletion(w, `{"action":"call_tool","tool_call":{"tool_name":"k8s","arguments":{"argv":["get","pods"]},"purpose":"列表"}}`)
+		case 2:
+			// 从第二轮载荷取 evidenceId
+			var reqBody struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			eid := extractEvidenceID(reqBody.Messages)
+			if eid == "" {
+				t.Errorf("round2: missing evidenceId in payload")
+				writeChatCompletion(w, `{"action":"reply","content":"fail","question":""}`)
+				return
+			}
+			writeChatCompletion(w, fmt.Sprintf(
+				`{"action":"call_tool","tool_call":{"tool_name":"evidence.read","arguments":{"evidenceId":%q,"offset":1,"limit":1},"purpose":"翻页"}}`,
+				eid,
+			))
+		default:
+			var reqBody struct {
+				Messages []struct {
+					Role    string `json:"role"`
+					Content string `json:"content"`
+				} `json:"messages"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&reqBody)
+			for _, m := range reqBody.Messages {
+				if m.Role == "user" {
+					thirdUser = m.Content
+				}
+			}
+			writeChatCompletion(w, `{"action":"reply","content":"ok","question":""}`)
+		}
+	})
+
+	registry := tools.NewRegistry()
+	if err := registry.Register(k8sFake); err != nil {
+		t.Fatalf("register k8s: %v", err)
+	}
+	evRead, err := tools.NewEvidenceReadTool(idx, registry)
+	if err != nil {
+		t.Fatalf("evidence.read: %v", err)
+	}
+	if err := registry.Register(evRead); err != nil {
+		t.Fatalf("register evidence.read: %v", err)
+	}
+	dispatcher := tools.NewDispatcher(registry, tools.NewReadonlyPolicy())
+	tower, err := agent.NewTowerResponder(client, newTestFactory(t), &fakeRunExecutor{}, store.NewMemoryRunLedger(), dispatcher, registry.Specs(), idx)
+	if err != nil {
+		t.Fatalf("new tower: %v", err)
+	}
+
+	if _, err := tower.Respond(context.Background(), session.RespondInput{
+		SessionID: "sess_nav",
+		UserText:  "翻页看 pod",
+	}); err != nil {
+		t.Fatalf("respond: %v", err)
+	}
+	if calls.Load() < 3 {
+		t.Fatalf("want 3 LLM rounds, got %d", calls.Load())
+	}
+	// 第三轮应含 evidence.read 观察与切片行 p1
+	if !strings.Contains(thirdUser, "evidence.read") {
+		t.Fatalf("third payload missing evidence.read: %s", thirdUser)
+	}
+	if !strings.Contains(thirdUser, "p1") {
+		t.Fatalf("third payload missing sliced row p1: %s", thirdUser)
+	}
+	// evidence.read 观察不应再带 evidenceId（导航结果不 Put）
+	// 允许 k8s 那条仍有 evidenceId；检查 evidence.read 条目
+	if strings.Count(thirdUser, `"toolName":"evidence.read"`) == 0 && !strings.Contains(thirdUser, "evidence.read") {
+		t.Fatalf("expected evidence.read observation")
+	}
+}
+
+// 假 k8s：文本表 + Slicer，名称必须为 k8s 以匹配策略与约定
+type sliceableK8sFake struct{}
+
+func (sliceableK8sFake) Spec() tools.ToolSpec {
+	return tools.ToolSpec{
+		Name:        "k8s",
+		Description: "fake k8s with table raw",
+		InputSchema: json.RawMessage(`{"type":"object","additionalProperties":true}`),
+	}
+}
+
+func (sliceableK8sFake) Execute(_ context.Context, _ json.RawMessage) (*core.Evidence, error) {
+	raw, _ := json.Marshal(map[string]any{
+		"argv":     []string{"get", "pods"},
+		"exitCode": 0,
+		"stdout":   "NAME   STATUS\np0     Running\np1     Error\np2     Pending\n",
+		"stderr":   "",
+	})
+	return &core.Evidence{
+		Source:      "k8s",
+		ToolName:    "k8s",
+		CommandView: "kubectl get pods",
+		Summary:     "pods · 3 行",
+		Raw:         raw,
+	}, nil
+}
+
+func (sliceableK8sFake) Slice(raw []byte, q tools.SliceQuery) (tools.SliceView, error) {
+	var rr struct {
+		Stdout string `json:"stdout"`
+	}
+	if err := json.Unmarshal(raw, &rr); err != nil {
+		return tools.SliceView{}, err
+	}
+	lines := strings.Split(strings.TrimRight(rr.Stdout, "\n"), "\n")
+	if len(lines) < 2 {
+		return tools.SliceView{}, errors.New("no table")
+	}
+	cols := strings.Fields(lines[0])
+	var rows [][]string
+	for _, ln := range lines[1:] {
+		rows = append(rows, strings.Fields(ln))
+	}
+	end := q.Offset + q.Limit
+	if end > len(rows) {
+		end = len(rows)
+	}
+	var page [][]string
+	if q.Offset < end {
+		page = rows[q.Offset:end]
+	}
+	return tools.SliceView{Total: len(rows), Offset: q.Offset, Limit: q.Limit, Columns: cols, Rows: page}, nil
+}
+
+func extractEvidenceID(messages []struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}) string {
+	for _, m := range messages {
+		if m.Role != "user" {
+			continue
+		}
+		// 粗提取 "evidenceId":"e_..."
+		const key = `"evidenceId":"`
+		i := strings.Index(m.Content, key)
+		if i < 0 {
+			continue
+		}
+		rest := m.Content[i+len(key):]
+		j := strings.IndexByte(rest, '"')
+		if j > 0 {
+			return rest[:j]
+		}
+	}
+	return ""
 }

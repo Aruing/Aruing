@@ -50,6 +50,9 @@ type Tools struct {
 	// 默认关闭（只读策略拒绝）；对应诊断执行环境变量
 	// 开启后装配层改用诊断策略，由规划提示词引导只做诊断探针
 	AllowDiagnosticExec bool `yaml:"allow_diagnostic_exec"`
+	// 集群工具标准输出写入证据前的最大字节数；零表示使用 k8s 包默认（1MiB）
+	// 对应环境变量 ARUING_K8S_MAX_STDOUT_BYTES
+	MaxStdoutBytes int `yaml:"max_stdout_bytes"`
 }
 
 // 配置文件反序列化用的根形状，仅本包内部使用
@@ -83,6 +86,7 @@ func LoadFrom(getenv func(string) string) Config {
 		Tools: Tools{
 			KubectlPath:         strings.TrimSpace(getenv("ARUING_KUBECTL_PATH")),
 			AllowDiagnosticExec: parseBoolEnv(getenv("ARUING_ALLOW_DIAGNOSTIC_EXEC")),
+			MaxStdoutBytes:      parseIntEnv(getenv("ARUING_K8S_MAX_STDOUT_BYTES")),
 		},
 		Debug: parseBoolEnv(getenv("ARUING_DEBUG")),
 	}
@@ -119,6 +123,11 @@ func MergeEnvLookup(base Config, lookup func(string) (string, bool)) Config {
 	if v, ok := lookup("ARUING_ALLOW_DIAGNOSTIC_EXEC"); ok {
 		out.Tools.AllowDiagnosticExec = parseBoolEnv(v)
 	}
+	if v, ok := lookup("ARUING_K8S_MAX_STDOUT_BYTES"); ok {
+		if n := parseIntEnv(v); n > 0 {
+			out.Tools.MaxStdoutBytes = n
+		}
+	}
 	if v, ok := lookup("ARUING_DEBUG"); ok {
 		out.Debug = parseBoolEnv(v)
 	}
@@ -147,6 +156,19 @@ func ValidateLLM(cfg Config) error {
 func parseBoolEnv(v string) bool {
 	b, err := strconv.ParseBool(strings.TrimSpace(v))
 	return err == nil && b
+}
+
+// 解析正整型环境变量；空、非数字或非正返回 0
+func parseIntEnv(v string) int {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
 }
 
 // 判断大模型端点、密钥与模型名是否均非空

@@ -45,6 +45,7 @@ const (
 // 会话总控：实现会话应答器
 // 有限动作：直接回复、调工具、升格诊断
 // 不持有跨轮可变状态；每次应答独立决策
+// 轮内观察索引可选：有则基线工具观察写入 evidenceId，供 evidence.read 切片
 type TowerResponder struct {
 	// 大模型客户端，用于结构化决策
 	client llm.Client
@@ -64,11 +65,14 @@ type TowerResponder struct {
 	baselineMaxToolRounds int
 	// 可选进度与调试输出（默认丢弃）；详细模式时命令行传入标准错误
 	progress io.Writer
+	// 轮内观察索引；非空时 Put 成功观察并在 Respond 返回前 Discard
+	obsIndex *tools.ObservationIndex
 }
 
 // 组装总控；客户端、编号工厂、执行器、账本必填，调度器与工具规格可选
 // 调度器为空时校验拒绝调工具，便于无工具单测
 // 工具规格为空时按空列表处理；构造时复制切片，调用方后续修改不影响本实例
+// obsIndex 可选：非空时基线成功观察写入索引并在本轮 Respond 结束时 Discard
 func NewTowerResponder(
 	client llm.Client,
 	factory *core.Factory,
@@ -76,6 +80,7 @@ func NewTowerResponder(
 	ledger session.RunLedger,
 	dispatcher *tools.Dispatcher,
 	specs []tools.ToolSpec,
+	obsIndex *tools.ObservationIndex,
 ) (*TowerResponder, error) {
 	if client == nil {
 		return nil, errors.New("tower requires an llm client")
@@ -110,6 +115,7 @@ func NewTowerResponder(
 		systemPrompt:          systemPrompt,
 		baselineMaxToolRounds: defaultBaselineMaxToolRounds,
 		progress:              io.Discard,
+		obsIndex:              obsIndex,
 	}, nil
 }
 
@@ -162,6 +168,14 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}
 
 	t.progressf("tower: session=%s history=%d user_chars=%d", in.SessionID, len(in.History), len(in.UserText))
+
+	// 本轮 Put 进索引的 evidenceId；Respond 任一出口 Discard，避免跨轮泄漏
+	var putEvidenceIDs []string
+	defer func() {
+		if t.obsIndex != nil && len(putEvidenceIDs) > 0 {
+			t.obsIndex.Discard(putEvidenceIDs)
+		}
+	}()
 
 	view, err := prepareTowerContext(
 		ctx,
@@ -249,6 +263,9 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			if execErr != nil {
 				return session.RespondOutput{}, execErr
 			}
+			if obs.EvidenceID != "" {
+				putEvidenceIDs = append(putEvidenceIDs, obs.EvidenceID)
+			}
 			observations = append(observations, obs)
 			toolRounds++
 
@@ -312,6 +329,8 @@ type towerObservation struct {
 	Raw json.RawMessage `json:"raw,omitempty"`
 	// 仅当注入副本对原始输出做了预算截断时为真；权威内存观察不置位
 	RawTruncated bool `json:"rawTruncated,omitempty"`
+	// 轮内观察索引编号（e_…）；有索引且成功写出 Raw 时设置，供 evidence.read
+	EvidenceID string `json:"evidenceId,omitempty"`
 }
 
 // 模型每轮输出契约（结构化生成反序列化目标）
@@ -536,6 +555,13 @@ func (t *TowerResponder) executeBaselineTool(ctx context.Context, call towerTool
 	}
 	if len(item.Raw) > 0 {
 		obs.Raw = append(json.RawMessage(nil), item.Raw...)
+	}
+	// 有索引且写出了 Raw 时分配 e_ 编号并 Put，供本轮 evidence.read；导航工具结果不 Put
+	if t.obsIndex != nil && len(obs.Raw) > 0 && call.ToolName != "evidence.read" {
+		if eid, idErr := t.factory.NewID("e"); idErr == nil {
+			obs.EvidenceID = eid
+			t.obsIndex.Put(eid, tools.ObsRecord{Raw: obs.Raw, ToolName: call.ToolName})
+		}
 	}
 	return obs, nil
 }

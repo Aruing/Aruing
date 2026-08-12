@@ -224,7 +224,7 @@ func TestTowerRespondInjectsRehydrated(t *testing.T) {
 		writeChatCompletion(w, `{"action":"reply","content":"依据回灌原文作答","question":""}`)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil)
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, store.NewMemoryRunLedger(), nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}

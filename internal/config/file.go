@@ -31,6 +31,7 @@ func LoadFile(path string) (Config, error) {
 		Tools: Tools{
 			KubectlPath:         strings.TrimSpace(fc.Tools.KubectlPath),
 			AllowDiagnosticExec: fc.Tools.AllowDiagnosticExec,
+			MaxStdoutBytes:      fc.Tools.MaxStdoutBytes,
 		},
 		Debug: fc.Debug,
 	}, nil
