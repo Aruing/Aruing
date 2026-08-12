@@ -23,6 +23,7 @@ import (
 
 	"aruing/internal/core"
 	"aruing/internal/tools"
+	"aruing/internal/tools/summary"
 )
 
 const (
@@ -117,9 +118,44 @@ func (t *Tool) Spec() tools.ToolSpec {
 			"参数 argv 为不含命令自身的参数列表，例如 [\"get\",\"pods\",\"-n\",\"default\"]。" +
 			"使用进程直调，不经 shell；默认表格输出会被自动投影为摘要（类型/条数/列/行）。" +
 			"大结果集先用 --field-selector / label selector 收窄，或 -o jsonpath={...} 抽取具体字段；需要完整对象时再 -o json。" +
+			"若观察已有 evidenceId 且需翻页看表内其它行，用 evidence.read 按 offset/limit 切片，勿重复拉全量。" +
 			"可选 stdin 与 timeoutSeconds。",
 		InputSchema: append(json.RawMessage(nil), t.specJSON...),
 	}
+}
+
+// 从本工具写入的 evidence.Raw（resultRaw）中切出表格一页
+// 仅支持 exitCode=0 且可解析为 JSON Table 或文本表的 stdout；否则返回错误
+func (t *Tool) Slice(raw []byte, q tools.SliceQuery) (tools.SliceView, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return tools.SliceView{}, errors.New("empty raw")
+	}
+	var rr resultRaw
+	if err := json.Unmarshal(raw, &rr); err != nil {
+		return tools.SliceView{}, fmt.Errorf("decode k8s raw: %w", err)
+	}
+	if rr.ExitCode != 0 {
+		return tools.SliceView{}, fmt.Errorf("kubectl exitCode=%d, not a table", rr.ExitCode)
+	}
+	stdout := rr.Stdout
+	if strings.TrimSpace(stdout) == "" {
+		return tools.SliceView{}, errors.New("empty stdout")
+	}
+	var proj tableProjection
+	var ok bool
+	if proj, ok = parseJSONTable(stdout); !ok {
+		if proj, ok = parseTextTable(stdout); !ok {
+			return tools.SliceView{}, errors.New("stdout is not a tabular projection")
+		}
+	}
+	cols, rows, total, offset, limit := summary.SliceRows(proj.columns, proj.rows, q.Offset, q.Limit)
+	return tools.SliceView{
+		Total:   total,
+		Offset:  offset,
+		Limit:   limit,
+		Columns: cols,
+		Rows:    rows,
+	}, nil
 }
 
 // 解析并校验参数后执行集群命令，把完整调用结果写入证据

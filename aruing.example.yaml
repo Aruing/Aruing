@@ -17,6 +17,9 @@ tools:
   kubectl_path: ""
   # Allow in-pod diagnostic probes (ping/nslookup). Default false (read-only policy).
   allow_diagnostic_exec: false
+  # Max kubectl stdout bytes kept in evidence/raw before truncate; 0 = k8s default 1MiB.
+  # Env: ARUING_K8S_MAX_STDOUT_BYTES
+  max_stdout_bytes: 0
 
 # Print Tower / orchestrator progress to stderr (same as ARUING_DEBUG=1 / --verbose)
 debug: false

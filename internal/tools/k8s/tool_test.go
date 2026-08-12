@@ -363,3 +363,49 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+// 文本表 Raw 可按 offset/limit 切片
+func TestToolSliceTextTable(t *testing.T) {
+	tool := mustNewTool(t, Config{})
+	raw, _ := json.Marshal(resultRaw{
+		Argv:     []string{"get", "pods"},
+		ExitCode: 0,
+		Stdout: "NAME   STATUS\n" +
+			"p0     Running\n" +
+			"p1     Error\n" +
+			"p2     Pending\n",
+	})
+	view, err := tool.Slice(raw, tools.SliceQuery{Offset: 1, Limit: 1})
+	if err != nil {
+		t.Fatalf("slice: %v", err)
+	}
+	if view.Total != 3 || view.Offset != 1 || len(view.Rows) != 1 {
+		t.Fatalf("view: %#v", view)
+	}
+	if view.Rows[0][0] != "p1" {
+		t.Fatalf("row: %#v", view.Rows[0])
+	}
+}
+
+// 非表格 stdout 不可切片
+func TestToolSliceRejectsNonTable(t *testing.T) {
+	tool := mustNewTool(t, Config{})
+	raw, _ := json.Marshal(resultRaw{
+		ExitCode: 0,
+		Stdout:   "just some free text without columns",
+	})
+	_, err := tool.Slice(raw, tools.SliceQuery{Offset: 0, Limit: 10})
+	if err == nil {
+		t.Fatal("expected non-table error")
+	}
+}
+
+// 非零退出码不可切片
+func TestToolSliceRejectsNonZeroExit(t *testing.T) {
+	tool := mustNewTool(t, Config{})
+	raw, _ := json.Marshal(resultRaw{ExitCode: 1, Stdout: "NAME  STATUS\na  b\n"})
+	_, err := tool.Slice(raw, tools.SliceQuery{Offset: 0, Limit: 10})
+	if err == nil {
+		t.Fatal("expected exitCode error")
+	}
+}

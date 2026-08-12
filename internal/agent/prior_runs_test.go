@@ -129,7 +129,7 @@ func TestTowerPriorRunDetailsFromLedger(t *testing.T) {
 		writeChatCompletion(w, `{"action":"reply","content":"依据 e_pull：Failed to pull image，上次判定镜像问题","question":""}`)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, ledger, nil, nil)
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, ledger, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestTowerEmptyLedgerNoPriorRuns(t *testing.T) {
 		writeChatCompletion(w, `{"action":"reply","content":"本会话尚无正式诊断记录，可 escalate 后再追问依据","question":""}`)
 	})
 	exec := &fakeRunExecutor{}
-	tower, err := NewTowerResponder(client, newTestFactory(t), exec, ledger, nil, nil)
+	tower, err := NewTowerResponder(client, newTestFactory(t), exec, ledger, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("new tower: %v", err)
 	}

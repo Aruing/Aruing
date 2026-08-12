@@ -158,8 +158,7 @@ func TestCompactL1(t *testing.T) {
 	}
 	if diag == nil {
 		t.Fatal("diagnostic message missing")
-	}
-	if strings.HasPrefix(diag.Content, "[folded]") {
+	} else if strings.HasPrefix(diag.Content, "[folded]") {
 		t.Fatal("diagnostic should not be folded as non-diagnostic")
 	}
 }
@@ -324,11 +323,9 @@ func TestFitMergedL2View(t *testing.T) {
 	}
 	if cp == nil {
 		t.Fatal("checkpoint missing from hist")
-	}
-	if strings.HasPrefix(cp.Content, "[folded]") {
+	} else if strings.HasPrefix(cp.Content, "[folded]") {
 		t.Fatalf("checkpoint must not be folded first: %q", cp.Content)
-	}
-	if !strings.Contains(cp.Content, marker) {
+	} else if !strings.Contains(cp.Content, marker) {
 		t.Fatalf("injected checkpoint should keep handoff marker, got %q", cp.Content)
 	}
 

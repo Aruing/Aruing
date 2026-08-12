@@ -45,18 +45,29 @@ type orchestratorRoles struct {
 }
 
 // 工具注册表与调度器；基线塔与编排器必须共用同一调度器
+// obsIndex 供基线轮内 evidenceId / evidence.read；编排器路径可不读
 type tooling struct {
 	registry     *tools.Registry
 	dispatcher   *tools.Dispatcher
+	obsIndex     *tools.ObservationIndex
 	reconEnabled bool
 }
 
-// 组装工具注册表与调度器；集群命令可用时注册集群工具
+// 组装工具注册表与调度器；集群命令可用时注册集群工具与 evidence.read
 func buildTooling(toolsCfg config.Tools) (tooling, error) {
 	registry := tools.NewRegistry()
-	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg.KubectlPath)
+	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg)
 	if err != nil {
 		return tooling{}, err
+	}
+
+	obsIndex := tools.NewObservationIndex()
+	evidenceRead, err := tools.NewEvidenceReadTool(obsIndex, registry)
+	if err != nil {
+		return tooling{}, fmt.Errorf("create evidence.read tool: %w", err)
+	}
+	if err := registry.Register(evidenceRead); err != nil {
+		return tooling{}, fmt.Errorf("register evidence.read tool: %w", err)
 	}
 
 	var policy = tools.NewReadonlyPolicy()
@@ -66,14 +77,16 @@ func buildTooling(toolsCfg config.Tools) (tooling, error) {
 	return tooling{
 		registry:     registry,
 		dispatcher:   tools.NewDispatcher(registry, policy),
+		obsIndex:     obsIndex,
 		reconEnabled: k8sRegistered,
 	}, nil
 }
 
 // 当集群命令可用时注册后端级集群工具；不可用则跳过
 // 路径优先使用显式配置，否则在系统路径中查找默认集群命令
-func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) (bool, error) {
-	path := kubectlPath
+// MaxStdoutBytes 零值时由 k8s 包默认（1MiB）
+func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, error) {
+	path := toolsCfg.KubectlPath
 	if path == "" {
 		looked, err := exec.LookPath("kubectl")
 		if err != nil {
@@ -85,6 +98,7 @@ func maybeRegisterK8s(registry *tools.Registry, kubectlPath string) (bool, error
 		KubectlPath:    path,
 		DefaultTimeout: 30 * time.Second,
 		MaxTimeout:     2 * time.Minute,
+		MaxStdoutBytes: toolsCfg.MaxStdoutBytes,
 	})
 	if err != nil {
 		return false, nil
@@ -174,6 +188,7 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 		ledger,
 		toolsGraph.dispatcher,
 		toolsGraph.registry.Specs(),
+		toolsGraph.obsIndex,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("build tower: %w", err)
