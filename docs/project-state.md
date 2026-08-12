@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-12（**下一项：`0.1.0-beta12` L3 腿 A（大表中段可读）——已实现待审**：大表改为 PCA 异常段 + 取值覆盖段（引入 gonum）；plan 在笔记 `plan/0.1.0-beta12/`。beta11 #65 已归档；大资源量诊断准确率为主线阻塞，见 arc《工具输出导航》§优先级重排）
+> 最后更新：2026-08-12（**`0.1.0-beta12` 已归档** #66：L3 腿 A 大表中段可读——one-hot + PCA + Hotelling T²；引入 gonum。**下一步重开候选窗口**：腿 B（紧随）/ CLI banner polish / chat 循环容错 / 磁盘持久化（0.2+）。前序：beta11 #65 已归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta12` / 工具输出 L3 腿 A（大表中段可读）** ✅ 完成并归档（2026-08-12；#66）：arc《工具输出导航》Step 3a。大表（> 64 行）`Summary` 从「头 8 + 尾 4」升级为**三段式（列频次 + PCA 异常段 + 取值覆盖段）**：`significantColumns` 过滤低基数非清一色列 → `encodeOneHot` → Gonum `stat.PC` 算 PCA → 每行按 Hotelling's T² 排序选前 8 异常行（带 `← T²=X.XX` 标注）；覆盖段保证每个非主流取值至少 1 行代表 + 中段均匀步长补全；头/尾各 4 固定。算法依据：Pearson 1901 / Hotelling 1933 PCA、Mahalanobis 1936、Hotelling 1947 T²、Benzécri 1973 MCA 简化形态。引入 `gonum.org/v1/gonum v0.17.0`。兜底：`N<30` / 方差为 0 / 协方差奇异 → 异常段为空、全靠覆盖段。只动 `internal/tools/k8s`，`core`/`agent` 零改；`Raw` 不变。plan 在笔记 `plan/archive/0.1.0-beta12/`；arc 在 `plan/arc/tool-output-navigation.md`；历程《工具输出大表中段可读》。
 
 **`0.1.0-beta11` / 结构化工具输出（L0–L2）** ✅ 完成并归档（2026-08-11；#65）：arc《工具输出导航》Step 1-2。k8s 工具对 `get` 类表格（默认文本表 + `-o json` `Table`）产出紧凑 `Summary`（类型/条数/列/行），大表标注头尾 + 引导 narrow（#18）；`Raw` 不可变原带不变（#19）；`ToolSpec.Description` 改 narrow-first（删「优先 -o json」，教 `--field-selector`/label/`-o jsonpath`）。只动 `internal/tools/k8s`，`core`/`agent` 零改动。beta10 harness（`crashloop-bad-image`）真 LLM smoke 通过。plan 在笔记 `plan/archive/0.1.0-beta11/`；arc 在 `plan/arc/tool-output-navigation.md`；历程《工具输出从字符串到可导航双结构》。缺口：不能 narrow / 不能 time-cursorable 的巨输出在 0.1.0 仍 lossy（见 arc「已识别缺口」段）。
 
@@ -53,6 +55,7 @@
 | beta9 | 澄清挂起（waiting_user） | ✅ | #63 `Suspension`/`Outcome`/`RunStatusWaitingUser`；`ResolveActionClarify`；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口优先 Resume；CLI run 遇挂起退出 |
 | beta10 | 可复现场景 harness（kind） | ✅ | #64 `scenarios/` + `scripts/` + `lab-*`（up/down/list/chat/kube）+ 三场景；验收以 `chat` 为主；LLM smoke 通过；不进 `make test` |
 | beta11 | 结构化工具输出（L0–L2） | ✅ | #65 `summary.go` 表格投影（文本表 + JSON Table + fallback + 大表标注）+ narrow-first `Spec`；beta10 harness smoke 通过 |
+| beta12 | 工具输出 L3 腿 A（大表中段可读） | ✅ | #66 三段式 Summary（列频次 + PCA 异常段 + 取值覆盖段）；`anomaly.go` one-hot + PCA + Hotelling T²；引入 gonum；core/agent 零改；Raw 不变 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -60,9 +63,9 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta12` / 工具输出 L3 **腿 A（大表中段可读）**——**诊断主线阻塞项**（维护者 2026-08-12：先做腿 A）。plan：笔记 `plan/0.1.0-beta12/`（头文件 + `2026-8-12-table-mid-drill.md`，已 grill 冻结）。范围：同一次 Summary 投影增强——大表（> 64 行）改为**三段式（列频次 + PCA 异常段 + 取值覆盖段）**，算法为 one-hot + PCA + Hotelling's T²（Pearson 1901 / Hotelling 1947 / MCA 简化形态），引入 `gonum.org/v1/gonum`；只动 `internal/tools/k8s`；core/agent 零改；不动 Evidence 协议。
+**下一项**：**重开候选窗口**——beta12 已交付 arc Step 3 腿 A，**腿 B（紧随，不无限期延后）**是 L3 收尾自然下一步；同时穿插小 PR 可并行。维护者下次会话先定方向。
 
-**0.1.0 候选**（本里程碑之后 / 穿插）：
+**0.1.0 候选**（重开后选择）：
 
 1. **L3 腿 B**（arc Step 3b）：non-narrow 巨输出 `Raw` 页式 + `read offset/limit`；logs 时间游标——动协议，紧随腿 A
 2. **CLI banner 加 kubectl/kubeconfig 路径**（穿插小 PR）
@@ -72,12 +75,12 @@
 
 **arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
 
-- Step **3a** 大表中段可读 → **`0.1.0-beta12`（当前 draft）**
-- Step **3b** 巨输出载波 / 日志游标 → 腿 A 之后
+- Step **3a** 大表中段可读 → **`0.1.0-beta12`（done，#66）**
+- Step **3b** 巨输出载波 / 日志游标 → 紧随腿 A
 - Step 4 map-reduce（0.2+）
 - Step 5 子 agent 分治（0.2+，#15/#17）
 
-**已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）、场景 harness（beta10）、结构化工具输出 L0–L2（beta11）。
+**已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）、场景 harness（beta10）、结构化工具输出 L0–L2（beta11）、L3 腿 A 大表中段可读（beta12）。
 
 已确认（beta5–9 交付后仍有效）：
 
@@ -93,7 +96,7 @@
 
 阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`（活跃）与 `plan/archive/`（已关）。
 
-已落地要点（beta2–9 摘要）：
+已落地要点（beta2–12 摘要）：
 
 1. **#4a/#4b～#8 / R-1**：Policy + 可选 k8s；LLM 角色链；config env；Markdown CLI
 2. **beta3**：`investigateLoop` + 工具失败容错 + 报告证据明细
@@ -105,6 +108,9 @@
 8. **beta7**：压缩后按范围回灌（#59）
 9. **beta8**：YAML 配置文件 + 路径链 + env 覆盖；CLI 去假闭环（#61/#62）
 10. **beta9**：`Suspension`/`Outcome` 通用挂起抽象；resolve clarify 端到端；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口挂起恢复优先
+11. **beta10**：`scenarios/` + `scripts/` + `lab-*` 可复现 kind harness；以 `chat` 验收为主
+12. **beta11**：`projectSummary` 表格投影（文本表 + JSON Table + fallback）；`Evidence.Summary` 从无用占位升为可导航 L0/L1/L2；`Raw` 不可变；narrow-first `ToolSpec.Description`
+13. **beta12**：大表 PCA 异常段 + 取值覆盖段（one-hot + PCA + Hotelling T²）；引入 gonum；`anomaly.go`；core/agent 零改；arc Step 3a
 
 ## 编排与多轮
 
