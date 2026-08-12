@@ -175,11 +175,9 @@ func TestRehydrateRestoresOriginalNotFolded(t *testing.T) {
 	}
 	if diag == nil {
 		t.Fatalf("diagnostic missing from window: %+v", win)
-	}
-	if !strings.Contains(diag.Content, "ORIGINAL_MARKER_777") {
+	} else if !strings.Contains(diag.Content, "ORIGINAL_MARKER_777") {
 		t.Fatalf("rehydrate should restore original, got %q", diag.Content)
-	}
-	if strings.HasPrefix(diag.Content, "[folded]") {
+	} else if strings.HasPrefix(diag.Content, "[folded]") {
 		t.Fatalf("rehydrate must not return the folded skeleton: %q", diag.Content)
 	}
 }

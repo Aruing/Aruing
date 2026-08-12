@@ -146,24 +146,25 @@ func TestReconClusterSuccess(t *testing.T) {
 	evidence, resources := orch.reconCluster(context.Background(), "run_recon")
 	if evidence == nil {
 		t.Fatal("evidence = nil, want recon evidence")
+	} else {
+		// 摘要被覆写为侦察成果摘要
+		if !strings.Contains(evidence.Summary, "发现") || !strings.Contains(evidence.Summary, "2") {
+			t.Errorf("summary = %q, want recon digest", evidence.Summary)
+		}
+		// 编号经工厂发放，证据编号来自工厂
+		if evidence.ID != "e_recon" {
+			t.Errorf("evidence ID = %q, want e_recon (factory-issued)", evidence.ID)
+		}
+		// 原始标准输出仍在原文，供用户深挖
+		if !strings.Contains(extractStdout(evidence.Raw), "ingressroutes") {
+			t.Errorf("raw stdout lost: %s", evidence.Raw)
+		}
 	}
 	if len(resources) != 2 {
 		t.Fatalf("resources = %d, want 2: %+v", len(resources), resources)
 	}
 	if findResource(resources, "IngressRoute") == nil {
 		t.Errorf("resources missing IngressRoute: %+v", resources)
-	}
-	// 摘要被覆写为侦察成果摘要
-	if !strings.Contains(evidence.Summary, "发现") || !strings.Contains(evidence.Summary, "2") {
-		t.Errorf("summary = %q, want recon digest", evidence.Summary)
-	}
-	// 编号经工厂发放，证据编号来自工厂
-	if evidence.ID != "e_recon" {
-		t.Errorf("evidence ID = %q, want e_recon (factory-issued)", evidence.ID)
-	}
-	// 原始标准输出仍在原文，供用户深挖
-	if !strings.Contains(extractStdout(evidence.Raw), "ingressroutes") {
-		t.Errorf("raw stdout lost: %s", evidence.Raw)
 	}
 }
 
@@ -182,15 +183,16 @@ func TestReconClusterFailure(t *testing.T) {
 	evidence, resources := orch.reconCluster(context.Background(), "run_recon")
 	if evidence == nil {
 		t.Fatal("evidence = nil, want error evidence (transparent failure)")
+	} else {
+		if evidence.Error == "" {
+			t.Errorf("error evidence should carry Error field: %+v", evidence)
+		}
+		if !strings.Contains(evidence.Summary, "侦察") || !strings.Contains(evidence.Summary, "失败") {
+			t.Errorf("summary = %q, want recon failure note", evidence.Summary)
+		}
 	}
 	if resources != nil {
 		t.Errorf("resources = %+v, want nil on failure", resources)
-	}
-	if evidence.Error == "" {
-		t.Errorf("error evidence should carry Error field: %+v", evidence)
-	}
-	if !strings.Contains(evidence.Summary, "侦察") || !strings.Contains(evidence.Summary, "失败") {
-		t.Errorf("summary = %q, want recon failure note", evidence.Summary)
 	}
 }
 
