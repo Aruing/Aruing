@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-13（**`0.1.0-beta13` 已归档** #67+#68：L3 腿 B 普适证据导航——`internal/tools/summary` + `Slicer` + `evidence.read` + 轮内 `ObservationIndex`。**下一步重开候选窗口**：CLI banner polish / chat 循环容错 / logs 时间游标 / 磁盘持久化（0.2+）。前序：beta12 #66 已归档）
+> 最后更新：2026-08-13（**`0.1.0-beta14` 启动**：交互式 TUI + 启动 banner；arc《TUI》Step 1；新硬约束 **#20**。前序：`0.1.0-beta13` 已归档 #67+#68 L3 腿 B 普适证据导航）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta14` / 交互式 TUI + 启动 banner** ⏳ 进行中（2026-08-13 启动；arc《TUI》Step 1）：把 `aruing chat` 从裸 REPL 升级为 bubbletea inline TUI（输入框 + 消息流 + Markdown + spinner + 主题），单轮 Turn 失败不杀会话；启动 banner 补 kubectl/kubeconfig/k8s 状态。选型 charm 全家桶（bubbletea/lipgloss/bubbles/glamour）。新硬约束 **#20**（TUI 纯展示层 + 主题 token + 为流式留位）。同步开 arc《流式响应》（流式全景，本里程碑只守其脊柱前置：TUI 预留 streaming buffer）。plan 在笔记 `plan/0.1.0-beta14/`；arc 在 `plan/arc/tui.md` + `plan/arc/streaming-response.md`。不触 §4（TUI 只接现有 `svc.Turn`）。
 
 **`0.1.0-beta13` / 工具输出 L3 腿 B（普适证据导航）** ✅ 完成并归档（2026-08-13；#67+#68）：arc《工具输出导航》Step 3b 主段。#67 纯重构：表格导航算法（PCA/覆盖/频次）抽到 `internal/tools/summary`，k8s 只留格式解析。#68：可选 `tools.Slicer` + `summary.SliceRows`；注册工具 `evidence.read`（经 Dispatcher/Policy，#17）；基线成功观察由 Tower 经 Factory 发 `evidenceId` 写入轮内 `ObservationIndex`，`Respond` 结束 `Discard`；k8s 实现 Slicer（文本表 / JSON Table）；`MaxStdoutBytes` 可配置；不可切片（describe/logs）返错误引导 re-query。导航结果不 Put 回索引。`core.Evidence` 零改。plan 在笔记 `plan/archive/0.1.0-beta13/`；arc 在 `plan/arc/tool-output-navigation.md`。未做：日志时间游标、超巨页式存储（0.2+）、formal RunLedger drill。
 
@@ -59,6 +61,7 @@
 | beta11 | 结构化工具输出（L0–L2） | ✅ | #65 `summary.go` 表格投影（文本表 + JSON Table + fallback + 大表标注）+ narrow-first `Spec`；beta10 harness smoke 通过 |
 | beta12 | 工具输出 L3 腿 A（大表中段可读） | ✅ | #66 三段式 Summary（列频次 + PCA 异常段 + 取值覆盖段）；`anomaly.go` one-hot + PCA + Hotelling T²；引入 gonum；core/agent 零改；Raw 不变 |
 | beta13 | 工具输出 L3 腿 B（普适证据导航） | ✅ | #67 `internal/tools/summary`；#68 `Slicer` + `evidence.read` + 轮内 `ObservationIndex` + k8s Slicer + `MaxStdoutBytes` 配置；core 零改 |
+| beta14 | 交互式 TUI + 启动 banner | ⏳ | arc《TUI》Step 1；charm 全家桶（bubbletea/lipgloss/bubbles/glamour）；banner 扩展 + 容错 + Markdown + 主题；新硬约束 #20；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -66,14 +69,14 @@
 
 ## 下一步
 
-**下一项**：**重开候选窗口**——beta13 已交付 arc Step 3b 主段（`evidence.read` 行级下钻）；L3 表格导航闭环。穿插小 PR 与残留缺口可并行。维护者下次会话先定方向。
+**下一项**：`0.1.0-beta14`（交互式 TUI + 启动 banner）已启动。Step 1（banner 扩展）设计已起草（笔记 `plan/0.1.0-beta14/2026-8-13-banner.md`），待审；审过实现。Step 2（TUI 骨架）/ Step 3（容错 + Markdown + 主题）随后。维护者下次会话审 Step 1 设计。
 
-**0.1.0 候选**（重开后选择）：
+**0.1.0 候选**（beta14 之后）：
 
-1. **CLI banner 加 kubectl/kubeconfig 路径**（穿插小 PR）
-2. **chat 交互循环容错**（穿插；`chatTurn` 单轮失败勿杀整会话）
-3. **logs / events 时间游标**（arc 3b 残留；`SliceQuery` 已留位）
-4. **磁盘持久化 / 超巨输出页式**（0.2+ 或重开远景）
+1. **logs / events 时间游标**（arc《工具输出导航》3b 残留；`SliceQuery` 已留位）
+2. **磁盘持久化 / 超巨输出页式**（0.2+ 或重开远景）
+3. **TUI 布局可配（L4）/ 组件可插拔（L5）**（arc《TUI》Step 2/3）
+4. **流式响应**（arc《流式响应》，0.2+）
 5. 后续阶段挂起（investigate / parse 复用 `Suspension`）
 
 **arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
@@ -142,6 +145,7 @@
 - 工具接口不限定读写；能力按后端 Tool + Schema 开放，授权由 `Policy`
 - **#18**：不得用人为上限阉割正常产品能力；触顶用压缩 / 明确失败
 - **#19**：工具输出为可导航双结构（`Summary` 投影 + `Raw` 原带）；工具只做机械格式投影不做业务判断；模型经 Summary 看全貌，按需 narrow 或 `evidence.read` drill，不被逼猜（→ arc《工具输出导航》）
+- **#20**：TUI 是纯展示层（不持有业务事实、不假装 Evidence/Verdict；样式经主题 token 不硬编码；Model 预留 streaming buffer 为流式留位）（→ arc《TUI》）
 - 线性 Orchestrator 是单轮临时驱动器 / 诊断升格实现；角色不私自多轮调 Tool（#15–#17）
 - 编号与执行：Tool 只经 Dispatcher；各阶段 ID 经 `Factory` 发放
 
