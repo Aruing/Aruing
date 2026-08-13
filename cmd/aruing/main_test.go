@@ -99,38 +99,55 @@ func TestNewSessionStackRequiresLLM(t *testing.T) {
 	}
 }
 
-// 配置横幅应展示路径与模型，且不泄露密钥
-func TestWriteConfigBanner(t *testing.T) {
+// 启动横幅应展示路径、模型、kubectl/context，且不泄露密钥
+func TestWriteStartupBanner(t *testing.T) {
 	var stderr bytes.Buffer
-	writeConfigBanner(&stderr, "/tmp/demo.yaml", config.Config{
+	writeStartupBanner(&stderr, "/tmp/demo.yaml", config.Config{
 		LLM: config.LLM{
 			BaseURL: "https://example.com/v1",
 			APIKey:  "sk-secret",
 			Model:   "demo-model",
 		},
+	}, clusterInfo{
+		kubectlPath:   "/usr/local/bin/kubectl",
+		kubectlSource: sourcePATH,
+		context:       "kind-demo",
 	})
 	got := stderr.String()
-	if !strings.Contains(got, "path=/tmp/demo.yaml") {
-		t.Fatalf("missing path: %q", got)
-	}
-	if !strings.Contains(got, "llm_model=demo-model") {
-		t.Fatalf("missing model: %q", got)
-	}
-	if !strings.Contains(got, "ready=true") {
-		t.Fatalf("want ready=true: %q", got)
+	for _, want := range []string{
+		"path=/tmp/demo.yaml",
+		"llm_model=demo-model",
+		"ready=true",
+		"kubectl=/usr/local/bin/kubectl source=PATH",
+		"context=kind-demo",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 	if strings.Contains(got, "sk-secret") {
 		t.Fatalf("must not print api key: %q", got)
 	}
+}
 
-	stderr.Reset()
-	writeConfigBanner(&stderr, "", config.Config{})
-	got = stderr.String()
-	if !strings.Contains(got, "path=env-only") {
-		t.Fatalf("want env-only path: %q", got)
-	}
-	if !strings.Contains(got, "ready=false") {
-		t.Fatalf("want ready=false: %q", got)
+// kubectl 缺失时应降级标记并提示不可用，不阻断启动
+func TestWriteStartupBannerKubectlMissing(t *testing.T) {
+	var stderr bytes.Buffer
+	writeStartupBanner(&stderr, "", config.Config{}, clusterInfo{
+		kubectlSource: sourceMissing,
+		context:       contextMissing,
+	})
+	got := stderr.String()
+	for _, want := range []string{
+		"path=env-only",
+		"ready=false",
+		"kubectl=<missing> source=missing",
+		"context=<n/a>",
+		"k8s tool not registered",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
 	}
 }
 

@@ -102,7 +102,7 @@ make chat CHAT_MSG='hello'
 - Tools are not inherently R/O; policy gates execution. Read tools registered now; write tools later with approval  
 - `run` → Orchestrator; `chat` → Session.Turn + Tower; same Dispatcher  
 
-Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15–#19).
+Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15–#20).
 
 ## Docs
 

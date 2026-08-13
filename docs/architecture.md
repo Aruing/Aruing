@@ -135,4 +135,6 @@ Run ←──SessionID（升格时）────┘
 18. **不得用人为上限阉割正常产品能力**（与 #2 同构，不限于「枚举」）：禁止把「最近 N 条历史」「最多 K 次诊断摘要」「只支持封闭意图表」等实现成默认能力边界，导致用户正常续聊 / 追问 / 使用时静默丢信息或被迫新开会话。权威数据（如 `Store` 消息）须可全量保留；注入模型等受物理预算约束的路径须 **预算内尽量全给，超预算用压缩 / 剪枝 / 分页 / 明确失败与可恢复路径**（如 context compaction），不得用固定条数 / 步数截肢冒充最小闭环。仍允许：有限 **系统动作**（非用户意图枚举）、**授权与安全 Policy**、单次调用防死环的熔断（触顶须明确失败且可调，不得变成会话记忆或业务能力的永久墙）
 19. **工具输出为可导航双结构，不是字符串**：`Evidence.Raw` 是工具产出的不可变原带（产出后只留存、不回写）；`Summary` 与后续派生视图是投影。工具只做**机械格式投影**（按输出格式解析行/列等结构，**不按资源类型映射、不下健康判断**；判断归模型 + 编排）。模型经 `Summary` 看全貌、按需 narrow 查询或经注册工具 `evidence.read`（`Slicer` + 轮内 `ObservationIndex`，#17）drill 到 `Raw` 行级切片；不得用整块文本或截断预览逼模型猜全貌。分片汇总（map-reduce）类全覆盖扫描作为专门能力存在，不是工具输出默认出口。详见笔记 `plan/arc/tool-output-navigation.md`
 
+20. **终端交互（TUI）是纯展示层**：`aruing chat` 的终端交互（bubbletea 等）只做渲染与输入捕获，所有证据 / 结论来自 `session.Turn` 的 `TurnResult` 与 `RunLedger`，TUI 不得成为第二真相源、不得假装 `Evidence` / `Verdict`（守 #4 / #5）；样式经主题 token（`tui.theme`），代码不得硬编码颜色 / 边框（为可定制留路）；Model 须预留 streaming buffer 字段、View 渲染对 streaming 友好（为流式响应留位，见笔记 `plan/arc/streaming-response.md`）。详见笔记 `plan/arc/tui.md`
+
 与约束冲突时按 `arui-note` 既有"禁止回退"流程处理：未经维护者重新批准不得违反。
