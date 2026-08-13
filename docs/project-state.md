@@ -1,12 +1,14 @@
 # 项目当前状态
 
-> 最后更新：2026-08-13（**`0.1.0-beta14` 启动**：交互式 TUI + 启动 banner；arc《TUI》Step 1；新硬约束 **#20**。前序：`0.1.0-beta13` 已归档 #67+#68 L3 腿 B 普适证据导航）
+> 最后更新：2026-08-13（**`0.1.0-beta15` 启动**：行内 TUI（pi 留痕）+ 双模式。前序：`0.1.0-beta14` 已归档 #70+#71+#72 交互式 TUI+主题）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta14` / 交互式 TUI + 启动 banner** ⏳ 进行中（2026-08-13 启动；arc《TUI》Step 1）：把 `aruing chat` 从裸 REPL 升级为 bubbletea inline TUI（输入框 + 消息流 + Markdown + spinner + 主题），单轮 Turn 失败不杀会话；启动 banner 补 kubectl/kubeconfig/k8s 状态。选型 charm 全家桶（bubbletea/lipgloss/bubbles/glamour）。新硬约束 **#20**（TUI 纯展示层 + 主题 token + 为流式留位）。同步开 arc《流式响应》（流式全景，本里程碑只守其脊柱前置：TUI 预留 streaming buffer）。plan 在笔记 `plan/0.1.0-beta14/`；arc 在 `plan/arc/tui.md` + `plan/arc/streaming-response.md`。不触 §4（TUI 只接现有 `svc.Turn`）。
+**`0.1.0-beta15` / 行内 TUI（pi 留痕风格）+ 双模式** ⏳ 进行中（2026-08-13 启动）：beta14 bubbletea 全屏模式实测非留痕、IM 不跟随、无多行；自写行内 inline 引擎（readline + 留痕 + 底部输入框 + 多行 + spinner + 容错），保留 app（bubbletea）为可选（Step 3 接 `config.TUI.Mode`）。
+
+**`0.1.0-beta14` / 交互式 TUI + 启动 banner** ✅ 完成并归档（2026-08-13；#70 banner + #71 TUI 骨架+容错 + #72 glamour markdown+主题；新硬约束 #20；历程《交互式终端与可定制主题基础》《为流式留位》）。plan 在 `plan/archive/0.1.0-beta14/`。
 
 **`0.1.0-beta13` / 工具输出 L3 腿 B（普适证据导航）** ✅ 完成并归档（2026-08-13；#67+#68）：arc《工具输出导航》Step 3b 主段。#67 纯重构：表格导航算法（PCA/覆盖/频次）抽到 `internal/tools/summary`，k8s 只留格式解析。#68：可选 `tools.Slicer` + `summary.SliceRows`；注册工具 `evidence.read`（经 Dispatcher/Policy，#17）；基线成功观察由 Tower 经 Factory 发 `evidenceId` 写入轮内 `ObservationIndex`，`Respond` 结束 `Discard`；k8s 实现 Slicer（文本表 / JSON Table）；`MaxStdoutBytes` 可配置；不可切片（describe/logs）返错误引导 re-query。导航结果不 Put 回索引。`core.Evidence` 零改。plan 在笔记 `plan/archive/0.1.0-beta13/`；arc 在 `plan/arc/tool-output-navigation.md`。未做：日志时间游标、超巨页式存储（0.2+）、formal RunLedger drill。
 
@@ -61,7 +63,8 @@
 | beta11 | 结构化工具输出（L0–L2） | ✅ | #65 `summary.go` 表格投影（文本表 + JSON Table + fallback + 大表标注）+ narrow-first `Spec`；beta10 harness smoke 通过 |
 | beta12 | 工具输出 L3 腿 A（大表中段可读） | ✅ | #66 三段式 Summary（列频次 + PCA 异常段 + 取值覆盖段）；`anomaly.go` one-hot + PCA + Hotelling T²；引入 gonum；core/agent 零改；Raw 不变 |
 | beta13 | 工具输出 L3 腿 B（普适证据导航） | ✅ | #67 `internal/tools/summary`；#68 `Slicer` + `evidence.read` + 轮内 `ObservationIndex` + k8s Slicer + `MaxStdoutBytes` 配置；core 零改 |
-| beta14 | 交互式 TUI + 启动 banner | ⏳ | #70 banner + #71 TUI 骨架（done）；Step 3 Markdown+主题（glamour + tui.theme）进行中；新硬约束 #20；不触 §4 |
+| beta14 | 交互式 TUI + 启动 banner | ✅ | #70 banner + #71 TUI 骨架+容错 + #72 markdown+主题；新硬约束 #20；不触 §4 |
+| beta15 | 行内 TUI + 双模式 | ⏳ | Step 1 行内骨架（自写 readline + 留痕 + 多行 + 容错）；Step 2 分割线+主题+markdown 共享；Step 3 配置模式切换；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -69,7 +72,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta14` Step 3（glamour Markdown + tui.theme 主题）实现中——beta14 收官步。Step 1（banner）#70、Step 2（TUI 骨架 + 容错）#71 已 merged。Step 3 后可关里程碑归档。
+**下一项**：`0.1.0-beta15` Step 1（行内 TUI 骨架）实现中——自写 readline + 留痕 + 底部输入框 + 多行（shift+enter/ctrl+j）+ 容错。beta14 已归档。Step 2 分割线+markdown+主题共享，Step 3 配置模式切换。
 
 **0.1.0 候选**（beta14 之后）：
 

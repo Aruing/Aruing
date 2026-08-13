@@ -1,4 +1,5 @@
-// TUI 装配与启动：构造 Model、注入依赖、启动 bubbletea program。
+// TUI 装配与分发：按模式选行内（inline）或全屏（app）入口。
+// Step 1 默认走行内；Step 3 加 config.TUI.Mode 选。
 package tui
 
 import (
@@ -14,13 +15,18 @@ import (
 	"aruing/internal/session"
 )
 
-// 输入框占用的终端行数（影响 viewport 可用高度）
+// 输入框占用的终端行数（仅 app 模式 viewport 高度计算用）
 const inputHeight = 3
 
-// 装配 Model 并启动 bubbletea program，阻塞至退出。
-// ctx 在 program 退出时由 defer cancel 触发，取消在途的 Turn 调用。
-// tuiCfg 提供主题（dark | light | auto），决定样式色表与 glamour 渲染风格。
+// Run 接收交互入口，按模式分发。Step 1 默认行内（pi 留痕风格）。
+// tuiCfg 提供主题与（Step 3 起）模式。
 func Run(ctx context.Context, svc *session.Service, sessionID, format string, out io.Writer, tuiCfg config.TUI) error {
+	// Step 3 接 config.TUI.Mode 选 app；本步默认行内
+	return inlineRun(ctx, svc, sessionID, format, tuiCfg.Theme, out)
+}
+
+// app 模式入口（bubbletea 全屏）：Step 3 在 config.TUI.Mode=="app" 时调用
+func appRun(ctx context.Context, svc *session.Service, sessionID, format string, out io.Writer, tuiCfg config.TUI) error { //nolint:unused // Step 3 在 config.TUI.Mode=="app" 时调用
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	p := tea.NewProgram(newModel(ctx, svc, sessionID, format, tuiCfg.Theme), tea.WithOutput(out))
@@ -29,7 +35,7 @@ func Run(ctx context.Context, svc *session.Service, sessionID, format string, ou
 }
 
 // 构造初始 Model：textarea 输入、viewport 历史、spinner 等待指示；按主题加载样式色表
-func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string) Model {
+func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string) Model { //nolint:unused // app 模式构造，随 appRun 在 Step 3 接入
 	st := loadStyles(tuiTheme)
 
 	ta := textarea.New()
@@ -48,7 +54,6 @@ func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiT
 	return Model{
 		svc:       svc,
 		sessionID: sessionID,
-		format:    format,
 		tuiTheme:  tuiTheme,
 		styles:    st,
 		input:     ta,
