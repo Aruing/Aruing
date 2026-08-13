@@ -131,7 +131,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
-	return m, nil
+	// 其它消息（如 textarea 内部的 BlinkMsg）转发输入组件，维持光标闪烁等内部循环
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
 }
 
 func (m Model) View() string {
