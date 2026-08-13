@@ -61,7 +61,7 @@
 | beta11 | 结构化工具输出（L0–L2） | ✅ | #65 `summary.go` 表格投影（文本表 + JSON Table + fallback + 大表标注）+ narrow-first `Spec`；beta10 harness smoke 通过 |
 | beta12 | 工具输出 L3 腿 A（大表中段可读） | ✅ | #66 三段式 Summary（列频次 + PCA 异常段 + 取值覆盖段）；`anomaly.go` one-hot + PCA + Hotelling T²；引入 gonum；core/agent 零改；Raw 不变 |
 | beta13 | 工具输出 L3 腿 B（普适证据导航） | ✅ | #67 `internal/tools/summary`；#68 `Slicer` + `evidence.read` + 轮内 `ObservationIndex` + k8s Slicer + `MaxStdoutBytes` 配置；core 零改 |
-| beta14 | 交互式 TUI + 启动 banner | ⏳ | arc《TUI》Step 1；charm 全家桶（bubbletea/lipgloss/bubbles/glamour）；banner 扩展 + 容错 + Markdown + 主题；新硬约束 #20；不触 §4 |
+| beta14 | 交互式 TUI + 启动 banner | ⏳ | #70 banner（Step 1 done）；Step 2 TUI 骨架（bubbletea/lipgloss/bubbles）进行中；Step 3 容错+Markdown+主题待；新硬约束 #20；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -69,7 +69,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta14`（交互式 TUI + 启动 banner）已启动。Step 1（banner 扩展）设计已起草（笔记 `plan/0.1.0-beta14/2026-8-13-banner.md`），待审；审过实现。Step 2（TUI 骨架）/ Step 3（容错 + Markdown + 主题）随后。维护者下次会话审 Step 1 设计。
+**下一项**：`0.1.0-beta14` Step 2（TUI 骨架）实现中——`internal/tui` 包（bubbletea inline + textarea + viewport + spinner + streaming buffer 预留）+ `chat` 交互模式接线。Step 1（banner）已 merged #70。Step 3（容错 + Markdown + 主题）随后。
 
 **0.1.0 候选**（beta14 之后）：
 
