@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"aruing/internal/config"
 	"aruing/internal/session"
 )
 
@@ -18,16 +19,19 @@ const inputHeight = 3
 
 // 装配 Model 并启动 bubbletea program，阻塞至退出。
 // ctx 在 program 退出时由 defer cancel 触发，取消在途的 Turn 调用。
-func Run(ctx context.Context, svc *session.Service, sessionID, format string, out io.Writer) error {
+// tuiCfg 提供主题（dark | light | auto），决定样式色表与 glamour 渲染风格。
+func Run(ctx context.Context, svc *session.Service, sessionID, format string, out io.Writer, tuiCfg config.TUI) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	p := tea.NewProgram(newModel(ctx, svc, sessionID, format), tea.WithOutput(out))
+	p := tea.NewProgram(newModel(ctx, svc, sessionID, format, tuiCfg.Theme), tea.WithOutput(out))
 	_, err := p.Run()
 	return err
 }
 
-// 构造初始 Model：textarea 输入、viewport 历史、spinner 等待指示
-func newModel(ctx context.Context, svc *session.Service, sessionID, format string) Model {
+// 构造初始 Model：textarea 输入、viewport 历史、spinner 等待指示；按主题加载样式色表
+func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string) Model {
+	st := loadStyles(tuiTheme)
+
 	ta := textarea.New()
 	ta.Prompt = "" // 提示符由 View 自绘，避免与输入框自身提示重复
 	ta.ShowLineNumbers = false
@@ -39,12 +43,14 @@ func newModel(ctx context.Context, svc *session.Service, sessionID, format strin
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = spinnerStyle
+	sp.Style = st.spinner
 
 	return Model{
 		svc:       svc,
 		sessionID: sessionID,
 		format:    format,
+		tuiTheme:  tuiTheme,
+		styles:    st,
 		input:     ta,
 		viewport:  vp,
 		spinner:   sp,

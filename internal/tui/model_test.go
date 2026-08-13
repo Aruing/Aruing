@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -14,19 +15,22 @@ import (
 
 var errBoom = errors.New("boom")
 
-// 测试用最小 Model：只装交互所需的组件，svc 留空（单测不执行 Turn cmd）
+// 测试用最小 Model：只装交互所需的组件，svc 留空（单测不执行 Turn cmd）；主题 dark
 func newTestModel() Model {
 	ta := textarea.New()
 	ta.Focus()
-	return Model{
+	m := Model{
 		input:    ta,
 		viewport: viewport.New(80, 10),
 		width:    80,
 		height:   24,
+		tuiTheme: "dark",
 	}
+	m.styles = loadStyles("dark")
+	return m
 }
 
-// turnMsg 成功：助手视图入历史，busy 清除
+// turnMsg 成功：助手视图入历史，busy 清除（md 为 nil 时降级返回原文）
 func TestUpdateTurnSuccess(t *testing.T) {
 	m := newTestModel()
 	m.busy = true
@@ -39,8 +43,11 @@ func TestUpdateTurnSuccess(t *testing.T) {
 	if um.busy {
 		t.Fatal("busy should clear after turn")
 	}
-	if len(um.messages) != 1 || um.messages[0].kind != "assistant" || um.messages[0].text != "hello" {
+	if len(um.messages) != 1 || um.messages[0].kind != "assistant" {
 		t.Fatalf("messages = %+v", um.messages)
+	}
+	if !strings.Contains(um.messages[0].text, "hello") {
+		t.Fatalf("assistant text = %q", um.messages[0].text)
 	}
 }
 
@@ -106,9 +113,13 @@ func TestUpdateCtrlCQuit(t *testing.T) {
 	}
 }
 
-// 诊断结果渲染为助手正文 + 报告两条视图
+// 诊断结果经 glamour 渲染为助手正文 + 报告两条视图
 func TestRenderAssistantDiagnostic(t *testing.T) {
-	views := renderAssistant(session.TurnResult{
+	r, err := newMarkdownRenderer("dark", 80)
+	if err != nil {
+		t.Fatalf("newMarkdownRenderer: %v", err)
+	}
+	views := renderAssistant(r, session.TurnResult{
 		AssistantMessage: session.Message{Content: "结论", Mode: session.ModeDiagnostic},
 		Report: &core.Report{
 			Title:       "T",
@@ -119,7 +130,33 @@ func TestRenderAssistantDiagnostic(t *testing.T) {
 	if len(views) != 2 {
 		t.Fatalf("want 2 views (content + report), got %d", len(views))
 	}
-	if views[0].text != "结论" {
+	if !strings.Contains(views[0].text, "结论") {
 		t.Fatalf("first view = %q", views[0].text)
+	}
+	if !strings.Contains(views[1].text, "T") || !strings.Contains(views[1].text, "supported") {
+		t.Fatalf("report view = %q", views[1].text)
+	}
+}
+
+// 主题归一：dark/light 透传；空/auto/未知落到 termenv 检测（dark 或 light）
+func TestResolveTheme(t *testing.T) {
+	for _, in := range []string{"dark", "light"} {
+		if got := resolveTheme(in); got != in {
+			t.Fatalf("resolveTheme(%q) = %q", in, got)
+		}
+	}
+	for _, in := range []string{"", "auto", "bogus"} {
+		if got := resolveTheme(in); got != "dark" && got != "light" {
+			t.Fatalf("resolveTheme(%q) = %q, want dark/light", in, got)
+		}
+	}
+}
+
+// dark 与 light 色表不同（可定制生效）
+func TestLoadStylesDiffersByTheme(t *testing.T) {
+	d := loadStyles("dark")
+	l := loadStyles("light")
+	if d.user.GetForeground() == l.user.GetForeground() {
+		t.Fatal("dark/light user foreground should differ")
 	}
 }

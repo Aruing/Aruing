@@ -252,7 +252,7 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	}
 
 	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回
-	return tui.Run(ctx, svc, sessionID, formatVal, stdout)
+	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI)
 }
 
 // 执行一轮会话并按约定写标准输出

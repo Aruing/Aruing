@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
 
 	"aruing/internal/core"
 	"aruing/internal/session"
@@ -42,6 +43,10 @@ type Model struct {
 	svc       *session.Service
 	sessionID string
 	format    string
+	tuiTheme  string // 配置主题（dark | light | auto）；空同 auto
+
+	styles styles
+	md     *glamour.TermRenderer // markdown 渲染器；WindowSizeMsg 到达后按宽度建
 
 	messages  []msgView
 	input     textarea.Model
@@ -75,6 +80,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Width = msg.Width
 		m.viewport.Height = vph
 		m.input.SetWidth(msg.Width)
+		// 终端尺寸已知后按主题 + 宽度建 markdown 渲染器
+		if r, err := newMarkdownRenderer(m.tuiTheme, msg.Width); err == nil {
+			m.md = r
+		}
 		return m, nil
 
 	case turnMsg:
@@ -82,7 +91,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.messages = append(m.messages, msgView{kind: "error", text: msg.err.Error()})
 		} else {
-			m.messages = append(m.messages, renderAssistant(msg.result)...)
+			m.messages = append(m.messages, renderAssistant(m.md, msg.result)...)
 		}
 		syncViewport(&m)
 		return m, nil
@@ -147,14 +156,14 @@ func (m Model) View() string {
 		b.WriteString("\n" + m.spinner.View() + " 思考中…")
 	}
 	if !m.streaming.empty() {
-		b.WriteString("\n" + assistantStyle.Render(m.streaming.view()))
+		b.WriteString("\n" + m.styles.assistant.Render(m.streaming.view()))
 	}
 	w := m.width
 	if w < 1 {
 		w = 1
 	}
-	b.WriteString("\n" + dividerStyle.Render(strings.Repeat("─", w)) + "\n")
-	b.WriteString(promptStyle.Render("❯ ") + m.input.View())
+	b.WriteString("\n" + m.styles.divider.Render(strings.Repeat("─", w)) + "\n")
+	b.WriteString(m.styles.prompt.Render("❯ ") + m.input.View())
 	return b.String()
 }
 
@@ -164,42 +173,42 @@ func syncViewport(m *Model) {
 	for _, mv := range m.messages {
 		switch mv.kind {
 		case "user":
-			b.WriteString(userStyle.Render("你 ") + mv.text + "\n")
+			b.WriteString(m.styles.user.Render("你 ") + mv.text + "\n")
 		case "assistant":
-			b.WriteString(assistantStyle.Render("aruing ") + mv.text + "\n")
+			b.WriteString(m.styles.assistant.Render("aruing ") + mv.text + "\n")
 		case "error":
-			b.WriteString(errorStyle.Render("错误 ") + mv.text + "\n")
+			b.WriteString(m.styles.err.Render("错误 ") + mv.text + "\n")
 		case "system":
-			b.WriteString(systemStyle.Render(mv.text) + "\n")
+			b.WriteString(m.styles.system.Render(mv.text) + "\n")
 		}
 	}
 	m.viewport.SetContent(b.String())
 	m.viewport.GotoBottom()
 }
 
-// 按 Mode 把一轮 Turn 结果渲染为消息视图（纯文本；Step 3 用 glamour 美化）
-func renderAssistant(r session.TurnResult) []msgView {
+// 用 markdown 渲染器把一轮 Turn 结果渲染为消息视图（正文 + 诊断报告）
+func renderAssistant(r *glamour.TermRenderer, res session.TurnResult) []msgView {
 	var views []msgView
-	if c := strings.TrimSpace(r.AssistantMessage.Content); c != "" {
-		views = append(views, msgView{kind: "assistant", text: c})
+	if c := strings.TrimSpace(res.AssistantMessage.Content); c != "" {
+		views = append(views, msgView{kind: "assistant", text: renderMarkdown(r, c)})
 	}
-	if r.Report != nil && r.AssistantMessage.Mode == session.ModeDiagnostic {
-		views = append(views, msgView{kind: "assistant", text: renderReportText(r.Report)})
+	if res.Report != nil && res.AssistantMessage.Mode == session.ModeDiagnostic {
+		views = append(views, msgView{kind: "assistant", text: renderMarkdown(r, reportMarkdown(res.Report))})
 	}
 	return views
 }
 
-// 诊断报告纯文本投影（Step 3 改 glamour Markdown）
-func renderReportText(rep *core.Report) string {
+// 把诊断报告组织成 markdown 文本，交 glamour 渲染
+func reportMarkdown(rep *core.Report) string {
 	var b strings.Builder
 	if rep.Title != "" {
-		b.WriteString("## " + rep.Title + "\n")
+		b.WriteString("## " + rep.Title + "\n\n")
 	}
 	if rep.Summary != "" {
-		b.WriteString(rep.Summary + "\n")
+		b.WriteString(rep.Summary + "\n\n")
 	}
 	for _, c := range rep.Conclusions {
-		fmt.Fprintf(&b, "- [%s] %s\n", c.Result, c.Reason)
+		fmt.Fprintf(&b, "- **[%s]** %s\n", c.Result, c.Reason)
 	}
 	return strings.TrimRight(b.String(), "\n")
 }

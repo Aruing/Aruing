@@ -23,6 +23,8 @@ type Config struct {
 	LLM LLM
 	// 集群工具相关路径
 	Tools Tools
+	// 终端交互主题（dark | light | auto）；空等同 auto
+	TUI TUI
 	// 是否输出基线塔与编排调试进度到标准错误（调试环境变量或命令行详细开关）
 	Debug bool
 }
@@ -55,12 +57,22 @@ type Tools struct {
 	MaxStdoutBytes int `yaml:"max_stdout_bytes"`
 }
 
+// 终端交互层主题配置
+//
+// Theme 取 dark | light | auto（默认 auto：按终端背景检测）；对应环境变量 ARUING_TUI_THEME
+type TUI struct {
+	// dark | light | auto；空视为 auto
+	Theme string `yaml:"theme"`
+}
+
 // 配置文件反序列化用的根形状，仅本包内部使用
 type fileConfig struct {
 	// 大模型访问参数段
 	LLM LLM `yaml:"llm"`
 	// 工具路径与诊断执行策略段
 	Tools Tools `yaml:"tools"`
+	// 终端交互主题段
+	TUI TUI `yaml:"tui"`
 	// 是否输出调试进度
 	Debug bool `yaml:"debug"`
 }
@@ -88,6 +100,7 @@ func LoadFrom(getenv func(string) string) Config {
 			AllowDiagnosticExec: parseBoolEnv(getenv("ARUING_ALLOW_DIAGNOSTIC_EXEC")),
 			MaxStdoutBytes:      parseIntEnv(getenv("ARUING_K8S_MAX_STDOUT_BYTES")),
 		},
+		TUI:   TUI{Theme: strings.TrimSpace(getenv("ARUING_TUI_THEME"))},
 		Debug: parseBoolEnv(getenv("ARUING_DEBUG")),
 	}
 }
@@ -126,6 +139,11 @@ func MergeEnvLookup(base Config, lookup func(string) (string, bool)) Config {
 	if v, ok := lookup("ARUING_K8S_MAX_STDOUT_BYTES"); ok {
 		if n := parseIntEnv(v); n > 0 {
 			out.Tools.MaxStdoutBytes = n
+		}
+	}
+	if v, ok := lookup("ARUING_TUI_THEME"); ok {
+		if t := strings.TrimSpace(v); t != "" {
+			out.TUI.Theme = t
 		}
 	}
 	if v, ok := lookup("ARUING_DEBUG"); ok {
