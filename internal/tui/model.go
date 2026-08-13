@@ -119,10 +119,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			svc := m.svc
 			sid := m.sessionID
 			ctx := m.ctx
-			return m, func() tea.Msg {
+			turn := func() tea.Msg {
 				result, err := svc.Turn(ctx, sid, text)
 				return turnMsg{result: result, err: err}
 			}
+			// 提交时重启 spinner tick：idle 时 tick 已停，busy 期间需持续动画
+			return m, tea.Batch(turn, m.spinner.Tick)
 		default:
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
