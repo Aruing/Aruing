@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +17,7 @@ import (
 	"aruing/internal/config"
 	"aruing/internal/core"
 	"aruing/internal/session"
+	"aruing/internal/tui"
 )
 
 // 对外展示的版本号，发布时应作为命令行输出的唯一来源
@@ -182,14 +182,14 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	return writeReport(stdout, *format, *outcome.Report, outcome.Evidence)
 }
 
-// 多轮入口：会话轮次加基线塔；无位置参数则从标准输入交互读行
+// 多轮入口：会话轮次加基线塔；无位置参数进入交互式 TUI
 // 必须配置大模型；进度与会话编号写标准错误，助手内容与诊断报告写标准输出
 func runChat(args []string, stdout, stderr io.Writer) error {
-	return runChatWith(args, stdout, stderr, os.Stdin)
+	return runChatWith(args, stdout, stderr)
 }
 
-// 与多轮入口相同，标准输入可注入便于测试
-func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error {
+// 与多轮入口相同；单句模式直接 Turn，交互模式进入 TUI
+func runChatWith(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("chat", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	sessionIDFlag := fs.String("session", "", "existing session id (omit to create a new session)")
@@ -251,28 +251,8 @@ func runChatWith(args []string, stdout, stderr io.Writer, stdin io.Reader) error
 		return chatTurn(ctx, svc, sessionID, question, formatVal, stdout)
 	}
 
-	// 交互：空行跳过；退出指令或文件结束时退出
-	scanner := bufio.NewScanner(stdin)
-	// 允许较长输入行（默认缓冲通常够用；略放大防极端粘贴）
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for {
-		if !scanner.Scan() {
-			if err := scanner.Err(); err != nil {
-				return fmt.Errorf("read input: %w", err)
-			}
-			return nil
-		}
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		if line == "exit" || line == "quit" {
-			return nil
-		}
-		if err := chatTurn(ctx, svc, sessionID, line, formatVal, stdout); err != nil {
-			return err
-		}
-	}
+	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回
+	return tui.Run(ctx, svc, sessionID, formatVal, stdout)
 }
 
 // 执行一轮会话并按约定写标准输出

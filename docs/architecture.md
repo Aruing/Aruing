@@ -46,6 +46,7 @@ flowchart LR
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
 | `internal/session` | 用户侧多轮壳：`Session` / `Message`、`Store`、`RunLedger` / `DiagnosticRecord`、`Service.Turn`、`Responder`（`RespondOutput.CheckpointContent` 可选）、`RunExecutor`（返 `Outcome`）、可选 `SuspendedRunner`（`Resume` / `FindSuspended`）、`Escalate`（建 Run + Execute，完成写 `RunLedger`，挂起返 `ModeClarify`）、`Resume`（注入答复恢复挂起 Run）；脚手架 Echo / Diagnose；Turn 在 assistant 前写入 `ModeCheckpoint` | Message 不嵌证据链、不替代 Orchestrator；不实现 LLM Tower / L2 摘要（在 agent）；CLI 经 `aruing chat` 接入 |
+| `internal/tui` | 终端交互层：bubbletea Elm 架构（Model/Update/View），`chat` 交互模式的输入框 + 消息历史 + spinner；纯展示层，事实来自 `session.Turn`（守 #20）；streaming buffer 为流式留位；样式经 lipgloss token（Step 3 配置化） | 不持有业务事实、不假装 Evidence/Verdict；不做流式（arc《流式响应》）；不接诊断 core/编排 |
 | `internal/store` | 持久化实现：`MemoryStore`（会话与消息）、`MemoryRunLedger`（正式诊断 Report+Evidence）；接口由使用方定义（`session.Store` / `session.RunLedger`） | 不定义业务接口；进程退出即丢；非磁盘持久化 |
 | `internal/graph` | 流程编排状态机（占位） | 当前未用；线性诊断仍由 `Orchestrator`；跨阶段挂起时再承接 |
 | `internal/config` | 进程级配置：可选 YAML（`LoadFile` / `ResolveConfigPath` / `LoadResolved`）+ env（`ARUING_*`）覆盖 + CLI 再盖（如 `--verbose`）；字段含 `LLM`（BaseURL/APIKey/Model）、`Tools`（KubectlPath / AllowDiagnosticExec / MaxStdoutBytes / MaxStderrBytes）、`Debug`；`ValidateLLM` / `LLM.Ready` / `ToClientConfig`；路径链：`--config` → `ARUING_CONFIG` → `playground/config.yaml` → 用户级 → 系统级 | 不热更新、不读 `.env` 文件本身（Make 可 inject env）；不 deep-merge 多文件 |
