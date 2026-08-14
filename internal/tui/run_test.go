@@ -25,9 +25,14 @@ func TestRunDispatch(t *testing.T) {
 		t.Fatalf("explicit inline err = %v", err)
 	}
 
-	// app：不应是行内的 tty 错误（bubbletea 自行处理非 tty）
+	// app：应报 app 自己的 tty 错误（证明分发走了 appRun 而非 inlineRun）
 	err = Run(ctx, nil, "s", "markdown", &bytes.Buffer{}, config.TUI{Mode: "app"})
-	if err != nil && strings.Contains(err.Error(), "requires a terminal") {
-		t.Fatalf("app dispatch hit inline path: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "app UI requires a terminal") {
+		t.Fatalf("app dispatch err = %v, want app UI requires a terminal", err)
+	}
+	// 未知值按 inline
+	err = Run(ctx, nil, "s", "markdown", &bytes.Buffer{}, config.TUI{Mode: "bogus"})
+	if err == nil || !strings.Contains(err.Error(), "inline chat requires a terminal") {
+		t.Fatalf("bogus mode should fall back to inline, err = %v", err)
 	}
 }
