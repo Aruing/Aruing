@@ -41,7 +41,9 @@ func appRun(ctx context.Context, svc *session.Service, sessionID, format string,
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	p := tea.NewProgram(newModel(ctx, svc, sessionID, format, tuiCfg.Theme), tea.WithInput(os.Stdin), tea.WithOutput(out))
+	// 全屏模式渲染直写真终端（os.Stdout）并接管 alt-screen：传入的 out 可能是
+	// 缓冲/管道（CLI 测试注入），在非 tty 输出上 bubbletea 渲染不生效会表现为卡死
+	p := tea.NewProgram(newModel(ctx, svc, sessionID, format, tuiCfg.Theme), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen())
 	_, err := p.Run()
 	if err != nil {
 		return fmt.Errorf("app UI failed to start (needs an interactive terminal): %w", err)
