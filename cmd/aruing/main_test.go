@@ -268,3 +268,13 @@ func emptyConfigPath(t *testing.T) string {
 	t.Setenv("ARUING_CONFIG", path)
 	return path
 }
+
+// --ui 非法值应明确报错（在组装前校验）
+func TestChatBadUIMode(t *testing.T) {
+	clearLLMEnv(t)
+	var stdout, stderr bytes.Buffer
+	err := dispatch([]string{"chat", "--ui", "bogus", "hello"}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "unknown ui mode") {
+		t.Fatalf("err = %v, want unknown ui mode", err)
+	}
+}

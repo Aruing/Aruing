@@ -57,12 +57,15 @@ type Tools struct {
 	MaxStdoutBytes int `yaml:"max_stdout_bytes"`
 }
 
-// 终端交互层主题配置
+// 终端交互层配置
 //
 // Theme 取 dark | light | auto（默认 auto：按终端背景检测）；对应环境变量 ARUING_TUI_THEME
+// Mode 取 inline | app（默认 inline：行内留痕；app 为 bubbletea 全屏）；对应环境变量 ARUING_TUI_MODE
 type TUI struct {
 	// dark | light | auto；空视为 auto
 	Theme string `yaml:"theme"`
+	// inline | app；空或未知值按 inline 处理
+	Mode string `yaml:"mode"`
 }
 
 // 配置文件反序列化用的根形状，仅本包内部使用
@@ -100,7 +103,10 @@ func LoadFrom(getenv func(string) string) Config {
 			AllowDiagnosticExec: parseBoolEnv(getenv("ARUING_ALLOW_DIAGNOSTIC_EXEC")),
 			MaxStdoutBytes:      parseIntEnv(getenv("ARUING_K8S_MAX_STDOUT_BYTES")),
 		},
-		TUI:   TUI{Theme: strings.TrimSpace(getenv("ARUING_TUI_THEME"))},
+		TUI: TUI{
+			Theme: strings.TrimSpace(getenv("ARUING_TUI_THEME")),
+			Mode:  strings.TrimSpace(getenv("ARUING_TUI_MODE")),
+		},
 		Debug: parseBoolEnv(getenv("ARUING_DEBUG")),
 	}
 }
@@ -144,6 +150,11 @@ func MergeEnvLookup(base Config, lookup func(string) (string, bool)) Config {
 	if v, ok := lookup("ARUING_TUI_THEME"); ok {
 		if t := strings.TrimSpace(v); t != "" {
 			out.TUI.Theme = t
+		}
+	}
+	if v, ok := lookup("ARUING_TUI_MODE"); ok {
+		if t := strings.TrimSpace(v); t != "" {
+			out.TUI.Mode = t
 		}
 	}
 	if v, ok := lookup("ARUING_DEBUG"); ok {

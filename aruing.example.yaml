@@ -21,10 +21,12 @@ tools:
   # Env: ARUING_K8S_MAX_STDOUT_BYTES
   max_stdout_bytes: 0
 
-# Terminal UI theme for `aruing chat`: dark | light | auto (auto detects terminal
-# background). Env: ARUING_TUI_THEME
+# Terminal UI for `aruing chat`: theme dark | light | auto (auto detects terminal
+# background), mode inline | app (inline = scrollback-style chat, app = fullscreen).
+# Env: ARUING_TUI_THEME / ARUING_TUI_MODE; CLI: --ui inline|app overrides mode.
 tui:
   theme: auto
+  mode: inline
 
 # Print Tower / orchestrator progress to stderr (same as ARUING_DEBUG=1 / --verbose)
 debug: false
