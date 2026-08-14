@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"aruing/internal/session"
 )
 
 // 续行符判断：单个 \ 结尾续行，双 \\ 字面反斜杠
@@ -91,5 +93,49 @@ func TestConsumeSoft(t *testing.T) {
 	}
 	if n.consumeSoft() {
 		t.Fatal("third consumeSoft should be false")
+	}
+}
+
+// 轮间分割线：空行 + 水平线 + 空行结构；宽度自适应与非法回退
+func TestRenderMessageDivider(t *testing.T) {
+	st := loadStyles("dark")
+
+	var b strings.Builder
+	renderMessageDivider(&b, st, 10)
+	got := b.String()
+	// 结构：空行 + 满宽水平线 + 空行（首尾各一个换行，线后留空行）
+	if !strings.HasPrefix(got, "\n") || !strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("want blank/line/blank structure, got %q", got)
+	}
+	if !strings.Contains(got, strings.Repeat("─", 10)) {
+		t.Fatalf("divider line missing in %q", got)
+	}
+
+	// 非法宽度回退 80
+	b.Reset()
+	renderMessageDivider(&b, st, 0)
+	if !strings.Contains(b.String(), strings.Repeat("─", 80)) {
+		t.Fatal("width<=0 should fall back to 80")
+	}
+}
+
+// 行内 markdown：有 renderer 时输出含 glamour 样式（非降级原文）
+func TestInlineMarkdownRendered(t *testing.T) {
+	r, err := newMarkdownRenderer("dark", 80)
+	if err != nil {
+		t.Fatalf("newMarkdownRenderer: %v", err)
+	}
+	views := renderAssistant(r, session.TurnResult{
+		AssistantMessage: session.Message{Content: "# 标题", Mode: session.ModeBaseline},
+	})
+	if len(views) != 1 {
+		t.Fatalf("views = %d", len(views))
+	}
+	if !strings.Contains(views[0].text, "标题") {
+		t.Fatalf("rendered = %q", views[0].text)
+	}
+	// 降级原文（纯文本）不含 ANSI 转义序列；渲染后应含
+	if !strings.Contains(views[0].text, "\x1b[") {
+		t.Fatalf("expected glamour ANSI styling, got %q", views[0].text)
 	}
 }
