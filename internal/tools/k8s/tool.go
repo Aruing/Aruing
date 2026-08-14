@@ -124,8 +124,10 @@ func (t *Tool) Spec() tools.ToolSpec {
 	}
 }
 
-// 从本工具写入的 evidence.Raw（resultRaw）中切出表格一页
-// 仅支持 exitCode=0 且可解析为 JSON Table 或文本表的 stdout；否则返回错误
+// 从本工具写入的 evidence.Raw（resultRaw）中切出原文的一页
+// 解析顺序：JSON Table → 文本表 → 行级兜底；仅 exitCode=0 且 stdout 非空可切，否则返回错误
+// 行级兜底服务 describe/logs/events 等非表格输出：stdout 按行拆为单列，空行保留（分段有结构意义），
+// Columns 为 nil 表示非表格，由调用方走行渲染；纯机械投影，不解释行内容（#16/#19）
 func (t *Tool) Slice(raw []byte, q tools.SliceQuery) (tools.SliceView, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return tools.SliceView{}, errors.New("empty raw")
@@ -145,7 +147,7 @@ func (t *Tool) Slice(raw []byte, q tools.SliceQuery) (tools.SliceView, error) {
 	var ok bool
 	if proj, ok = parseJSONTable(stdout); !ok {
 		if proj, ok = parseTextTable(stdout); !ok {
-			return tools.SliceView{}, errors.New("stdout is not a tabular projection")
+			return sliceTextLines(stdout, q)
 		}
 	}
 	cols, rows, total, offset, limit := summary.SliceRows(proj.columns, proj.rows, q.Offset, q.Limit)
@@ -155,6 +157,24 @@ func (t *Tool) Slice(raw []byte, q tools.SliceQuery) (tools.SliceView, error) {
 		Limit:   limit,
 		Columns: cols,
 		Rows:    rows,
+	}, nil
+}
+
+// 行级兜底切片：stdout 按行拆为单列（含空行），交给共享翻页 helper 开窗
+// 行数按物理行计（去尾部换行），与 evidence.read 返回的 total 一致，模型可据此定位窗口
+func sliceTextLines(stdout string, q tools.SliceQuery) (tools.SliceView, error) {
+	lines := strings.Split(strings.TrimRight(stdout, "\r\n"), "\n")
+	rows := make([][]string, len(lines))
+	for i, line := range lines {
+		rows[i] = []string{line}
+	}
+	cols, page, total, offset, limit := summary.SliceRows(nil, rows, q.Offset, q.Limit)
+	return tools.SliceView{
+		Total:   total,
+		Offset:  offset,
+		Limit:   limit,
+		Columns: cols,
+		Rows:    page,
 	}, nil
 }
 

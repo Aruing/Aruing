@@ -42,7 +42,7 @@ flowchart LR
 | `internal/llm` | OpenAI 兼容协议客户端，发 prompt 收 JSON / 文本 | 不感知 prompt 内容与组装 |
 | `internal/tools` | `Tool` / `ToolSpec`、`Registry`（含 `Specs`）、`Dispatcher`、`Policy`（`ReadonlyPolicy` / `DiagnosticPolicy` / `AllowAll`）、可选 `Slicer`（`Slice`/`SliceQuery`/`SliceView`）、轮内 `ObservationIndex`、`evidence.read` 导航工具、`FakeListPodsTool`；按后端粒度注册，暴露 JSON Schema；执行前经 Policy 授权 | 不判断业务、不做推理、不枚举资源类型；不解析各后端 stdout 格式（归后端包） |
 | `internal/tools/summary` | 工具无关表格投影/导航：大表 Render（列频次 + PCA 异常段 + 取值覆盖）、`SliceRows` 行级 offset/limit | 不调后端、不解析 kubectl/JSON 专属格式、不做业务判断 |
-| `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；解析 stdout 为表后调 `summary` 投影；实现 `Slicer`（表格可切片，describe/logs 不可）；Evidence 记录 exitCode/stdout/stderr；`MaxStdoutBytes` 可配 | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
+| `internal/tools/k8s` | 后端级 `k8s` 工具：shell-less 结构化 argv 调用 kubectl；解析 stdout 为表后调 `summary` 投影；实现 `Slicer`（表格按行/列切片，describe/logs/events 等非表格输出行级兜底切片，Columns 为空）；Evidence 记录 exitCode/stdout/stderr；`MaxStdoutBytes` 可配 | 不内置读写唯一真相（由 `Policy` 白名单）；主编排 wiring 在 kubectl 可用时可选注册 |
 | `internal/tools/prometheus` | 指标查询（占位） | 当前未实现 |
 | `internal/tools/loki` | 集中日志（占位） | 当前未实现 |
 | `internal/session` | 用户侧多轮壳：`Session` / `Message`、`Store`、`RunLedger` / `DiagnosticRecord`、`Service.Turn`、`Responder`（`RespondOutput.CheckpointContent` 可选）、`RunExecutor`（返 `Outcome`）、可选 `SuspendedRunner`（`Resume` / `FindSuspended`）、`Escalate`（建 Run + Execute，完成写 `RunLedger`，挂起返 `ModeClarify`）、`Resume`（注入答复恢复挂起 Run）；脚手架 Echo / Diagnose；Turn 在 assistant 前写入 `ModeCheckpoint` | Message 不嵌证据链、不替代 Orchestrator；不实现 LLM Tower / L2 摘要（在 agent）；CLI 经 `aruing chat` 接入 |

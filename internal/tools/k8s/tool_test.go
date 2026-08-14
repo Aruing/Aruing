@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -387,16 +388,54 @@ func TestToolSliceTextTable(t *testing.T) {
 	}
 }
 
-// 非表格 stdout 不可切片
-func TestToolSliceRejectsNonTable(t *testing.T) {
+// 非表格 stdout 走行级兜底：按物理行切片，空行保留，Columns 为空表示非表格
+func TestToolSliceTextLines(t *testing.T) {
 	tool := mustNewTool(t, Config{})
 	raw, _ := json.Marshal(resultRaw{
 		ExitCode: 0,
-		Stdout:   "just some free text without columns",
+		Stdout:   "Name: demo-api\nNamespace: demo\n\nEvents:\n  Back-off\n",
 	})
-	_, err := tool.Slice(raw, tools.SliceQuery{Offset: 0, Limit: 10})
-	if err == nil {
-		t.Fatal("expected non-table error")
+	view, err := tool.Slice(raw, tools.SliceQuery{Offset: 2, Limit: 2})
+	if err != nil {
+		t.Fatalf("slice: %v", err)
+	}
+	// 物理行共 5 行（含空行），窗口从第 2 行起
+	if view.Total != 5 || view.Offset != 2 || len(view.Rows) != 2 {
+		t.Fatalf("view: %#v", view)
+	}
+	if len(view.Columns) != 0 {
+		t.Fatalf("want nil columns for non-table, got %#v", view.Columns)
+	}
+	if view.Rows[0][0] != "" || view.Rows[1][0] != "Events:" {
+		t.Fatalf("rows: %#v", view.Rows)
+	}
+}
+
+// 行级兜底的窗口饱和与越界：limit 钳到硬顶，offset 越界返回空页但 total 正确
+func TestToolSliceTextLinesBounds(t *testing.T) {
+	tool := mustNewTool(t, Config{})
+	stdout := make([]string, 250)
+	for i := range stdout {
+		stdout[i] = fmt.Sprintf("line-%03d", i)
+	}
+	raw, _ := json.Marshal(resultRaw{ExitCode: 0, Stdout: strings.Join(stdout, "\n") + "\n"})
+
+	// limit 超硬顶时钳到 200
+	view, err := tool.Slice(raw, tools.SliceQuery{Offset: 0, Limit: 300})
+	if err != nil {
+		t.Fatalf("slice: %v", err)
+	}
+	if view.Limit != 200 || len(view.Rows) != 200 {
+		t.Fatalf("clamped limit: limit=%d rows=%d", view.Limit, len(view.Rows))
+	}
+
+	// offset 越界返回空页，total 仍为全量行数
+	view, err = tool.Slice(raw, tools.SliceQuery{Offset: 400, Limit: 10})
+	if err != nil {
+		t.Fatalf("slice: %v", err)
+	}
+	if view.Total != 250 || len(view.Rows) != 0 {
+		t.Fatalf("out-of-range: total=%d rows=%d", view.Total, len(view.Rows))
 	}
 }
 
