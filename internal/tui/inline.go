@@ -54,16 +54,11 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	}
 	defer rl.Close()
 
-	// 按终端宽建一次 markdown 渲染器（与 app 模式同源）；取不到宽用默认 80
-	width := 80
-	if w, _, szErr := term.GetSize(int(os.Stdout.Fd())); szErr == nil && w > 0 {
-		width = w
-	}
-	md, err := newMarkdownRenderer(tuiTheme, width)
-	if err != nil {
-		// 渲染器建不起来（理论不可达）：降级 nil，renderMarkdown 返回原文
-		md = nil //nolint:staticcheck // 降级是有意的
-	}
+	// 终端宽度与 markdown 渲染器：每轮提交时重取宽度（ioctl 开销可忽略），
+	// 宽度变了才重建 renderer（重建需解析 style 配置，毫秒级，仅在变化时付）。
+	// 这样会话中途调整终端宽，markdown 换行宽与 divider 宽都能自适应
+	width := terminalWidth()
+	md := buildRenderer(tuiTheme, width)
 
 	// 一次性交互提示（系统样式，留痕）
 	fmt.Fprintln(out, st.system.Render("多行输入：shift+enter / option+enter（终端支持时）/ 行尾 \\ + 回车；exit / Ctrl+D 退出"))
@@ -81,6 +76,11 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		}
 		if text == "exit" || text == "quit" {
 			return nil
+		}
+		// 每轮重取终端宽：变了则重建 renderer，后续 divider 与 markdown 都用新宽
+		if w := terminalWidth(); w != width {
+			width = w
+			md = buildRenderer(tuiTheme, width)
 		}
 		// readline 提交后输入行（prompt + 内容）天然留在终端，不重复打印用户消息
 		waitTurn(ctx, out, st, md, svc, sessionID, text)
@@ -168,6 +168,23 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 			return
 		}
 	}
+}
+
+// 取当前终端宽；取不到（非 tty 等）回退 80
+func terminalWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return 80
+}
+
+// 按主题与宽建 markdown 渲染器；建不起来（理论不可达）降级 nil，renderMarkdown 返回原文
+func buildRenderer(tuiTheme string, width int) *glamour.TermRenderer {
+	md, err := newMarkdownRenderer(tuiTheme, width)
+	if err != nil {
+		return nil //nolint:staticcheck // 降级是有意的
+	}
+	return md
 }
 
 // 需要翻译成换行的按键序列：终端启用扩展键盘协议后才可区分
