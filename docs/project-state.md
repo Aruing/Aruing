@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-14（**`0.1.0-beta15`**：Step 1 #73 + Step 2 #74 已 merged，Step 3（`--ui` 模式切换）实现中——beta15 收官步。前序：beta14 已归档）
+> 最后更新：2026-08-14（**`0.1.0-beta15` 已归档**：行内 TUI 双模式 #73/#74/#76 + hotfix；历程《行内 TUI 与双模式》。**下一步重开候选窗口**。前序：beta14 已归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta15` / 行内 TUI（pi 留痕风格）+ 双模式** ⏳ 进行中：Step 1 #73 行内引擎（自写 readline 多行重绘错位 → 改 **ergochat/readline**；shift+enter 软换行经 modifyOtherKeys + 序列翻译，`\` 续行兑底；非 tty 明确报错；toolchain 钉 go1.26.6 清标准库 CVE）；Step 2 #74 轮间 divider + glamour markdown + 每轮重取终端宽；Step 3：`config.TUI.Mode` + `--ui` 选模式，默认 inline，app（bubbletea）接选。
+**`0.1.0-beta15` / 行内 TUI（pi 留痕风格）+ 双模式** ✅ 完成并归档（2026-08-14；#73 行内引擎（自写翻车→ ergochat/readline + shift+enter 软换行）；#74 轮间 divider + glamour + 每轮自适应宽；#76 `--ui`/`tui.mode` 双模式接选 + app 模式 tty 预检/AltScreen/渲染绑真终端 hotfix ×2；toolchain go1.26.6 清标准库 CVE）。历程《行内 TUI 与双模式》。plan 在 `plan/archive/0.1.0-beta15/`。
 
 **`0.1.0-beta14` / 交互式 TUI + 启动 banner** ✅ 完成并归档（2026-08-13；#70 banner + #71 TUI 骨架+容错 + #72 glamour markdown+主题；新硬约束 #20；历程《交互式终端与可定制主题基础》《为流式留位》）。plan 在 `plan/archive/0.1.0-beta14/`。
 
@@ -64,7 +64,7 @@
 | beta12 | 工具输出 L3 腿 A（大表中段可读） | ✅ | #66 三段式 Summary（列频次 + PCA 异常段 + 取值覆盖段）；`anomaly.go` one-hot + PCA + Hotelling T²；引入 gonum；core/agent 零改；Raw 不变 |
 | beta13 | 工具输出 L3 腿 B（普适证据导航） | ✅ | #67 `internal/tools/summary`；#68 `Slicer` + `evidence.read` + 轮内 `ObservationIndex` + k8s Slicer + `MaxStdoutBytes` 配置；core 零改 |
 | beta14 | 交互式 TUI + 启动 banner | ✅ | #70 banner + #71 TUI 骨架+容错 + #72 markdown+主题；新硬约束 #20；不触 §4 |
-| beta15 | 行内 TUI + 双模式 | ⏳ | #73 Step 1（ergochat/readline + 软换行 + 容错）；#74 Step 2（divider + glamour + 每轮自适应宽）；Step 3（--ui 模式切换）实现中；不触 §4 |
+| beta15 | 行内 TUI + 双模式 | ✅ | #73（ergochat/readline + 软换行 + 容错）；#74（divider + glamour + 每轮自适应宽）；#76（--ui 双模式 + hotfix）；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -72,7 +72,16 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta15` Step 3（`--ui` 模式切换）实现中——beta15 收官步；完成后关里程碑归档并蒸馏历程。Step 1 #73、Step 2 #74 已 merged。
+**下一项**：**重开候选窗口**——beta15 已归档（行内 TUI 双模式交付）。维护者下次会话先定方向。
+
+**0.1.0 候选**（重开后选择）：
+
+1. **logs / events 时间游标**（arc《工具输出导航》3b 残留；`SliceQuery` 已留位）
+2. **磁盘持久化 / 超巨输出页式**（0.2+ 或重开远景；arc《TUI》缺口同批解）
+3. **TUI 布局可配（L4）/ 完整主题 YAML**（arc《TUI》Step 2）
+4. **流式响应**（arc《流式响应》，0.2+；前端 streamingBuffer 已留位）
+5. **`/` 运行时命令（/mode /theme 热切）**（延后项，版本未定）
+6. 后续阶段挂起（investigate / parse 复用 `Suspension`）
 
 **0.1.0 候选**（beta14 之后）：
 
