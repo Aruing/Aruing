@@ -37,6 +37,11 @@ var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 // 行内模式入口：readline 循环 + Turn 等待（spinner）+ 助手留痕 + 容错
 func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string, out io.Writer) error {
 	st := loadStyles(tuiTheme)
+	// 行内引擎逐键读取依赖 raw mode：非 tty（管道 / 脚本）明确报错不降级；
+	// 无人值守场景应用单句模式（chat "问题"，一次 Turn 后退出）
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return fmt.Errorf("inline chat requires a terminal (for non-interactive use: aruing chat \"question\")")
+	}
 	// 启用 modifyOtherKeys：让支持的终端对 shift+enter 上报独立序列（不支持的终端忽略此序列）
 	fmt.Fprint(out, modifyOtherKeysOn)
 	defer fmt.Fprint(out, modifyOtherKeysOff)

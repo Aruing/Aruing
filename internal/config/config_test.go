@@ -305,3 +305,32 @@ llm:
 		t.Fatal("want ValidateLLM error without LLM")
 	}
 }
+
+// TUI.Mode 随环境变量加载与覆盖；空值默认
+func TestTUIModeEnv(t *testing.T) {
+	cfg := LoadFrom(func(k string) string {
+		if k == "ARUING_TUI_MODE" {
+			return "app"
+		}
+		return ""
+	})
+	if cfg.TUI.Mode != "app" {
+		t.Fatalf("Mode = %q, want app", cfg.TUI.Mode)
+	}
+
+	// MergeEnvLookup 覆盖基底
+	merged := MergeEnvLookup(Config{}, func(k string) (string, bool) {
+		if k == "ARUING_TUI_MODE" {
+			return "inline", true
+		}
+		return "", false
+	})
+	if merged.TUI.Mode != "inline" {
+		t.Fatalf("merged Mode = %q, want inline", merged.TUI.Mode)
+	}
+
+	// 空 = 默认（零值）
+	if (LoadFrom(nil)).TUI.Mode != "" {
+		t.Fatal("default Mode should be empty")
+	}
+}

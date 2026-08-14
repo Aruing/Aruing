@@ -1,0 +1,33 @@
+package tui
+
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+
+	"aruing/internal/config"
+)
+
+// Run 按模式分发：app 走 bubbletea 全屏；inline/空走行内（非 tty 下报明确错误证明走了行内）
+func TestRunDispatch(t *testing.T) {
+	ctx := context.Background()
+
+	// inline（默认）：非 tty 无 svc 时应先撞到行内入口的 tty 检查
+	err := Run(ctx, nil, "s", "markdown", &bytes.Buffer{}, config.TUI{})
+	if err == nil || !strings.Contains(err.Error(), "requires a terminal") {
+		t.Fatalf("inline dispatch err = %v, want requires a terminal", err)
+	}
+
+	// 显式 inline 同上
+	err = Run(ctx, nil, "s", "markdown", &bytes.Buffer{}, config.TUI{Mode: "inline"})
+	if err == nil || !strings.Contains(err.Error(), "requires a terminal") {
+		t.Fatalf("explicit inline err = %v", err)
+	}
+
+	// app：不应是行内的 tty 错误（bubbletea 自行处理非 tty）
+	err = Run(ctx, nil, "s", "markdown", &bytes.Buffer{}, config.TUI{Mode: "app"})
+	if err != nil && strings.Contains(err.Error(), "requires a terminal") {
+		t.Fatalf("app dispatch hit inline path: %v", err)
+	}
+}

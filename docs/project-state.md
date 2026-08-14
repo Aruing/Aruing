@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-13（**`0.1.0-beta15` 启动**：行内 TUI（pi 留痕）+ 双模式。前序：`0.1.0-beta14` 已归档 #70+#71+#72 交互式 TUI+主题）
+> 最后更新：2026-08-14（**`0.1.0-beta15`**：Step 1 #73 + Step 2 #74 已 merged，Step 3（`--ui` 模式切换）实现中——beta15 收官步。前序：beta14 已归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta15` / 行内 TUI（pi 留痕风格）+ 双模式** ⏳ 进行中（2026-08-13 启动）：beta14 bubbletea 全屏模式实测非留痕、IM 不跟随、无多行；自写行内 inline 引擎（readline + 留痕 + 底部输入框 + 多行 + spinner + 容错），保留 app（bubbletea）为可选（Step 3 接 `config.TUI.Mode`）。
+**`0.1.0-beta15` / 行内 TUI（pi 留痕风格）+ 双模式** ⏳ 进行中：Step 1 #73 行内引擎（自写 readline 多行重绘错位 → 改 **ergochat/readline**；shift+enter 软换行经 modifyOtherKeys + 序列翻译，`\` 续行兑底；非 tty 明确报错；toolchain 钉 go1.26.6 清标准库 CVE）；Step 2 #74 轮间 divider + glamour markdown + 每轮重取终端宽；Step 3：`config.TUI.Mode` + `--ui` 选模式，默认 inline，app（bubbletea）接选。
 
 **`0.1.0-beta14` / 交互式 TUI + 启动 banner** ✅ 完成并归档（2026-08-13；#70 banner + #71 TUI 骨架+容错 + #72 glamour markdown+主题；新硬约束 #20；历程《交互式终端与可定制主题基础》《为流式留位》）。plan 在 `plan/archive/0.1.0-beta14/`。
 
@@ -64,7 +64,7 @@
 | beta12 | 工具输出 L3 腿 A（大表中段可读） | ✅ | #66 三段式 Summary（列频次 + PCA 异常段 + 取值覆盖段）；`anomaly.go` one-hot + PCA + Hotelling T²；引入 gonum；core/agent 零改；Raw 不变 |
 | beta13 | 工具输出 L3 腿 B（普适证据导航） | ✅ | #67 `internal/tools/summary`；#68 `Slicer` + `evidence.read` + 轮内 `ObservationIndex` + k8s Slicer + `MaxStdoutBytes` 配置；core 零改 |
 | beta14 | 交互式 TUI + 启动 banner | ✅ | #70 banner + #71 TUI 骨架+容错 + #72 markdown+主题；新硬约束 #20；不触 §4 |
-| beta15 | 行内 TUI + 双模式 | ⏳ | Step 1 行内骨架（自写 readline + 留痕 + 多行 + 容错）；Step 2 分割线+主题+markdown 共享；Step 3 配置模式切换；不触 §4 |
+| beta15 | 行内 TUI + 双模式 | ⏳ | #73 Step 1（ergochat/readline + 软换行 + 容错）；#74 Step 2（divider + glamour + 每轮自适应宽）；Step 3（--ui 模式切换）实现中；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -72,7 +72,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.0-beta15` Step 1（行内 TUI 骨架）实现中——自写 readline + 留痕 + 底部输入框 + 多行（shift+enter/ctrl+j）+ 容错。beta14 已归档。Step 2 分割线+markdown+主题共享，Step 3 配置模式切换。
+**下一项**：`0.1.0-beta15` Step 3（`--ui` 模式切换）实现中——beta15 收官步；完成后关里程碑归档并蒸馏历程。Step 1 #73、Step 2 #74 已 merged。
 
 **0.1.0 候选**（beta14 之后）：
 

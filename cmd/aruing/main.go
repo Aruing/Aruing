@@ -196,6 +196,7 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	format := fs.String("format", "markdown", "diagnostic report format: markdown|json (baseline is always plain text)")
 	configPath := fs.String("config", "", "path to config YAML (or ARUING_CONFIG / search paths)")
 	verbose := fs.Bool("verbose", false, "print Tower debug progress to stderr (same as ARUING_DEBUG=1)")
+	uiMode := fs.String("ui", "", "interactive chat UI: inline|app (overrides tui.mode config; default inline)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: aruing chat [flags] [question]")
 		fmt.Fprintln(stderr, "")
@@ -217,6 +218,10 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	default:
 		return fmt.Errorf("unknown format %q: use markdown or json", formatVal)
 	}
+	// 交互模式值校验提前失败（覆盖 cfg 在加载后做）
+	if m := strings.TrimSpace(*uiMode); m != "" && m != "inline" && m != "app" {
+		return fmt.Errorf("unknown ui mode %q: use inline or app", m)
+	}
 
 	cfg, usedPath, err := config.LoadResolved(*configPath)
 	if err != nil {
@@ -224,6 +229,10 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	}
 	if *verbose {
 		cfg.Debug = true
+	}
+	// --ui 非空时覆盖配置的模式（与 --verbose 覆盖 Debug 同模式）；仅影响交互模式
+	if m := strings.TrimSpace(*uiMode); m != "" {
+		cfg.TUI.Mode = m
 	}
 	// 会话开始前打印生效配置来源、模型与 k8s 连接信息，便于确认覆盖结果与集群归属
 	ci := resolveCluster(context.Background(), cfg.Tools, defaultKubectlContext)
