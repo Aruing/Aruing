@@ -15,7 +15,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/ergochat/readline"
+	"golang.org/x/term"
 
 	"aruing/internal/session"
 )
@@ -52,6 +54,12 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	}
 	defer rl.Close()
 
+	// 终端宽度与 markdown 渲染器：每轮提交时重取宽度（ioctl 开销可忽略），
+	// 宽度变了才重建 renderer（重建需解析 style 配置，毫秒级，仅在变化时付）。
+	// 这样会话中途调整终端宽，markdown 换行宽与 divider 宽都能自适应
+	width := terminalWidth()
+	md := buildRenderer(tuiTheme, width)
+
 	// 一次性交互提示（系统样式，留痕）
 	fmt.Fprintln(out, st.system.Render("多行输入：shift+enter / option+enter（终端支持时）/ 行尾 \\ + 回车；exit / Ctrl+D 退出"))
 
@@ -69,8 +77,15 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		if text == "exit" || text == "quit" {
 			return nil
 		}
+		// 每轮重取终端宽：变了则重建 renderer，后续 divider 与 markdown 都用新宽
+		if w := terminalWidth(); w != width {
+			width = w
+			md = buildRenderer(tuiTheme, width)
+		}
 		// readline 提交后输入行（prompt + 内容）天然留在终端，不重复打印用户消息
-		waitTurn(ctx, out, st, svc, sessionID, text)
+		waitTurn(ctx, out, st, md, svc, sessionID, text)
+		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
+		renderMessageDivider(out, st, width)
 	}
 }
 
@@ -115,7 +130,7 @@ func continuation(line string) (content string, more bool) {
 // 等待一轮 Turn 完成：期间单行 spinner 动画；完成后 print 助手 / 错误（留痕）
 // 容错：Turn 失败 print 错误后返回，外层循环继续读输入（不杀会话）
 // 流式留位（#20）：流式落地时本函数扩展为逐 chunk print 留痕，循环结构不变
-func waitTurn(ctx context.Context, out io.Writer, st styles, svc *session.Service, sessionID, text string) {
+func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRenderer, svc *session.Service, sessionID, text string) {
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	turnCh := make(chan turnMsg, 1)
@@ -140,7 +155,7 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, svc *session.Servic
 			if msg.err != nil {
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
 			} else {
-				for _, mv := range renderAssistant(nil, msg.result) {
+				for _, mv := range renderAssistant(md, msg.result) {
 					fmt.Fprintln(out, st.assistant.Render("aruing ")+mv.text)
 				}
 			}
@@ -153,6 +168,23 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, svc *session.Servic
 			return
 		}
 	}
+}
+
+// 取当前终端宽；取不到（非 tty 等）回退 80
+func terminalWidth() int {
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		return w
+	}
+	return 80
+}
+
+// 按主题与宽建 markdown 渲染器；建不起来（理论不可达）降级 nil，renderMarkdown 返回原文
+func buildRenderer(tuiTheme string, width int) *glamour.TermRenderer {
+	md, err := newMarkdownRenderer(tuiTheme, width)
+	if err != nil {
+		return nil //nolint:staticcheck // 降级是有意的
+	}
+	return md
 }
 
 // 需要翻译成换行的按键序列：终端启用扩展键盘协议后才可区分
@@ -220,6 +252,17 @@ func translateNewlineSeqs(in []byte) ([]byte, int) {
 	rest, soft := translateNewlineSeqs(in[bestAt+len(best):])
 	out = append(out, rest...)
 	return out, soft + 1
+}
+
+// 渲染轮间分割线：空行 + 主题色水平线 + 空行。
+// 封装单函数：后续用户自定义开关 / 样式（arc《TUI》Step 2）只改这里；宽度非法时回退 80
+func renderMessageDivider(out io.Writer, st styles, width int) {
+	if width <= 0 {
+		width = 80
+	}
+	fmt.Fprintln(out)
+	fmt.Fprintln(out, st.divider.Render(strings.Repeat("─", width)))
+	fmt.Fprintln(out)
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）
