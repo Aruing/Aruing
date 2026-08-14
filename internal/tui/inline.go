@@ -1,11 +1,12 @@
 // 行内 TUI：readline 库读输入（输入行提交后天然留痕）+ 助手消息 print 往下滚 + spinner + 容错。
 // 与 app（bubbletea 全屏）模式并列；默认走此模式（Step 3 加 config.TUI.Mode 选）。
 // 纯展示层——事实来自 svc.Turn，不持有业务事实（守 #20）。
-// 多行输入用续行符约定（行尾 \ + enter 续行）：readline 库不支持 shift+enter 序列捕获，
-// 终端对 shift+enter 的编码也不统一（xterm/kitty 各异），续行符是跨终端稳定的功能替代。
+// 多行输入：shift+enter / option+enter（终端支持时，经序列翻译）或行尾 \
+// + enter 续行；readline 库本身不解析这些序列，续行约定是跨终端稳定兑底。
 package tui
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -21,14 +22,25 @@ import (
 // spinner 帧间隔与帧表
 const spinnerInterval = 100 * time.Millisecond
 
+// xterm modifyOtherKeys 开关：启用后支持的终端（iTerm2/WezTerm/foot/VSCode 等）
+// 对 shift+enter 等修饰键上报独立序列，应用才能与普通 enter 区分
+const (
+	modifyOtherKeysOn  = "\x1b[>4;1m"
+	modifyOtherKeysOff = "\x1b[>4m"
+)
+
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // 行内模式入口：readline 循环 + Turn 等待（spinner）+ 助手留痕 + 容错
 func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string, out io.Writer) error {
 	st := loadStyles(tuiTheme)
+	// 启用 modifyOtherKeys：让支持的终端对 shift+enter 上报独立序列（不支持的终端忽略此序列）
+	fmt.Fprint(out, modifyOtherKeysOn)
+	defer fmt.Fprint(out, modifyOtherKeysOff)
+
 	rl, err := readline.NewFromConfig(&readline.Config{
 		Prompt: st.prompt.Render("❯ "),
-		Stdin:  os.Stdin,
+		Stdin:  &newlineKeyReader{r: os.Stdin},
 		Stdout: out,
 		Stderr: os.Stderr,
 	})
@@ -38,7 +50,7 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	defer rl.Close()
 
 	// 一次性交互提示（系统样式，留痕）
-	fmt.Fprintln(out, st.system.Render("多行输入：行尾 \\ + 回车续行；exit / Ctrl+D 退出"))
+	fmt.Fprintln(out, st.system.Render("多行输入：shift+enter / option+enter（终端支持时）/ 行尾 \\ + 回车；exit / Ctrl+D 退出"))
 
 	for {
 		text, err := readMultiline(rl)
@@ -126,6 +138,52 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, svc *session.Servic
 			return
 		}
 	}
+}
+
+// 需要翻译成换行的按键序列：终端启用扩展键盘协议后才可区分
+var newlineSeqs = [][]byte{
+	[]byte("\x1b[27;2;13~"), // shift+enter（xterm modifyOtherKeys）
+	[]byte("\x1b[13;2u"),    // shift+enter（kitty keyboard protocol）
+	[]byte("\x1b\r"),        // option/alt + enter（多数 mac 终端原生，无需协议）
+}
+
+// newlineKeyReader 包在 stdin 外，把 shift+enter / option+enter 序列翻译成
+// 续行约定（'\\' + 回车）：readline 收到后提交当前行（末尾带 \\），
+// readMultiline 的续行逻辑自动接续下一行。普通字节（含方向键等其它 ESC 序列）原样透传。
+// 限制：终端通常一次下发完整序列；若序列被拆到两次 Read，会退化为普通回车提交（可接受）。
+type newlineKeyReader struct {
+	r   io.Reader
+	buf []byte
+}
+
+func (n *newlineKeyReader) Read(p []byte) (int, error) {
+	for len(n.buf) == 0 {
+		var tmp [256]byte
+		rn, err := n.r.Read(tmp[:])
+		if rn > 0 {
+			n.buf = translateNewlineSeqs(tmp[:rn])
+		}
+		if err != nil && len(n.buf) == 0 {
+			return 0, err
+		}
+	}
+	copied := copy(p, n.buf)
+	n.buf = n.buf[copied:]
+	return copied, nil
+}
+
+// 递归替换输入中的全部换行序列
+func translateNewlineSeqs(in []byte) []byte {
+	for _, seq := range newlineSeqs {
+		if i := bytes.Index(in, seq); i >= 0 {
+			out := make([]byte, 0, len(in)+1)
+			out = append(out, in[:i]...)
+			out = append(out, '\\', '\r')
+			out = append(out, in[i+len(seq):]...)
+			return translateNewlineSeqs(out)
+		}
+	}
+	return in
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）

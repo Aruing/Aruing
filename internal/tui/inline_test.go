@@ -49,3 +49,28 @@ func TestMultilineJoin(t *testing.T) {
 		t.Fatal("multiline join should contain newlines")
 	}
 }
+
+// 换行序列翻译：shift+enter / option+enter → 续行约定（\\ + 回车）
+func TestTranslateNewlineSeqs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"xterm shift+enter", "帮我\x1b[27;2;13~看", "帮我\\\r看"},
+		{"kitty shift+enter", "\x1b[13;2u", "\\\r"},
+		{"option+enter", "帮\x1b\r我", "帮\\\r我"},
+		{"多个序列", "\x1b[13;2u\x1b\r", "\\\r\\\r"},
+		{"普通回车不动", "你好\r", "你好\r"},
+		{"方向键透传", "\x1b[A", "\x1b[A"},
+		{"普通文本透传", "hello 世界", "hello 世界"},
+		{"孤立 ESC 透传", "\x1b", "\x1b"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := string(translateNewlineSeqs([]byte(c.in))); got != c.want {
+				t.Fatalf("translate(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
