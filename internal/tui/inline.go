@@ -132,6 +132,11 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, svc *session.Servic
 		select {
 		case msg := <-turnCh:
 			clearLine(out)
+			// ctx 已取消时 Turn 多半返回 context canceled：静默退出，不打印伪错误
+			// （select 在 turnCh 与 ctx.Done 同时就绪时随机选中，需显式优先取消）
+			if turnCtx.Err() != nil {
+				return
+			}
 			if msg.err != nil {
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
 			} else {
@@ -195,19 +200,26 @@ func (n *newlineKeyReader) consumeSoft() bool {
 	return false
 }
 
-// 递归把输入中的全部换行序列替换成普通回车，返回替换后的数据与替换次数
+// 递归把输入中的全部换行序列替换成普通回车，返回替换后的数据与替换次数。
+// 必须取所有序列中位置最靠前的那个先处理：若按序列类型固定顺序，先命中的
+// 序列前面可能残留更早出现的另一种序列，被 readline 误当作孤立 ESC / 回车。
 func translateNewlineSeqs(in []byte) ([]byte, int) {
+	var best []byte
+	bestAt := -1
 	for _, seq := range newlineSeqs {
-		if i := bytes.Index(in, seq); i >= 0 {
-			out := make([]byte, 0, len(in))
-			out = append(out, in[:i]...)
-			out = append(out, '\r')
-			rest, soft := translateNewlineSeqs(in[i+len(seq):])
-			out = append(out, rest...)
-			return out, soft + 1
+		if i := bytes.Index(in, seq); i >= 0 && (bestAt < 0 || i < bestAt) {
+			best, bestAt = seq, i
 		}
 	}
-	return in, 0
+	if bestAt < 0 {
+		return in, 0
+	}
+	out := make([]byte, 0, len(in))
+	out = append(out, in[:bestAt]...)
+	out = append(out, '\r')
+	rest, soft := translateNewlineSeqs(in[bestAt+len(best):])
+	out = append(out, rest...)
+	return out, soft + 1
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）

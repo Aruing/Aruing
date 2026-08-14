@@ -62,6 +62,8 @@ func TestTranslateNewlineSeqs(t *testing.T) {
 		{"kitty shift+enter", "\x1b[13;2u", "\r", 1},
 		{"option+enter", "帮\x1b\r我", "帮\r我", 1},
 		{"多个序列", "\x1b[13;2u\x1b\r", "\r\r", 2},
+		{"混合顺序：option 在前", "\x1b\r\x1b[13;2u", "\r\r", 2},
+		{"混合顺序：option 前后夹文本", "前\x1b\r中\x1b[27;2;13~后", "前\r中\r后", 2},
 		{"普通回车不动", "你好\r", "你好\r", 0},
 		{"方向键透传", "\x1b[A", "\x1b[A", 0},
 		{"普通文本透传", "hello 世界", "hello 世界", 0},
