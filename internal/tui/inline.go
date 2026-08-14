@@ -1,8 +1,9 @@
 // 行内 TUI：readline 库读输入（输入行提交后天然留痕）+ 助手消息 print 往下滚 + spinner + 容错。
 // 与 app（bubbletea 全屏）模式并列；默认走此模式（Step 3 加 config.TUI.Mode 选）。
 // 纯展示层——事实来自 svc.Turn，不持有业务事实（守 #20）。
-// 多行输入：shift+enter / option+enter（终端支持时，经序列翻译）或行尾 \
-// + enter 续行；readline 库本身不解析这些序列，续行约定是跨终端稳定兑底。
+// 多行输入：shift+enter / option+enter（终端支持时，经序列翻译成带标记的回车）
+// 或行尾 \
+// + enter 手动续行兑底；readline 库本身不解析这些序列。
 package tui
 
 import (
@@ -38,9 +39,11 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	fmt.Fprint(out, modifyOtherKeysOn)
 	defer fmt.Fprint(out, modifyOtherKeysOff)
 
+	keys := &newlineKeyReader{r: os.Stdin}
+
 	rl, err := readline.NewFromConfig(&readline.Config{
 		Prompt: st.prompt.Render("❯ "),
-		Stdin:  &newlineKeyReader{r: os.Stdin},
+		Stdin:  keys,
 		Stdout: out,
 		Stderr: os.Stderr,
 	})
@@ -53,7 +56,7 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	fmt.Fprintln(out, st.system.Render("多行输入：shift+enter / option+enter（终端支持时）/ 行尾 \\ + 回车；exit / Ctrl+D 退出"))
 
 	for {
-		text, err := readMultiline(rl)
+		text, err := readMultiline(rl, keys)
 		if err != nil {
 			// io.EOF（Ctrl+D）或 ErrInterrupt（Ctrl+C）：正常退出
 			fmt.Fprintln(out)
@@ -71,13 +74,20 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	}
 }
 
-// 读多行输入：行尾单个反斜杠 + enter 表示续行，拼接下一行；空行或无续行符即完成
-func readMultiline(rl *readline.Instance) (string, error) {
+// 读多行输入：shift/option+enter（软换行，由 keys 标记）直接换行拼接下一行；
+// 行尾单个反斜杠 + 回车是终端不支持软换行序列时的手动续行兑底
+func readMultiline(rl *readline.Instance, keys *newlineKeyReader) (string, error) {
 	var b strings.Builder
 	for {
 		line, err := rl.ReadLine()
 		if err != nil {
 			return "", err
+		}
+		// 本行的回车若来自软换行翻译：直接拼接换行继续读，不连 \ 也不提交
+		if keys.consumeSoft() {
+			b.WriteString(line)
+			b.WriteString("\n")
+			continue
 		}
 		content, more := continuation(line)
 		b.WriteString(content)
@@ -147,13 +157,15 @@ var newlineSeqs = [][]byte{
 	[]byte("\x1b\r"),        // option/alt + enter（多数 mac 终端原生，无需协议）
 }
 
-// newlineKeyReader 包在 stdin 外，把 shift+enter / option+enter 序列翻译成
-// 续行约定（'\\' + 回车）：readline 收到后提交当前行（末尾带 \\），
-// readMultiline 的续行逻辑自动接续下一行。普通字节（含方向键等其它 ESC 序列）原样透传。
+// newlineKeyReader 包在 stdin 外，把 shift+enter / option+enter 序列翻译成普通回车
+// 并计数（软换行）：readline 收到回车提交当前行，readMultiline 据计数判定是换行
+// 还是提交，反斜杠不进缓冲区、屏幕无残留。普通字节（含方向键等其它 ESC 序列）原样透传。
 // 限制：终端通常一次下发完整序列；若序列被拆到两次 Read，会退化为普通回车提交（可接受）。
 type newlineKeyReader struct {
 	r   io.Reader
 	buf []byte
+	// 未消费的软换行计数；readline 在同一线程内同步读 stdin，无并发竞争
+	soft int
 }
 
 func (n *newlineKeyReader) Read(p []byte) (int, error) {
@@ -161,7 +173,9 @@ func (n *newlineKeyReader) Read(p []byte) (int, error) {
 		var tmp [256]byte
 		rn, err := n.r.Read(tmp[:])
 		if rn > 0 {
-			n.buf = translateNewlineSeqs(tmp[:rn])
+			out, soft := translateNewlineSeqs(tmp[:rn])
+			n.buf = out
+			n.soft += soft
 		}
 		if err != nil && len(n.buf) == 0 {
 			return 0, err
@@ -172,18 +186,28 @@ func (n *newlineKeyReader) Read(p []byte) (int, error) {
 	return copied, nil
 }
 
-// 递归替换输入中的全部换行序列
-func translateNewlineSeqs(in []byte) []byte {
+// consumeSoft 报告并满耗一个软换行计数
+func (n *newlineKeyReader) consumeSoft() bool {
+	if n.soft > 0 {
+		n.soft--
+		return true
+	}
+	return false
+}
+
+// 递归把输入中的全部换行序列替换成普通回车，返回替换后的数据与替换次数
+func translateNewlineSeqs(in []byte) ([]byte, int) {
 	for _, seq := range newlineSeqs {
 		if i := bytes.Index(in, seq); i >= 0 {
-			out := make([]byte, 0, len(in)+1)
+			out := make([]byte, 0, len(in))
 			out = append(out, in[:i]...)
-			out = append(out, '\\', '\r')
-			out = append(out, in[i+len(seq):]...)
-			return translateNewlineSeqs(out)
+			out = append(out, '\r')
+			rest, soft := translateNewlineSeqs(in[i+len(seq):])
+			out = append(out, rest...)
+			return out, soft + 1
 		}
 	}
-	return in
+	return in, 0
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）

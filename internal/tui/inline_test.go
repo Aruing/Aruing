@@ -50,27 +50,44 @@ func TestMultilineJoin(t *testing.T) {
 	}
 }
 
-// 换行序列翻译：shift+enter / option+enter → 续行约定（\\ + 回车）
+// 换行序列翻译：shift+enter / option+enter → 普通回车 + 软换行计数（屏幕无 \ 残留）
 func TestTranslateNewlineSeqs(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string
 		want string
+		soft int
 	}{
-		{"xterm shift+enter", "帮我\x1b[27;2;13~看", "帮我\\\r看"},
-		{"kitty shift+enter", "\x1b[13;2u", "\\\r"},
-		{"option+enter", "帮\x1b\r我", "帮\\\r我"},
-		{"多个序列", "\x1b[13;2u\x1b\r", "\\\r\\\r"},
-		{"普通回车不动", "你好\r", "你好\r"},
-		{"方向键透传", "\x1b[A", "\x1b[A"},
-		{"普通文本透传", "hello 世界", "hello 世界"},
-		{"孤立 ESC 透传", "\x1b", "\x1b"},
+		{"xterm shift+enter", "帮我\x1b[27;2;13~看", "帮我\r看", 1},
+		{"kitty shift+enter", "\x1b[13;2u", "\r", 1},
+		{"option+enter", "帮\x1b\r我", "帮\r我", 1},
+		{"多个序列", "\x1b[13;2u\x1b\r", "\r\r", 2},
+		{"普通回车不动", "你好\r", "你好\r", 0},
+		{"方向键透传", "\x1b[A", "\x1b[A", 0},
+		{"普通文本透传", "hello 世界", "hello 世界", 0},
+		{"孤立 ESC 透传", "\x1b", "\x1b", 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := string(translateNewlineSeqs([]byte(c.in))); got != c.want {
-				t.Fatalf("translate(%q) = %q, want %q", c.in, got, c.want)
+			got, soft := translateNewlineSeqs([]byte(c.in))
+			if string(got) != c.want || soft != c.soft {
+				t.Fatalf("translate(%q) = (%q, %d), want (%q, %d)", c.in, got, soft, c.want, c.soft)
 			}
 		})
+	}
+}
+
+// 软换行计数消费：先报 true 耗尽后报 false
+func TestConsumeSoft(t *testing.T) {
+	n := &newlineKeyReader{}
+	n.soft = 2
+	if !n.consumeSoft() {
+		t.Fatal("first consumeSoft should be true")
+	}
+	if !n.consumeSoft() {
+		t.Fatal("second consumeSoft should be true")
+	}
+	if n.consumeSoft() {
+		t.Fatal("third consumeSoft should be false")
 	}
 }
