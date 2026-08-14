@@ -8,8 +8,10 @@ BIN_DIR := bin
 BIN := $(BIN_DIR)/$(APP)
 ARGS ?= help
 QUESTION ?= why is demo-api unreachable in default namespace
-# chat 可选首句；空则进入 stdin 交互
+# chat 可选首句；空则进入交互循环
 CHAT_MSG ?=
+# chat 交互界面：inline（默认留痕）| app（全屏）；透传 --ui
+UI ?=
 # 真链路 smoke 使用的 env 文件；可用 make run-llm ENV_FILE=.env.ollama 切换
 ENV_FILE ?= .env
 GO ?= go
@@ -41,7 +43,7 @@ run-llm:
 # 例: make chat / make chat CHAT_MSG='hello' / make chat ENV_FILE=.env.ollama
 chat:
 	$(load-dotenv); \
-	go run $(CMD) chat $(CHAT_MSG)
+	go run $(CMD) chat $(if $(UI),--ui $(UI),) $(CHAT_MSG)
 
 # 确认 dotenv 是否生效；不打印 API key 全文
 print-env:
