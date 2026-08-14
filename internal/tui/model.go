@@ -42,7 +42,6 @@ type turnMsg struct {
 type Model struct {
 	svc       *session.Service
 	sessionID string
-	format    string
 	tuiTheme  string // 配置主题（dark | light | auto）；空同 auto
 
 	styles styles

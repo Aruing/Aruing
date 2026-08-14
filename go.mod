@@ -2,11 +2,14 @@ module aruing
 
 go 1.26
 
+toolchain go1.26.6
+
 require (
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
+	github.com/ergochat/readline v0.1.3
 	github.com/muesli/termenv v0.16.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	github.com/sashabaranov/go-openai v1.41.2
