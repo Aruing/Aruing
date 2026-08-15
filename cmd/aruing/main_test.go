@@ -278,3 +278,33 @@ func TestChatBadUIMode(t *testing.T) {
 		t.Fatalf("err = %v, want unknown ui mode", err)
 	}
 }
+
+// 非 tty stdin 行模式：逐行同会话跑 Turn；空行忽略、exit 停止（smoke 脚本依赖此行为）
+func TestChatStdinLoop(t *testing.T) {
+	factory := core.NewFactory()
+	mem := store.NewMemoryStore()
+	svc := session.NewService(mem, factory, session.EchoResponder{})
+	ctx := context.Background()
+	sess, err := svc.NewSession(ctx)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	in := strings.NewReader("hello\n\nagain\nexit\nnever-sent\n")
+	var out bytes.Buffer
+	if err = chatStdinLoop(ctx, svc, sess.ID, "markdown", &out, in); err != nil {
+		t.Fatalf("stdin loop: %v", err)
+	}
+
+	// exit 之后的行不应产生 Turn
+	msgs, err := mem.ListMessages(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 4 {
+		t.Fatalf("messages = %d, want 4 (2 turns, exit stops)", len(msgs))
+	}
+	if !strings.Contains(out.String(), "hello") || !strings.Contains(out.String(), "again") {
+		t.Fatalf("stdout missing echo content: %q", out.String())
+	}
+}

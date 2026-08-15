@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,8 @@ import (
 	"aruing/internal/core"
 	"aruing/internal/session"
 	"aruing/internal/tui"
+
+	"golang.org/x/term"
 )
 
 // 对外展示的版本号，发布时应作为命令行输出的唯一来源
@@ -260,8 +263,32 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 		return chatTurn(ctx, svc, sessionID, question, formatVal, stdout)
 	}
 
+	// 非 tty stdin：逐行读取直到 exit/quit/EOF（usage 承诺的行为；供脚本/smoke 驱动多轮）
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return chatStdinLoop(ctx, svc, sessionID, formatVal, stdout, os.Stdin)
+	}
+
 	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回
 	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI)
+}
+
+// 非 tty stdin 行模式：每行一 Turn，同会话；空行忽略，exit/quit 停止。
+// 任一 Turn 失败即返回（严格失败，便于脚本感知）。
+func chatStdinLoop(ctx context.Context, svc *session.Service, sessionID, format string, stdout io.Writer, in io.Reader) error {
+	scanner := bufio.NewScanner(in)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		if line == "exit" || line == "quit" {
+			return nil
+		}
+		if err := chatTurn(ctx, svc, sessionID, line, format, stdout); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
 }
 
 // 执行一轮会话并按约定写标准输出
