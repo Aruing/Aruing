@@ -15,9 +15,10 @@
 set -uo pipefail
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../scenarios/lib/common.sh"
-# common.sh 自带 set -euo pipefail；本脚本要单场景失败不中断，改回宽松语义，
+# common.sh 自带 set -euo pipefail；本脚本要单场景失败不中断，
+# 必须显式关掉 errexit（set -uo 不含 +e 时 -e 会残留，pr-agent #81 指出）；
 # 失败一律由显式 if 捕获（run_step）。
-set -uo pipefail
+set +e -uo pipefail
 
 # 本脚本内自实现（不进 common.sh：仅 smoke-all 使用）：
 # scn_first_prompt <name> → 打印 prompts.md 第 1 条有序列表提示词；
