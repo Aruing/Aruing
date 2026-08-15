@@ -195,3 +195,58 @@ func TestOrchestratorSuspendStagesCoexist(t *testing.T) {
 		t.Fatalf("cross-session leak: %q", got)
 	}
 }
+
+// 调查挂起不得丢侦察产物：挂起前已侦察，Resume 续跑后
+// ① 完成证据链仍含侦察证据（透明性）；② 续跑轮规划器仍收到 cluster_resources
+func TestOrchestratorInvestigateSuspendKeepsRecon(t *testing.T) {
+	registry := tools.NewRegistry()
+	if err := registry.Register(toolstest.NewFakeListPodsTool()); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := registry.Register(&fakeK8sAPIResourcesTool{
+		stdout: "NAME           SHORTNAMES   NAMESPACED   KIND\n" +
+			"ingressroutes  ico          true         IngressRoute\n",
+	}); err != nil {
+		t.Fatalf("register fake k8s: %v", err)
+	}
+	planner := agenttest.NewFakePlanner(agent.Plan{
+		Hypotheses: []core.Hypothesis{{ID: "h1", Statement: "猜想一"}},
+		Tasks:      []core.Task{{ID: "t1", Refs: []string{"h1"}, ToolName: "fake.list_pods"}},
+	})
+	planner.WithClarify("何时开始？")
+	orch := agent.NewOrchestrator(
+		agenttest.NewFakeParser(core.Query{ID: "q_r", Nodes: []core.Node{{ID: "n_r", Type: "resource", Text: "demo"}}}),
+		agenttest.NewFakeResolver(nil),
+		planner,
+		tools.NewDispatcher(registry, tools.NewReadonlyPolicy()),
+		agenttest.NewFakeVerifier([]core.Verdict{{ID: "v1", HypothesisID: "h1", Result: core.VerdictSupported, Reason: "ok"}}),
+		agenttest.NewFakeReporter(core.Report{ID: "r1", Summary: "ok"}),
+		&testFactory{now: time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)},
+	)
+	orch.SetReconEnabled(true)
+
+	out1, err := orch.Execute(context.Background(), core.Run{ID: "run_r", SessionID: "sess_r", Question: "demo 为什么慢"})
+	if err != nil || out1.Suspension == nil {
+		t.Fatalf("execute: %+v err=%v", out1, err)
+	}
+
+	out2, err := orch.Resume(context.Background(), "run_r", "今天早上")
+	if err != nil || out2.Report == nil {
+		t.Fatalf("resume: %+v err=%v", out2, err)
+	}
+	// ① 完成链含侦察证据
+	hasRecon := false
+	for _, ev := range out2.Evidence {
+		if ev.ToolName == "k8s" {
+			hasRecon = true
+			break
+		}
+	}
+	if !hasRecon {
+		t.Fatalf("resumed evidence chain lost recon evidence: %d items", len(out2.Evidence))
+	}
+	// ② 续跑轮（Resume 后的 Plan 调用）规划器收到 cluster_resources
+	if len(planner.GotClusterResources) < 2 || planner.GotClusterResources[len(planner.GotClusterResources)-1] == 0 {
+		t.Fatalf("resumed planner lost cluster_resources: %v", planner.GotClusterResources)
+	}
+}

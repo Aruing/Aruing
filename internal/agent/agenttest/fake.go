@@ -144,6 +144,8 @@ type FakePlanner struct {
 	GotClarifications [][]string
 	// 每次规划收到的目标数量（防「规划输入丢目标」回归断言用）
 	GotTargetCounts []int
+	// 每次规划收到的集群资源类型数量（防「续跑丢侦察上下文」回归断言用）
+	GotClusterResources []int
 }
 
 // 使用固定计划模板创建可重复使用的假规划器
@@ -174,6 +176,7 @@ func (p *FakePlanner) Plan(ctx context.Context, state agent.PlanState) (agent.Pl
 		p.GotClarifications = append(p.GotClarifications, append([]string(nil), state.Clarifications...))
 	}
 	p.GotTargetCounts = append(p.GotTargetCounts, len(state.Targets))
+	p.GotClusterResources = append(p.GotClusterResources, len(state.ClusterResources))
 	if p.clarify != nil {
 		req := *p.clarify
 		p.clarify = nil

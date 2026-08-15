@@ -116,8 +116,21 @@ type suspendedRun struct {
 	resolve ResolveState
 	// 调查状态（猜想、任务、证据、判决、澄清累积）；stage=investigate 时有效
 	investigate InvestigateState
+	// 调查挂起前已完成的侦察产物；Resume 续跑复用（不重复侦察、不丢证据与规划上下文）
+	recon *reconResult
 	// 最近一次澄清请求（面向用户）
 	clarify ClarifyRequest
+}
+
+// 一次集群侦察的产物：进报告链的证据（不进验证器输入）与喂规划器的资源清单
+// resolveCount 为定位证据在种子中的前缀长度，完成链按此插位侦察证据
+type reconResult struct {
+	// 侦察证据；可能为失败证据或 nil（未启用/未尝试）
+	evidence *core.Evidence
+	// 解析出的资源类型清单；失败或无输出时为空
+	resources []ClusterResource
+	// 侦察证据在最终证据链中的插位（定位块之后）；resume 路径据此还原链序
+	resolveCount int
 }
 
 // 调查阶段累积状态：investigateLoop 的种子与挂起快照载体，镜像 ResolveState 角色
@@ -295,9 +308,9 @@ func (o *Orchestrator) Resume(ctx context.Context, runID, answer string) (core.O
 		state := snap.investigate
 		state.Clarifications = append(slices.Clone(state.Clarifications), strings.TrimSpace(answer))
 		// 澄清后续跑调查：保留全部调查进度（猜想/任务/证据/判决），仅重置预算计数
-		// 侦察不重复（续跑无侦察）；resolveSeedCount 取 -1 跳过首入侦察门控
+		// 侦察产物自快照复用（不重复侦察、不丢证据与规划上下文）
 		state.Round = 0
-		return o.continueFromInvestigate(ctx, snap.run, snap.query, state, -1)
+		return o.continueFromInvestigate(ctx, snap.run, snap.query, state, -1, snap.recon)
 	default:
 		// 未知阶段不应发生（挂起仅在编排 switch 内产生）；防御性归位快照并明确失败
 		o.putSuspendedRun(snap)
@@ -361,17 +374,18 @@ func (o *Orchestrator) continueFromResolve(
 	return o.continueFromInvestigate(ctx, run, query, InvestigateState{
 		Targets:  targets,
 		Evidence: slices.Clone(resolveEvidence),
-	}, len(resolveEvidence))
+	}, len(resolveEvidence), nil)
 }
 
 // 自调查阶段继续：Execute（resolve 成功后，带定位种子）与 Resume（investigate 挂起，带完整调查进度）共用
-// resolveSeedCount 为定位证据在种子中的前缀长度，仅完成路径用于侦察证据插位（挂起路径无侦察）
+// resolveSeedCount 为定位证据在种子中的前缀长度（首入侦察插位）；prior 非 nil 时复用快照侦察产物
 func (o *Orchestrator) continueFromInvestigate(
 	ctx context.Context,
 	run core.Run,
 	query core.Query,
 	seed InvestigateState,
 	resolveSeedCount int,
+	prior *reconResult,
 ) (core.Outcome, error) {
 	if seed.MaxRounds <= 0 {
 		if o.investigateMaxRounds > 0 {
@@ -381,15 +395,20 @@ func (o *Orchestrator) continueFromInvestigate(
 		}
 	}
 
-	// 集群侦察：仅首入调查阶段执行（Resume 续跑不重复侦察）
-	// 侦察证据单独存放，不进调查循环种子（不漏到验证器）；由本方法在完成路径合并进返回链
-	var reconEvidence *core.Evidence
-	var clusterResources []ClusterResource
-	if resolveSeedCount >= 0 {
-		reconEvidence, clusterResources = o.reconCluster(ctx, run.ID)
-		if clusterResources != nil {
-			o.progressf("侦察到 %d 种资源类型", len(clusterResources))
+	// 集群侦察：首入调查阶段执行一次；Resume 续跑复用挂起快照携带的侦察产物
+	// （不重复侦察、不丢证据与规划上下文）。侦察证据不进调查循环种子（不漏到验证器），
+	// 由本方法在完成路径合并进返回链
+	recon := prior
+	if recon == nil && resolveSeedCount >= 0 {
+		ev, resources := o.reconCluster(ctx, run.ID)
+		recon = &reconResult{evidence: ev, resources: resources, resolveCount: resolveSeedCount}
+		if resources != nil {
+			o.progressf("侦察到 %d 种资源类型", len(resources))
 		}
+	}
+	var clusterResources []ClusterResource
+	if recon != nil {
+		clusterResources = recon.resources
 	}
 
 	// 调查阶段为编排可见循环：计划、执行、验证，证据不足时带历史证据再计划
@@ -399,7 +418,7 @@ func (o *Orchestrator) continueFromInvestigate(
 		return core.Outcome{}, err
 	}
 	if clarify != nil {
-		o.putInvestigateSuspended(run, query, *clarify, paused)
+		o.putInvestigateSuspended(run, query, *clarify, paused, recon)
 		return core.Outcome{
 			Suspension: &core.Suspension{
 				RunID:     run.ID,
@@ -413,7 +432,12 @@ func (o *Orchestrator) continueFromInvestigate(
 
 	// 按时间序组装完整证据链：定位 → 侦察 → 调查，全部对用户透明可追溯
 	// 报告器只看定位与调查证据（侦察是上下文，不是结论依据）；返回链含侦察供命令行渲染
-	chain := appendEvidence(evidence, reconEvidence, resolveSeedCount)
+	var chain []core.Evidence
+	if recon != nil {
+		chain = appendEvidence(evidence, recon.evidence, recon.resolveCount)
+	} else {
+		chain = evidence
+	}
 	o.progressf("生成报告…")
 	report, err := o.reporter.Report(ctx, run, verdicts, evidence)
 	if err != nil {
@@ -440,13 +464,14 @@ func (o *Orchestrator) putResolveSuspended(run core.Run, query core.Query, clari
 	o.putSuspendedRun(snap)
 }
 
-// 存入调查阶段挂起快照；深拷贝调查状态（保留进度续跑，Resume 派发见 StageInvestigate case）
-func (o *Orchestrator) putInvestigateSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state InvestigateState) {
+// 存入调查阶段挂起快照；深拷贝调查状态并携带侦察产物（保留进度续跑，Resume 派发见 StageInvestigate case）
+func (o *Orchestrator) putInvestigateSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state InvestigateState, recon *reconResult) {
 	snap := &suspendedRun{
 		run:         run,
 		query:       query,
 		stage:       core.StageInvestigate,
 		investigate: cloneInvestigateState(state),
+		recon:       recon,
 		clarify: ClarifyRequest{
 			Question: clarify.Question,
 			Options:  slices.Clone(clarify.Options),
