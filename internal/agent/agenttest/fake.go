@@ -28,6 +28,21 @@ func NewFakeParser(query core.Query) *FakeParser {
 	return &FakeParser{query: cloneQuery(query)}
 }
 
+// 带调用计数的假解析器：行为同 FakeParser，另记录 Parse 次数（Resume 续跑「不重跑解析」断言用）
+type CallCountParser struct {
+	// 固定问题模板
+	Query core.Query
+	// Parse 调用次数
+	Calls int
+}
+
+// 解析同 FakeParser（克隆模板、绑定运行编号），并累计调用次数
+func (p *CallCountParser) Parse(ctx context.Context, run core.Run) (core.Query, error) {
+	p.Calls++
+	fake := &FakeParser{query: cloneQuery(p.Query)}
+	return fake.Parse(ctx, run)
+}
+
 // 校验运行身份和原始问题，返回绑定当前运行编号的问题结构
 func (p *FakeParser) Parse(ctx context.Context, run core.Run) (core.Query, error) {
 	if ctx == nil {
@@ -116,9 +131,21 @@ func (r *FakeResolver) Next(ctx context.Context, state agent.ResolveState) (agen
 }
 
 // 可复用的假规划器，始终返回构造时给定的计划模板
+// 可选脚本：WithClarify 设定后下一次 Plan 只返回澄清提议，随后回落正常模板
+// （调查挂起编排测试用：首轮 clarify → 挂起 → Resume 后正常规划）
 type FakePlanner struct {
 	// 固定计划模板（按次克隆）
 	plan agent.Plan
+	// 待触发的澄清脚本；触发一次后清空
+	clarify *agent.ClarifyRequest
+	// 冲突模式开关：澄清时同时返回模板任务（负面测试用）
+	keepPlanOnClarify bool
+	// 已收到的历次规划状态中的澄清答复（测试断言用）
+	GotClarifications [][]string
+	// 每次规划收到的目标数量（防「规划输入丢目标」回归断言用）
+	GotTargetCounts []int
+	// 每次规划收到的集群资源类型数量（防「续跑丢侦察上下文」回归断言用）
+	GotClusterResources []int
 }
 
 // 使用固定计划模板创建可重复使用的假规划器
@@ -126,10 +153,40 @@ func NewFakePlanner(plan agent.Plan) *FakePlanner {
 	return &FakePlanner{plan: clonePlan(plan)}
 }
 
+// 设定下一次规划返回澄清提议（一次性；随后回落正常模板）
+func (p *FakePlanner) WithClarify(question string, options ...string) *FakePlanner {
+	p.clarify = &agent.ClarifyRequest{Question: question, Options: append([]string(nil), options...)}
+	return p
+}
+
+// 冲突模式：触发澄清脚本时仍同时返回模板任务（测试编排对 clarify+tasks 的拒绝）
+func (p *FakePlanner) KeepPlanOnClarify() *FakePlanner {
+	p.keepPlanOnClarify = true
+	return p
+}
+
 // 校验任务引用并返回绑定当前运行编号的独立计划
 func (p *FakePlanner) Plan(ctx context.Context, state agent.PlanState) (agent.Plan, error) {
 	if err := ctx.Err(); err != nil {
 		return agent.Plan{}, fmt.Errorf("plan tasks: %w", err)
+	}
+
+	// 澄清脚本：一次性触发后清空；记录收到的答复供测试断言
+	if len(state.Clarifications) > 0 {
+		p.GotClarifications = append(p.GotClarifications, append([]string(nil), state.Clarifications...))
+	}
+	p.GotTargetCounts = append(p.GotTargetCounts, len(state.Targets))
+	p.GotClusterResources = append(p.GotClusterResources, len(state.ClusterResources))
+	if p.clarify != nil {
+		req := *p.clarify
+		p.clarify = nil
+		if p.keepPlanOnClarify {
+			p.keepPlanOnClarify = false
+			plan := clonePlan(p.plan)
+			plan.Clarify = &req
+			return plan, nil
+		}
+		return agent.Plan{Clarify: &req}, nil
 	}
 
 	query, targets := state.Query, state.Targets

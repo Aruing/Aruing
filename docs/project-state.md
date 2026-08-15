@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-15（**`0.1.0-beta17` 已归档**：logs 时间游标 #78。**下一步重开候选窗口**（不评估 0.1.0 关版本，维护者指示）。前序：beta16 已归档）
+> 最后更新：2026-08-15（**`0.1.0-beta19` 交付中**：调查阶段挂起（investigate clarify）。beta18 工程效能并行（另一会话，不改产品代码）。前序：beta17 已归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta19` / 调查阶段挂起（investigate clarify）** 🚧 交付中：`Plan` 增可选 `Clarify`（规划器在证据不足以继续且缺口信息用户知道时提议；与任务/猜想互斥）；`InvestigateState` 种子化（调查循环可续跑，镜像定位循环）；挂起快照带 `Stage`，`Resume` 派发：investigate 路径保留调查进度续跑、重置轮次预算、不重复解析/侦察；planner prompt + LLM 输出结构 + agenttest 脚本假实现。session/Tower/CLI 零改（beta9 通用抽象兑现检验）。守 #15–#18 / §4。与 beta18（工程效能，不改产品代码）并行，无冲突面。
 
 **`0.1.0-beta17` / logs 时间游标（evidence.read 时间窗切片）** ✅ 完成并归档（2026-08-15；#78）：`SliceQuery` 增 `Since`/`Until`（RFC3339 闭区间，通用契约）；k8s `Slicer` 对行首 RFC3339（`logs --timestamps` 产物）机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导（#18）；meta 回填窗内首末时间戳；Spec / tower prompt 教学同步（取 logs 加 `--timestamps`）。core / 编排零改；新增 `scenarios/log-time-window` smoke 场景，kind + 真 LLM 正/负路径 smoke 通过。arc Step 1–3b 在 0.1.0 承诺全部兑现。plan 在 `plan/archive/0.1.0-beta17/`。
 
@@ -70,7 +72,8 @@
 | beta14 | 交互式 TUI + 启动 banner | ✅ | #70 banner + #71 TUI 骨架+容错 + #72 markdown+主题；新硬约束 #20；不触 §4 |
 | beta15 | 行内 TUI + 双模式 | ✅ | #73（ergochat/readline + 软换行 + 容错）；#74（divider + glamour + 每轮自适应宽）；#76（--ui 双模式 + hotfix）；不触 §4 |
 | beta16 | 巨输出分页（非表格行级页式） | ✅ | #77 k8s `Slicer` 行级兜底 + `evidence.read` 行渲染（行号/截断标注）+ `fallbackSummary` 首尾预览 + 翻页提示；core 零改；不触 §4 |
-| beta17 | logs 时间游标（时间窗切片） | ✅ | #78 `SliceQuery.Since/Until`（RFC3339 闭区间，通用契约）；k8s 行首 RFC3339 机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导；窗内首末时间戳 meta；`scenarios/log-time-window`；不触 §4 |
+| beta17 | logs 时间游标（时间窗切片） | ✅ |
+| beta19 | 调查阶段挂起（investigate clarify） | 🚧 | `Plan.Clarify` + `InvestigateState` 种子化 + `Resume` 按 Stage 派发（保留进度续跑）；session/Tower/CLI 零改；不触 §4.1/§4.3/§4.5 以外禁止项 | #78 `SliceQuery.Since/Until`（RFC3339 闭区间，通用契约）；k8s 行首 RFC3339 机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导；窗内首末时间戳 meta；`scenarios/log-time-window`；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 

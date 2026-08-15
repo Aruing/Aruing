@@ -150,6 +150,8 @@ func buildPlannerUserPayload(state PlanState) (string, error) {
 		Verdicts []core.Verdict `json:"verdicts,omitempty"`
 		// 集群侦察得到的资源类型列表，无集群工具时为空
 		ClusterResources []ClusterResource `json:"cluster_resources,omitempty"`
+		// 调查挂起后用户澄清的累积答复，规划器优先据此收敛
+		Clarifications []string `json:"clarifications,omitempty"`
 	}
 	raw, err := json.MarshalIndent(payload(state), "", "  ")
 	if err != nil {
@@ -164,6 +166,16 @@ type plannerLLMOutput struct {
 	Hypotheses []plannerHypothesisOut `json:"hypotheses"`
 	// 本轮取证任务列表；后续轮可为空表示查完
 	Tasks []plannerTaskOut `json:"tasks"`
+	// 可选澄清提议：证据不足以继续且缺口信息用户知道时输出；与任务/猜想互斥
+	Clarify *plannerClarifyOut `json:"clarify,omitempty"`
+}
+
+// 模型侧澄清请求，镜像 resolver 的 clarify 意图字段
+type plannerClarifyOut struct {
+	// 面向用户的问题
+	Question string `json:"question"`
+	// 可选候选答案
+	Options []string `json:"options,omitempty"`
 }
 
 // 模型侧一条猜想，引用仅在本输出内用于任务引用
@@ -201,6 +213,16 @@ type plannerTaskOut struct {
 //
 // 既往猜想编号为前几轮已登记的猜想系统编号，允许后续轮任务引用现有猜想
 func validatePlannerOutput(out plannerLLMOutput, query core.Query, targets []core.Target, specs []tools.ToolSpec, followUp bool, priorHypothesisIDs []string) error {
+	// 澄清提议与任务/猜想互斥：同给为规划错误（编排据此挂起，静默取舍会丢意图）
+	if out.Clarify != nil {
+		if len(out.Hypotheses) > 0 || len(out.Tasks) > 0 {
+			return errors.New("clarify must not carry hypotheses or tasks")
+		}
+		if strings.TrimSpace(out.Clarify.Question) == "" {
+			return errors.New("clarify question is required")
+		}
+		return nil
+	}
 	if !followUp {
 		if len(out.Hypotheses) == 0 {
 			return errors.New("at least one hypothesis is required")
@@ -322,6 +344,13 @@ func (p *LLMPlanner) fillPlan(runID string, out plannerLLMOutput) (Plan, error) 
 	plan := Plan{
 		Hypotheses: make([]core.Hypothesis, 0, len(out.Hypotheses)),
 		Tasks:      make([]core.Task, 0, len(out.Tasks)),
+	}
+	if out.Clarify != nil {
+		plan.Clarify = &ClarifyRequest{
+			Question: strings.TrimSpace(out.Clarify.Question),
+			Options:  append([]string(nil), out.Clarify.Options...),
+		}
+		return plan, nil
 	}
 
 	for _, h := range out.Hypotheses {

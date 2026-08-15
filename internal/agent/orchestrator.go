@@ -53,6 +53,8 @@ type PlanState struct {
 	Verdicts []core.Verdict
 	// 集群侦察发现的可用资源类型（含自定义资源）；让规划器知道集群装了什么可查，而非盲猜标准资源
 	ClusterResources []ClusterResource
+	// 调查挂起后用户澄清的累积答复（Resume 注入）；规划器优先据此收敛，不再重复问
+	Clarifications []string
 }
 
 // 集群侦察发现的资源类型条目（解析自集群资源列表命令）
@@ -101,17 +103,55 @@ type entityFactory interface {
 	Now() time.Time
 }
 
-// 进程内挂起运行快照：澄清后 Resume 重跑定位起
+// 进程内挂起运行快照：澄清后 Resume 按阶段派发重跑/续跑
 // 不做磁盘持久化；进程退出即丢
 type suspendedRun struct {
 	// 运行快照（含问题与会话编号）
 	run core.Run
 	// 解析后的问题结构，Resume 时复用避免重复解析
 	query core.Query
-	// 定位状态（任务、证据、澄清累积）
+	// 挂起阶段（resolve / investigate）；Resume 据此派发
+	stage string
+	// 定位状态（任务、证据、澄清累积）；stage=resolve 时有效
 	resolve ResolveState
+	// 调查状态（猜想、任务、证据、判决、澄清累积）；stage=investigate 时有效
+	investigate InvestigateState
+	// 调查挂起前已完成的侦察产物；Resume 续跑复用（不重复侦察、不丢证据与规划上下文）
+	recon *reconResult
 	// 最近一次澄清请求（面向用户）
 	clarify ClarifyRequest
+}
+
+// 一次集群侦察的产物：进报告链的证据（不进验证器输入）与喂规划器的资源清单
+// resolveCount 为定位证据在种子中的前缀长度，完成链按此插位侦察证据
+type reconResult struct {
+	// 侦察证据；可能为失败证据或 nil（未启用/未尝试）
+	evidence *core.Evidence
+	// 解析出的资源类型清单；失败或无输出时为空
+	resources []ClusterResource
+	// 侦察证据在最终证据链中的插位（定位块之后）；resume 路径据此还原链序
+	resolveCount int
+}
+
+// 调查阶段累积状态：investigateLoop 的种子与挂起快照载体，镜像 ResolveState 角色
+// Resume 续跑时全量携带（保留调查进度），Round 重置（预算只计本段工具调用）
+type InvestigateState struct {
+	// 定位阶段已确认的目标（调查输入；Resume 续跑保留）
+	Targets []core.Target
+	// 跨轮累积的候选猜想；验证器每轮拿全量重判
+	Hypotheses []core.Hypothesis
+	// 已登记录的取证任务
+	Tasks []core.Task
+	// 累积证据（定位种子 + 调查取证）
+	Evidence []core.Evidence
+	// 最近一轮判决；首轮为空
+	Verdicts []core.Verdict
+	// 本段调查循环的工具调用轮计数（预算计数，挂起恢复时重置）
+	Round int
+	// 本段调查轮数预算上限；零值由循环用默认
+	MaxRounds int
+	// 用户澄清的累积答复（Resume 注入）
+	Clarifications []string
 }
 
 // 保存完整假闭环所需的角色和执行依赖
@@ -255,14 +295,38 @@ func (o *Orchestrator) Resume(ctx context.Context, runID, answer string) (core.O
 		return core.Outcome{}, fmt.Errorf("resume: no suspended run %q", runID)
 	}
 
-	state := snap.resolve
-	state.Clarifications = append(slices.Clone(state.Clarifications), strings.TrimSpace(answer))
-	// 澄清后重跑定位：保留已取证据与任务，但重置轮次预算计数，避免触顶后无法消歧
-	// 证据/任务仍回喂驱动；Round 仅表示本段工具调用次数
-	state.Round = 0
+	o.progressf("恢复运行 %s（%s 澄清已注入）…", runID, snap.stage)
+	switch snap.stage {
+	case core.StageResolve:
+		state := snap.resolve
+		state.Clarifications = append(slices.Clone(state.Clarifications), strings.TrimSpace(answer))
+		// 澄清后重跑定位：保留已取证据与任务，但重置轮次预算计数，避免触顶后无法消歧
+		// 证据/任务仍回喂驱动；Round 仅表示本段工具调用次数
+		state.Round = 0
+		return o.continueFromResolve(ctx, snap.run, snap.query, state)
+	case core.StageInvestigate:
+		state := snap.investigate
+		state.Clarifications = append(slices.Clone(state.Clarifications), strings.TrimSpace(answer))
+		// 澄清后续跑调查：保留全部调查进度（猜想/任务/证据/判决），仅重置预算计数
+		// 侦察产物自快照复用（不重复侦察、不丢证据与规划上下文）
+		state.Round = 0
+		return o.continueFromInvestigate(ctx, snap.run, snap.query, state, -1, snap.recon)
+	default:
+		// 未知阶段不应发生（挂起仅在编排 switch 内产生）；防御性归位快照并明确失败
+		o.putSuspendedRun(snap)
+		return core.Outcome{}, fmt.Errorf("resume: unknown suspension stage %q", snap.stage)
+	}
+}
 
-	o.progressf("恢复运行 %s（澄清已注入）…", runID)
-	return o.continueFromResolve(ctx, snap.run, snap.query, state)
+// 把快照存入挂起索引并标记运行状态为等待用户（各阶段挂起的共用入口）
+func (o *Orchestrator) putSuspendedRun(snap *suspendedRun) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.suspended == nil {
+		o.suspended = make(map[string]*suspendedRun)
+	}
+	snap.run.Status = core.RunStatusWaitingUser
+	o.suspended[snap.run.ID] = snap
 }
 
 // 查找会话内挂起运行编号；无则空串
@@ -294,7 +358,7 @@ func (o *Orchestrator) continueFromResolve(
 	}
 	if clarify != nil {
 		// 挂起：保存快照，返回澄清问题；不进入侦察/调查
-		o.putSuspended(run, query, *clarify, pausedState)
+		o.putResolveSuspended(run, query, *clarify, pausedState)
 		return core.Outcome{
 			Suspension: &core.Suspension{
 				RunID:     run.ID,
@@ -306,22 +370,74 @@ func (o *Orchestrator) continueFromResolve(
 		}, nil
 	}
 
-	// 集群侦察：发现集群实际可用资源类型（含自定义资源），让规划器知道集群装了什么
-	// 侦察证据单独存放，不进调查循环种子（不漏到验证器）；由本方法合并进返回链
-	reconEvidence, clusterResources := o.reconCluster(ctx, run.ID)
-	if clusterResources != nil {
-		o.progressf("侦察到 %d 种资源类型", len(clusterResources))
+	// 定位种子证据作为调查首轮上下文复用，不白查已取信息
+	return o.continueFromInvestigate(ctx, run, query, InvestigateState{
+		Targets:  targets,
+		Evidence: slices.Clone(resolveEvidence),
+	}, len(resolveEvidence), nil)
+}
+
+// 自调查阶段继续：Execute（resolve 成功后，带定位种子）与 Resume（investigate 挂起，带完整调查进度）共用
+// resolveSeedCount 为定位证据在种子中的前缀长度（首入侦察插位）；prior 非 nil 时复用快照侦察产物
+func (o *Orchestrator) continueFromInvestigate(
+	ctx context.Context,
+	run core.Run,
+	query core.Query,
+	seed InvestigateState,
+	resolveSeedCount int,
+	prior *reconResult,
+) (core.Outcome, error) {
+	if seed.MaxRounds <= 0 {
+		if o.investigateMaxRounds > 0 {
+			seed.MaxRounds = o.investigateMaxRounds
+		} else {
+			seed.MaxRounds = defaultInvestigateMaxRounds
+		}
 	}
+
+	// 集群侦察：首入调查阶段执行一次；Resume 续跑复用挂起快照携带的侦察产物
+	// （不重复侦察、不丢证据与规划上下文）。侦察证据不进调查循环种子（不漏到验证器），
+	// 由本方法在完成路径合并进返回链
+	recon := prior
+	if recon == nil && resolveSeedCount >= 0 {
+		ev, resources := o.reconCluster(ctx, run.ID)
+		recon = &reconResult{evidence: ev, resources: resources, resolveCount: resolveSeedCount}
+		if resources != nil {
+			o.progressf("侦察到 %d 种资源类型", len(resources))
+		}
+	}
+	var clusterResources []ClusterResource
+	if recon != nil {
+		clusterResources = recon.resources
+	}
+
 	// 调查阶段为编排可见循环：计划、执行、验证，证据不足时带历史证据再计划
-	// 默认只跑一轮与早期单轮等价；预算调高后配合提示词才真正迭代
-	// 定位阶段已取的作为首轮种子复用，不白查已取信息；侦察证据不在此列
-	evidence, verdicts, err := o.investigateLoop(ctx, query, targets, resolveEvidence, clusterResources)
+	// 澄清挂起时保存快照返回 Suspension；调查任务与澄清互斥由循环校验
+	evidence, verdicts, clarify, paused, err := o.investigateLoop(ctx, query, seed, clusterResources)
 	if err != nil {
 		return core.Outcome{}, err
 	}
+	if clarify != nil {
+		o.putInvestigateSuspended(run, query, *clarify, paused, recon)
+		return core.Outcome{
+			Suspension: &core.Suspension{
+				RunID:     run.ID,
+				SessionID: run.SessionID,
+				Stage:     core.StageInvestigate,
+				Question:  clarify.Question,
+				Options:   slices.Clone(clarify.Options),
+			},
+		}, nil
+	}
+
 	// 按时间序组装完整证据链：定位 → 侦察 → 调查，全部对用户透明可追溯
 	// 报告器只看定位与调查证据（侦察是上下文，不是结论依据）；返回链含侦察供命令行渲染
-	chain := appendEvidence(evidence, reconEvidence, len(resolveEvidence))
+	var chain []core.Evidence
+	if recon != nil {
+		chain = appendEvidence(evidence, recon.evidence, recon.resolveCount)
+	} else {
+		chain = evidence
+	}
 	o.progressf("生成报告…")
 	report, err := o.reporter.Report(ctx, run, verdicts, evidence)
 	if err != nil {
@@ -333,25 +449,35 @@ func (o *Orchestrator) continueFromResolve(
 	}, nil
 }
 
-// 存入挂起快照并标记运行状态为等待用户；深拷贝定位状态避免污染
-func (o *Orchestrator) putSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state ResolveState) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.suspended == nil {
-		o.suspended = make(map[string]*suspendedRun)
-	}
-	// 深拷贝切片，避免后续修改污染快照
+// 存入定位阶段挂起快照并标记运行状态为等待用户；深拷贝定位状态避免污染
+func (o *Orchestrator) putResolveSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state ResolveState) {
 	snap := &suspendedRun{
 		run:     run,
 		query:   query,
+		stage:   core.StageResolve,
 		resolve: cloneResolveState(state),
 		clarify: ClarifyRequest{
 			Question: clarify.Question,
 			Options:  slices.Clone(clarify.Options),
 		},
 	}
-	snap.run.Status = core.RunStatusWaitingUser
-	o.suspended[run.ID] = snap
+	o.putSuspendedRun(snap)
+}
+
+// 存入调查阶段挂起快照；深拷贝调查状态并携带侦察产物（保留进度续跑，Resume 派发见 StageInvestigate case）
+func (o *Orchestrator) putInvestigateSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state InvestigateState, recon *reconResult) {
+	snap := &suspendedRun{
+		run:         run,
+		query:       query,
+		stage:       core.StageInvestigate,
+		investigate: cloneInvestigateState(state),
+		recon:       recon,
+		clarify: ClarifyRequest{
+			Question: clarify.Question,
+			Options:  slices.Clone(clarify.Options),
+		},
+	}
+	o.putSuspendedRun(snap)
 }
 
 // 取出并删除挂起快照；不存在时返回 false，调用方据此报错或降级
@@ -375,6 +501,20 @@ func cloneResolveState(state ResolveState) ResolveState {
 		Query:          state.Query,
 		Tasks:          slices.Clone(state.Tasks),
 		Evidence:       slices.Clone(state.Evidence),
+		Round:          state.Round,
+		MaxRounds:      state.MaxRounds,
+		Clarifications: slices.Clone(state.Clarifications),
+	}
+}
+
+// 复制调查状态中的切片字段，避免挂起快照与进行中状态共享底层数组
+func cloneInvestigateState(state InvestigateState) InvestigateState {
+	return InvestigateState{
+		Targets:        slices.Clone(state.Targets),
+		Hypotheses:     slices.Clone(state.Hypotheses),
+		Tasks:          slices.Clone(state.Tasks),
+		Evidence:       slices.Clone(state.Evidence),
+		Verdicts:       slices.Clone(state.Verdicts),
 		Round:          state.Round,
 		MaxRounds:      state.MaxRounds,
 		Clarifications: slices.Clone(state.Clarifications),
@@ -411,36 +551,57 @@ const defaultInvestigateMaxRounds = 1
 func (o *Orchestrator) investigateLoop(
 	ctx context.Context,
 	query core.Query,
-	targets []core.Target,
-	seedEvidence []core.Evidence,
+	seed InvestigateState,
 	clusterResources []ClusterResource,
-) ([]core.Evidence, []core.Verdict, error) {
-	maxRounds := o.investigateMaxRounds
+) (evidence []core.Evidence, verdicts []core.Verdict, clarify *ClarifyRequest, paused InvestigateState, err error) {
+	maxRounds := seed.MaxRounds
 	if maxRounds <= 0 {
 		maxRounds = defaultInvestigateMaxRounds
 	}
 
-	var hypotheses []core.Hypothesis
-	var tasks []core.Task
-	// 首轮以定位阶段已取证据起步，不白查；累积语义不变
-	evidence := slices.Clone(seedEvidence)
-	var verdicts []core.Verdict
+	state := seed
+	hypotheses := slices.Clone(seed.Hypotheses)
+	tasks := slices.Clone(seed.Tasks)
+	evidence = slices.Clone(seed.Evidence)
+	verdicts = slices.Clone(seed.Verdicts)
 
-	for round := 0; round < maxRounds; round++ {
-		if err := ctx.Err(); err != nil {
-			return nil, nil, fmt.Errorf("investigate: %w", err)
+	for round := state.Round; round < maxRounds; round++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, nil, InvestigateState{}, fmt.Errorf("investigate: %w", ctxErr)
 		}
 
 		o.progressf("调查第 %d 轮…", round+1)
-		plan, err := o.planner.Plan(ctx, PlanState{
+		plan, planErr := o.planner.Plan(ctx, PlanState{
 			Query:            query,
-			Targets:          targets,
+			Targets:          state.Targets,
 			Evidence:         evidence,
 			Verdicts:         verdicts,
 			ClusterResources: clusterResources,
+			Clarifications:   slices.Clone(state.Clarifications),
 		})
-		if err != nil {
-			return nil, nil, fmt.Errorf("plan tasks (round %d): %w", round, err)
+		if planErr != nil {
+			return nil, nil, nil, InvestigateState{}, fmt.Errorf("plan tasks (round %d): %w", round, planErr)
+		}
+
+		// 澄清提议：证据不足以继续且缺口信息用户知道；与任务互斥，同给为规划错误
+		if plan.Clarify != nil {
+			if len(plan.Tasks) > 0 || len(plan.Hypotheses) > 0 {
+				return nil, nil, nil, InvestigateState{}, errors.New("plan clarify must not carry tasks or hypotheses")
+			}
+			if strings.TrimSpace(plan.Clarify.Question) == "" {
+				return nil, nil, nil, InvestigateState{}, errors.New("plan clarify requires a non-empty question")
+			}
+			o.progressf("调查需澄清：%s", plan.Clarify.Question)
+			state.Hypotheses = hypotheses
+			state.Tasks = tasks
+			state.Evidence = evidence
+			state.Verdicts = verdicts
+			state.Round = round
+			// Targets 来自 seed 不变，显式保留语义清晰（挂起快照需携带）
+			return nil, nil, &ClarifyRequest{
+				Question: strings.TrimSpace(plan.Clarify.Question),
+				Options:  slices.Clone(plan.Clarify.Options),
+			}, cloneInvestigateState(state), nil
 		}
 
 		// 后续轮规划器若无可补查的任务，视为调查结束，沿用上一轮判断
@@ -455,7 +616,7 @@ func (o *Orchestrator) investigateLoop(
 		for _, task := range plan.Tasks {
 			item, executeErr := o.executeTask(ctx, task)
 			if executeErr != nil && (!errors.Is(executeErr, errToolFailed) || item == nil) {
-				return nil, nil, fmt.Errorf("execute task %q: %w", task.ID, executeErr)
+				return nil, nil, nil, InvestigateState{}, fmt.Errorf("execute task %q: %w", task.ID, executeErr)
 			}
 			// 工具失败时条目为合成的失败证据，容忍继续（未来此处可改暂停问用户）
 			tasks = append(tasks, task)
@@ -464,7 +625,7 @@ func (o *Orchestrator) investigateLoop(
 
 		verdicts, err = o.verifier.Verify(ctx, query, hypotheses, tasks, evidence)
 		if err != nil {
-			return nil, nil, fmt.Errorf("verify evidence (round %d): %w", round, err)
+			return nil, nil, nil, InvestigateState{}, fmt.Errorf("verify evidence (round %d): %w", round, err)
 		}
 		o.progressf("  验证：%s", summarizeVerdicts(verdicts))
 		// 至少一个猜想被支持即找到根因，结束调查
@@ -474,7 +635,7 @@ func (o *Orchestrator) investigateLoop(
 		}
 	}
 
-	return evidence, verdicts, nil
+	return evidence, verdicts, nil, InvestigateState{}, nil
 }
 
 // 判断是否存在被证据支持的猜想，存在即已找到根因、循环应结束
