@@ -75,10 +75,14 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 7. 创建 PR
 
-把填充好的模板作为 `--body` 传给 `gh pr create`：
+把填充好的模板作为 `--body` 传给 `gh pr create`，并自动打 assignee 与 label：
 
 ```bash
-gh pr create --base main --head <当前分支名> --title "<commit message 主题或一句话概括>" --body "<模板内容>"
+gh pr create --base main --head <当前分支名> \
+  --title "<commit message 主题或一句话概括>" \
+  --body "<模板内容>" \
+  --assignee @me \
+  --label "<按第 8 步映射，可多个，空格分隔>"
 ```
 
 - `--title` 用本分支第一个 commit 的主题，或基于工作内容一句话改写
@@ -86,6 +90,29 @@ gh pr create --base main --head <当前分支名> --title "<commit message 主�
 - 不要在 `--body` 里转义 `####`（GitHub 会正常渲染 markdown）
 - 如果分支还没 push，先 `git push -u origin <分支名>`
 - PR 创建后向用户返回 PR URL
+
+### 8. 打 assignee 与 label
+
+**assignee**：固定 `--assignee @me`（创建者即维护者本人，不硬编码用户名）。
+
+**label 映射**（类型 → 仓库现有 label；与历史 PR #74–#78 的实际打法一致）：
+
+| 第 2 步判定类型 | label |
+| --- | --- |
+| `feat` | `enhancement` |
+| `docs` | `documentation` |
+| `test` | `test` |
+| `fix` | `bug` |
+| `refactor` | `refactor` |
+| 改动含 `docs/skills/`（新建 / 修改 skill） | 追加 `skill` |
+| `ci` / `chore` / `perf` 等其他类型 | 不映射，不硬造新 label |
+
+规则：
+
+- 多类型 PR 取并集（如 `feat`+`docs` → `enhancement documentation`，与 #77/#78 一致）
+- **只用仓库已存在的 label**，不新建；拿不准时先 `gh label list` 核对
+- `Review effort N/5` 由 pr-agent 自动打，本 skill 不管
+- 若 label 拼错导致 `gh` 报错，去掉 `--label` 重试并在 PR 创建后手动补，不要卡住流程
 
 ## 模板
 
