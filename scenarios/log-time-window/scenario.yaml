@@ -1,0 +1,5 @@
+name: log-time-window
+kind_cluster_name: aruing-sc-log-time-window
+namespace: demo
+# 给人看的坏态提示；脚本不解析本文件
+notes: "busybox 每 tick 打一行日志后 exit 1 → CrashLoopBackOff 反复重启；日志随重启累积且各重启周期时间戳不同，供 evidence.read since/until 时间窗切片验收"
