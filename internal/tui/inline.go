@@ -101,7 +101,9 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 
 // 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行、长行在终端折行），
 // 用 user 样式项渲染「你 + 内容」。
-// 上移行数按回显真实占用的终端行数估：每逻辑行按 ceil(显示宽/终端宽) 折行，prompt 前缀占 2 格。
+// 回车后光标停在回显区下一行：须上移完整回显行数（echoRows）回到首行再逐行清印，
+// 少移一行会把「你 xx」打在原始回显下方、造成每轮输入重复显示。
+// 行数按回显真实占用估算：每逻辑行 ceil(显示宽/终端宽) 折行，「❯ 」前缀约 2 列，CJK 按 2 列。
 func echoUserMessage(out io.Writer, st styles, text string) {
 	width := terminalWidth()
 	echoRows := 0
@@ -111,8 +113,9 @@ func echoUserMessage(out io.Writer, st styles, text string) {
 		cols := 2 + displayCols(line)
 		echoRows += rowsFor(cols, width)
 	}
-	if echoRows > 1 {
-		fmt.Fprintf(out, "\x1b[%dA", echoRows-1)
+	// 回车后光标在回显区下一行行首：上移完整回显行数覆盖首行（差一行会留下原始回显致重复）
+	if echoRows > 0 {
+		fmt.Fprintf(out, "\x1b[%dA", echoRows)
 	}
 	for _, line := range logical {
 		clearLine(out)
