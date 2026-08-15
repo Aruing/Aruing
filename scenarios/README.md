@@ -60,6 +60,22 @@ make lab-kube NAME=crashloop-bad-image CMD="get po -A"
 make lab-kube NAME=crashloop-bad-image CMD="describe pod -n demo -l app=demo-api"
 ```
 
+### 同集群多 case（cases/）
+
+一场景一 kind 集群成本高；多个 case 可共享同一集群基底：
+
+```
+scenarios/<name>/
+  manifests/            # 集群基底（一次 up）
+  prompts.md/expect.md  # 顶层 = 默认 case：只发第 1 条提示词（单轮）
+  cases/<case>/         # 有此目录时顶层不再单独跑；case 按目录名排序逐个跑
+    prompts.md          # 全部有序提示词按序同 session 续聊（可表达挂起-回复链）
+    expect.md
+    apply/              # 可选：case 开始前 kubectl apply 追加的故障清单（*.yaml）
+```
+
+纪律（多故障共存时诊断 agent 全集群可见）：同集群 case 的故障隔离到不同 namespace、prompt 显式带 ns、expect 容忍他 case 故障「可见但非主因」。`apply/` 不回滚——但 `make smoke-all` 的 **fresh-up**（up 前拆掉已存在集群重建）保证每次重启后集群严格等于 manifests + 本轮 case 的 apply。
+
 > 不想用包装、想自己控制环境变量也行：`make lab-up` 结尾会打印 `export KUBECONFIG=...` 路径，自己执行后即可直接用 `./bin/aruing chat ...` 和 `kubectl ...`。
 
 **多轮对话**：`lab-chat` 带 `MSG=` 就是单轮诊断后退出。想多轮续聊就**不带 MSG**，进交互模式（一行一轮，`exit`/`quit`/Ctrl-D 退出）：
