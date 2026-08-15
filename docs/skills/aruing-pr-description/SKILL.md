@@ -75,7 +75,13 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 7. 创建 PR
 
-把填充好的模板作为 `--body` 传给 `gh pr create`，并自动打 assignee 与 label：
+创建前先过本地 lint 闸门：
+
+```bash
+make lint fmt-check   # 不绿不上 PR：顺手修掉自己分支引入的 lint/格式问题后再继续
+```
+
+lint 不绿时停下修（只修本分支引入的问题，不做全仓顺手重构），然后才把填充好的模板作为 `--body` 传给 `gh pr create`，并自动打 assignee 与 label：
 
 ```bash
 gh pr create --base main --head <当前分支名> \
