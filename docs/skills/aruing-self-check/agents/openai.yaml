@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing Self-Check"
+  short_description: "一键全量自检：make check + 全场景真集群 smoke + expect.md 内容判定 + 汇总报告"
+  default_prompt: "Use $aruing-self-check when running a full self-check or smoking all kind scenarios for this repository."
+
+policy:
+  allow_implicit_invocation: true

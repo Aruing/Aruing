@@ -108,6 +108,14 @@ vuln:
 
 check: tidy-check build test-ci fmt-check vet lint vuln
 
+# 全量真集群 smoke（全部场景，严格校验）：up → chat → down，单场景失败不中断，末尾汇总。
+# 依赖 Docker/kind/kubectl + bin/aruing + LLM 配置（playground/config.yaml 或 ARUING_CONFIG）。
+smoke-all:
+	bash scripts/smoke-all.sh
+
+# 一键全量自检 = 静态链 + 真集群 smoke。
+self-check: check smoke-all
+
 clean:
 	rm -rf "$(BIN_DIR)"
 

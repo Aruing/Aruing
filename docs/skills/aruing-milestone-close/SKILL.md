@@ -32,6 +32,7 @@ ls plan/<里程碑>/                          # 步骤 plan 清单
 
 | 动作 | 规则 |
 | --- | --- |
+| **前置自检（若动过工具/编排）** | 本里程碑动过 `internal/tools/` / `internal/agent/` / `internal/tui/` / 编排相关代码 → 关闭前按 `aruing-self-check` 跑全量自检，报告交维护者确认 |
 | 头文件状态头 → done | 只改状态行（含日期 + PR 号），正文不动 |
 | 逐步骤核对状态头 | 每个 step plan 须已 `merged`（PR 号 + commit）；发现未 merged 的列出，问维护者 |
 | 归档 | `mv plan/<里程碑>/ plan/archive/<里程碑>/`（头文件 + 步骤 plan 一起，不拆） |
