@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing Cluster Smoke"
+  short_description: "真集群场景测试纪律：何时跑、跑哪些、场景/case 维护规则、case 编排与污染纪律"
+  default_prompt: "Use $aruing-cluster-smoke when deciding whether/how to run kind scenario smoke tests or maintaining scenarios/cases."
+
+policy:
+  allow_implicit_invocation: true
