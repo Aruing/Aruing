@@ -16,4 +16,7 @@ type Plan struct {
 	Hypotheses []core.Hypothesis
 	// 为定位信息或验证猜想而生成的工具任务列表
 	Tasks []core.Task
+	// 可选：证据不足以继续且缺口信息用户知道（故障时间、近期变更等）时提议澄清；
+	// 与任务/猜想互斥（同给为规划错误，由编排拒绝），镜像 resolver 的 clarify 意图
+	Clarify *ClarifyRequest
 }

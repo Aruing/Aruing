@@ -2,8 +2,8 @@ package core
 
 // 运行挂起：编排某阶段需要用户澄清时产出
 //
-// Stage 标明挂起发生在哪一阶段，当前仅 resolve 使用；
-// 后续 investigate / parse 等复用本结构，只需在 Resume 派发加 case。
+// Stage 标明挂起发生在哪一阶段（resolve / investigate）；
+// 后续 parse 等复用本结构，只需在 Resume 派发加 case。
 // Report 与挂起互斥：Outcome 中恰一非空。
 type Suspension struct {
 	// 挂起的运行编号
@@ -33,3 +33,6 @@ type Outcome struct {
 
 // 定位阶段挂起时 Stage 取值
 const StageResolve = "resolve"
+
+// 调查阶段挂起时 Stage 取值（规划器在证据不足以继续、且缺口信息用户知道时问用户）
+const StageInvestigate = "investigate"

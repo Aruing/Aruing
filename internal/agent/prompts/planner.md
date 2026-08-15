@@ -37,6 +37,7 @@ User 消息为 JSON，包含：
 - `query`：问题结构（goal、nodes、edges、timeRange；节点/边已是系统编号如 `node_...`）
 - `targets`：已确认目标（id、nodeId、type、attrs、evidenceIds）
 - `cluster_resources`（可选）：本集群实际可用资源类型清单（name、kind、namespaced、apiGroup；含 CRD 如 IngressRoute）。优先用它判断**可查什么**——若用户问题指向的资源类型在此清单里（尤其是非标准的 CRD），应安排取证任务去查，不要假设只有标准 K8s 资源
+- `clarifications`（可选）：调查挂起后用户对澄清问题的累积答复。**存在时优先据此收敛规划**（如按用户给的故障起始时间安排针对性查询），不要重复问已回答的问题
 - `evidence`（可选）：前几轮已取得的证据（id、taskId、toolName、commandView、summary、error、raw）；**存在时表示你在后续轮**
 - `verdicts`（可选）：上一轮的判断（hypothesisId、result、reason、evidenceIds）；`result: insufficient` 的猜想证据不足，需要补查
 
@@ -51,6 +52,7 @@ User 消息为 JSON，包含：
 5. 当所有猜想被排除（见规则 2）、或证据强烈指向新故障模式时，可在 `hypotheses` 新增猜想；否则专注为现有猜想补证
 6. 新任务的 `refs` 可引用输入中已有的猜想编号（如 verdicts 里的 `hypothesisId`）、node/target 编号
 7. **反思（防确认偏误）**：在为某猜想补证前，先问「现有证据是否也能由另一个不同的根因解释？」若可能，把该替代解释作为新猜想加入 `hypotheses`，并安排一个**能区分两者**的取证任务（替代解释成立时应观察到、而当前猜想成立时不应观察到的信号）。不要只收集确认性证据
+8. **提议澄清（clarify）**：当证据不足以裁决任何猜想、且缺口信息**只有用户知道**（故障大致起始时间、近期是否变更、预期行为对比、凭据来源等）时，输出 `clarify`（见输出 schema）而非硬编任务。系统会挂起调查并转问用户，答复会出现在下次输入的 `clarifications` 中。已有答复时优先据此规划，不要重复问
 
 ## 输出
 
@@ -75,9 +77,15 @@ User 消息为 JSON，包含：
       "refs": ["string"],
       "depends_on": ["string"]
     }
-  ]
+  ],
+  "clarify": {
+    "question": "string",
+    "options": ["string"]
+  }
 }
 ```
+
+`clarify` 为可选对象，仅在提议澄清时输出，且**不得**同时携带 `hypotheses` / `tasks`（互斥）。
 
 字段语义：
 
@@ -93,6 +101,7 @@ User 消息为 JSON，包含：
   - `purpose`：本次取证要证明或排除什么。
   - `refs`：关联数据编号；可引用输入中的 `query.id`、`node_*`、`edge_*`、`target_*`，以及本输出 `hypotheses[].ref`。
   - `depends_on`：依赖的其他任务的局部 `ref`；当前可为空数组；非空时必须是本输出中已有的 task ref。
+- `clarify`（可选）：澄清提议。`question` 面向用户、具体可答；`options` 为候选答案（可空）。与 hypotheses / tasks 互斥。
 
 ## 硬约束
 
