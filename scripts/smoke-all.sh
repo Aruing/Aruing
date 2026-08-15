@@ -175,17 +175,23 @@ run_cases() { # <scenario>
 		fi
 		rm -f "$prompts_tmp"
 
-		if [[ $total -eq 0 ]]; then
-			echo "chat=SKIP (no prompts in case prompts.md)"
-			all_ok=1
-			rows+=("$scn/$cbase apply=$([[ $apply_fail -eq 0 ]] && echo ok || echo FAIL)($n_apply) chat=SKIP")
-		elif [[ $chat_ok -eq 1 && $apply_fail -eq 0 ]]; then
-			rows+=("$scn/$cbase apply=$([[ $n_apply -eq 0 ]] && echo none || echo ok)($n_apply) chat=ok($total prompts)")
-		else
-			rows+=("$scn/$cbase apply=$([[ $apply_fail -eq 0 ]] && echo ok || echo FAIL)($n_apply) chat=FAIL")
-		fi
+		apply_state="ok"
+		[[ $apply_fail -eq 0 ]] || apply_state="FAIL"
+		[[ $n_apply -eq 0 && $apply_fail -eq 0 ]] && apply_state="none"
+		chat_state="FAIL"
+		[[ $chat_ok -eq 1 ]] && chat_state="ok($total prompts)"
+		[[ $total -eq 0 ]] && { chat_state="SKIP"; all_ok=1; }
+		rows+=("$scn/$cbase apply=$apply_state($n_apply) chat=$chat_state")
+		[[ "$chat_state" == "SKIP" ]] && echo "chat=SKIP (no prompts in case prompts.md)"
 		echo
 	done < <(find "$cases_dir" -mindepth 1 -maxdepth 1 -type d | sort)
+
+	# cases/ 存在但零 case 目录：顶层默认 case 已被跳过，等于什么都没验收 → 判失败（pr-agent #83）
+	if ! find "$cases_dir" -mindepth 1 -maxdepth 1 -type d | grep -q .; then
+		echo "case=FAIL (cases/ exists but has no case directories)"
+		rows+=("$scn cases=EMPTY chat=SKIP")
+		return 1
+	fi
 
 	return $all_ok
 }
@@ -201,11 +207,23 @@ for name in "${names[@]}"; do
 	log="$logs_dir/$name.log"
 	: >"$log"
 
-	# fresh-up：已存在的集群先拆（保证重启后严格符合 manifests；残留 case apply 一并清除）
+	# fresh-up：已存在的集群先拆（保证重启后严格符合 manifests；残留 case apply 一并清除）。
+	# 拆除失败不得静默复用脏集群（pr-agent #83）：仍存在则该场景判 up=FAIL 跳过。
 	cluster="$(scn_cluster_name "$name")"
 	if scn_kind_exists "$cluster"; then
 		echo "fresh-up: removing pre-existing cluster '$cluster'"
 		bash "$PWD/scripts/scenario-down.sh" "$name" >>"$log" 2>&1 || true
+		if scn_kind_exists "$cluster"; then
+			echo "up=FAIL (fresh-up teardown failed; cluster '$cluster' still exists — refusing to reuse stale state)"
+			if [[ $has_cases -eq 1 ]]; then
+				rows+=("$name up=FAIL(fresh-up) all-cases=SKIP down=SKIP")
+			else
+				rows+=("$name up=FAIL(fresh-up) chat=SKIP down=SKIP")
+			fi
+			overall=1
+			echo
+			continue
+		fi
 	fi
 	run_step up "$log" bash "$PWD/scripts/scenario-up.sh" "$name" && up_ok=1
 
