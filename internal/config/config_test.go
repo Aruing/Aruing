@@ -334,3 +334,22 @@ func TestTUIModeEnv(t *testing.T) {
 		t.Fatal("default Mode should be empty")
 	}
 }
+
+// config 文件的 tui 段必须完整带入（回归：此前 LoadFile 漏拷 TUI，
+// 文件里的 theme/mode/theme_file 全部静默失效，只有 env 路径生效）
+func TestLoadFileCarriesTUISection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	yaml := "llm:\n  base_url: x\n  api_key: k\n  model: m\n" +
+		"tui:\n  theme: dark\n  mode: app\n  theme_file: theme.yaml\n"
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TUI.Theme != "dark" || cfg.TUI.Mode != "app" || cfg.TUI.ThemeFile != "theme.yaml" {
+		t.Fatalf("tui section lost: %+v", cfg.TUI)
+	}
+}
