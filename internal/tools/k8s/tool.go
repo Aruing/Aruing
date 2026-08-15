@@ -119,6 +119,7 @@ func (t *Tool) Spec() tools.ToolSpec {
 			"使用进程直调，不经 shell；默认表格输出会被自动投影为摘要（类型/条数/列/行）。" +
 			"大结果集先用 --field-selector / label selector 收窄，或 -o jsonpath={...} 抽取具体字段；需要完整对象时再 -o json。" +
 			"若观察已有 evidenceId 且需翻页看表内其它行，用 evidence.read 按 offset/limit 切片，勿重复拉全量。" +
+			"取 logs 建议加 --timestamps，之后可对该观察用 evidence.read 的 since/until（RFC3339）按时间窗切片。" +
 			"可选 stdin 与 timeoutSeconds。",
 		InputSchema: append(json.RawMessage(nil), t.specJSON...),
 	}
@@ -128,6 +129,8 @@ func (t *Tool) Spec() tools.ToolSpec {
 // 解析顺序：JSON Table → 文本表 → 行级兜底；仅 exitCode=0 且 stdout 非空可切，否则返回错误
 // 行级兜底服务 describe/logs/events 等非表格输出：stdout 按行拆为单列，空行保留（分段有结构意义），
 // Columns 为 nil 表示非表格，由调用方走行渲染；纯机械投影，不解释行内容（#16/#19）
+// 查询带时间窗（Since/Until）时：行级兑底路径先按行首 RFC3339 过滤再开窗（见 timecursor.go）；
+// 表格路径不猜列的时间语义，明确报错引导列收窄或 re-query
 func (t *Tool) Slice(raw []byte, q tools.SliceQuery) (tools.SliceView, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return tools.SliceView{}, errors.New("empty raw")
@@ -147,8 +150,17 @@ func (t *Tool) Slice(raw []byte, q tools.SliceQuery) (tools.SliceView, error) {
 	var ok bool
 	if proj, ok = parseJSONTable(stdout); !ok {
 		if proj, ok = parseTextTable(stdout); !ok {
+			// 行级兑底：非表格输出；带时间窗时先按行首 RFC3339 过滤再开窗（logs --timestamps 产物）
+			if q.Since != "" || q.Until != "" {
+				return sliceTimeWindow(stdout, q)
+			}
 			return sliceTextLines(stdout, q)
 		}
+	}
+	// 表格输出不猜列的时间语义（kubectl 表无绝对时间列）：遇时间窗明确报错引导列收窄或 re-query
+	if q.Since != "" || q.Until != "" {
+		return tools.SliceView{}, errors.New(
+			"表格输出不支持时间窗切片；请用列收窄重查（--field-selector / -o jsonpath）或对 logs 类非表格观察加 --timestamps 重取")
 	}
 	cols, rows, total, offset, limit := summary.SliceRows(proj.columns, proj.rows, q.Offset, q.Limit)
 	return tools.SliceView{

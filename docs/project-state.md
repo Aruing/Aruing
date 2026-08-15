@@ -1,12 +1,14 @@
 # 项目当前状态
 
-> 最后更新：2026-08-14（**`0.1.0-beta16` 已归档**：非表格输出行级分页 #77。**下一步重开候选窗口**。前序：beta15 已归档）
+> 最后更新：2026-08-15（**`0.1.0-beta17` 进行中**：logs 时间游标，arc Step 3b 最后残留。前序：beta16 已归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta16` / 巨输出分页（非表格输出行级页式）** ✅ 完成并归档（2026-08-14；#77）：arc《工具输出导航》Step 3b 残留收尾。k8s `Slicer` 行级兜底（非表格 stdout 按物理行拆单列、空行保留、`Columns=nil`）；`evidence.read` 行模式渲染（绝对行号 + 单行 240 runes 截断标注）；`fallbackSummary` 首尾行预览 + 翻页提示；Spec / tower prompt 教学同步。core / 编排 / 协议零改。仍 lossy 残留：超 `MaxStdoutBytes` 截断、logs 时间游标（均 0.2+）。plan 在 `plan/archive/0.1.0-beta16/`。
+**`0.1.0-beta17` / logs 时间游标（evidence.read 时间窗切片）** 🚧 进行中：`SliceQuery` 增 `Since`/`Until`（RFC3339 闭区间，通用契约）；k8s `Slicer` 对行首 RFC3339（`logs --timestamps` 产物）机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导（#18）；meta 回填窗内首末时间戳；Spec / tower prompt 教学同步（取 logs 加 `--timestamps`）。core / 编排零改。完成后 arc Step 1–3b 在 0.1.0 承诺全部兑现，转入 0.1.0 收尾关版本评估。
+
+**`0.1.0-beta16` / 巨输出分页（非表格输出行级页式）** ✅ 完成并归档（2026-08-14；#77）：arc《工具输出导航》Step 3b 残留收尾。k8s `Slicer` 行级兜底（非表格 stdout 按物理行拆单列、空行保留、`Columns=nil`）；`evidence.read` 行模式渲染（绝对行号 + 单行 240 runes 截断标注）；`fallbackSummary` 首尾行预览 + 翻页提示；Spec / tower prompt 教学同步。core / 编排 / 协议零改。仍 lossy 残留：超 `MaxStdoutBytes` 截断（0.2+ 落盘页式）；logs 时间游标 → beta17。plan 在 `plan/archive/0.1.0-beta16/`。
 
 **`0.1.0-beta15` / 行内 TUI（pi 留痕风格）+ 双模式** ✅ 完成并归档（2026-08-14；#73 行内引擎（自写翻车→ ergochat/readline + shift+enter 软换行）；#74 轮间 divider + glamour + 每轮自适应宽；#76 `--ui`/`tui.mode` 双模式接选 + app 模式 tty 预检/AltScreen/渲染绑真终端 hotfix ×2；toolchain go1.26.6 清标准库 CVE）。历程《行内 TUI 与双模式》。plan 在 `plan/archive/0.1.0-beta15/`。
 
@@ -68,6 +70,7 @@
 | beta14 | 交互式 TUI + 启动 banner | ✅ | #70 banner + #71 TUI 骨架+容错 + #72 markdown+主题；新硬约束 #20；不触 §4 |
 | beta15 | 行内 TUI + 双模式 | ✅ | #73（ergochat/readline + 软换行 + 容错）；#74（divider + glamour + 每轮自适应宽）；#76（--ui 双模式 + hotfix）；不触 §4 |
 | beta16 | 巨输出分页（非表格行级页式） | ✅ | #77 k8s `Slicer` 行级兜底 + `evidence.read` 行渲染（行号/截断标注）+ `fallbackSummary` 首尾预览 + 翻页提示；core 零改；不触 §4 |
+| beta17 | logs 时间游标（时间窗切片） | 🚧 | `SliceQuery.Since/Until`（RFC3339 闭区间，通用契约）；k8s 行首 RFC3339 机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导；窗内首末时间戳 meta；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -75,11 +78,11 @@
 
 ## 下一步
 
-**下一项**：**重开候选窗口**——beta16 已归档（非表格行级分页交付）。维护者下次会话先定方向。
+**下一项**：**beta17 收尾**（logs 时间游标；代码已交付待验收合并）→ 合并后评估 0.1.0 收尾关版本。
 
-**0.1.0 候选**（beta16 之后）：
+**0.1.0 候选**（beta17 之后）：
 
-1. **logs / events 时间游标**（arc《工具输出导航》3b 残留；`SliceQuery` 已留位）
+1. **logs / events 时间游标**（arc《工具输出导航》3b 残留）→ **beta17 进行中**
 2. **磁盘持久化 / 超巨输出页式**（0.2+ 或重开远景；arc《TUI》缺口同批解）
 3. **TUI 布局可配（L4）/ 完整主题 YAML**（arc《TUI》Step 2）
 4. **流式响应**（arc《流式响应》，0.2+；前端 streamingBuffer 已留位）

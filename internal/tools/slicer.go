@@ -7,12 +7,18 @@ type Slicer interface {
 	Slice(raw []byte, q SliceQuery) (SliceView, error)
 }
 
-// 切片查询：行级窗口
+// 切片查询：行级窗口 + 可选时间窗
+// 时间窗语义对所有后端一致：Since/Until 为 RFC3339 闭区间，至少一个非空时后端先在时间维过滤，
+// 再在过滤结果集上按 Offset/Limit 开窗；后端无法按时间切时明确报错，不得静默丢行（#18）
 type SliceQuery struct {
 	// 起始行（含），0 基；负值按 0 处理
 	Offset int
 	// 最多返回行数；非正时由调用方或实现侧使用默认
 	Limit int
+	// 可选时间窗起点（含），RFC3339；空表示不限
+	Since string
+	// 可选时间窗终点（含），RFC3339；空表示不限
+	Until string
 }
 
 // 切片结果：总行数与当前窗口
@@ -27,4 +33,8 @@ type SliceView struct {
 	Columns []string
 	// 本页行（单元格字符串）
 	Rows [][]string
+	// 可选：带时间窗查询时窗内首行时间戳（RFC3339），后端支持时间过滤时回填；空表示未启用或无匹配
+	WindowFirst string
+	// 可选：带时间窗查询时窗内末行时间戳（RFC3339），后端支持时间过滤时回填；空表示未启用或无匹配
+	WindowLast string
 }
