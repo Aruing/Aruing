@@ -99,18 +99,50 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	}
 }
 
-// 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行），
-// 用 user 样式项渲染「你 + 内容」。行数按软换行计数（与提交前回显一致）。
+// 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行、长行在终端折行），
+// 用 user 样式项渲染「你 + 内容」。
+// 上移行数按回显真实占用的终端行数估：每逻辑行按 ceil(显示宽/终端宽) 折行，prompt 前缀占 2 格。
 func echoUserMessage(out io.Writer, st styles, text string) {
-	lines := strings.Split(text, "\n")
-	// 光标回到回显首行：当前在末行行首（提交后），上移 n-1 行
-	if len(lines) > 1 {
-		fmt.Fprintf(out, "\x1b[%dA", len(lines)-1)
+	width := terminalWidth()
+	echoRows := 0
+	logical := strings.Split(text, "\n")
+	for _, line := range logical {
+		// 「❯ 」前缀约 2 列；保守按显示宽度折行计数（CJK 粗略按 2 列估，宁可多清一行也不残留）
+		cols := 2 + displayCols(line)
+		echoRows += rowsFor(cols, width)
 	}
-	for _, line := range lines {
+	if echoRows > 1 {
+		fmt.Fprintf(out, "\x1b[%dA", echoRows-1)
+	}
+	for _, line := range logical {
 		clearLine(out)
-		fmt.Fprintln(out, st.user.Render("你 ")+line)
+		fmt.Fprint(out, st.user.Render("你 "+line), "\n")
 	}
+}
+
+// 折行行数：列数除以终端宽向上取整，至少 1
+func rowsFor(cols, width int) int {
+	if width <= 0 {
+		width = 80
+	}
+	rows := (cols + width - 1) / width
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+// 粗估显示列数：CJK 与全角按 2 列，其余 1 列（用于折行行数估算，宁多勿少）
+func displayCols(s string) int {
+	cols := 0
+	for _, r := range s {
+		if r > 0x2E80 { // CJK 区块及以右粗略按宽字符
+			cols += 2
+		} else {
+			cols++
+		}
+	}
+	return cols
 }
 
 // 读多行输入：shift/option+enter（软换行，由 keys 标记）直接换行拼接下一行；
@@ -180,11 +212,10 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
 			} else {
 				for _, mv := range renderAssistant(md, msg.result) {
-					fmt.Fprintln(out, st.assistant.Render("aruing ")+mv.text)
+					// 整行经 assistant 样式项渲染：下边距属于回复块（块间呼吸感主题可调）
+					fmt.Fprint(out, st.assistant.Render("aruing "+mv.text), "\n")
 				}
 			}
-			// 助手回复块之后留一行空隙（轮间呼吸感）：经 assistant 样式项下边距，主题可调
-			fmt.Fprintln(out)
 			return
 		case <-ticker.C:
 			frame = (frame + 1) % len(spinnerFrames)
@@ -286,6 +317,7 @@ func renderMessageDivider(out io.Writer, st styles, width int) {
 	if width <= 0 {
 		width = 80
 	}
+	// margin 渲染产出 空/线/空 三行但不带终止换行：补单个 \n 让光标落到下一行
 	fmt.Fprint(out, st.divider.Render(strings.Repeat("─", width)), "\n")
 }
 

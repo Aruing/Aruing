@@ -103,8 +103,12 @@ func TestRenderMessageDivider(t *testing.T) {
 	var b strings.Builder
 	renderMessageDivider(&b, st, 10)
 	got := b.String()
-	// 结构：上边距空行 + 满宽水平线 + 下边距空行；边距经 divider 样式项渲染（主题可调）
-	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	// 结构：上边距空行 + 满宽水平线 + 下边距空行（margin 由 divider 样式项渲染），
+	// 末尾以单个换行结束，不再有额外空行
+	if !strings.HasSuffix(got, "\n") || strings.HasSuffix(got, "\n\n\n") {
+		t.Fatalf("divider must end with exactly one newline: %q", got)
+	}
+	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
 	if len(lines) != 3 || strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[2]) != "" {
 		t.Fatalf("want blank/line/blank structure, got %q", got)
 	}
