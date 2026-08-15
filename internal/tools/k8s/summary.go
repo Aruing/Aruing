@@ -247,15 +247,23 @@ func errorSummary(exitCode int, stderr string) string {
 	return s
 }
 
-// 非表格成功输出（describe、logs 等）的 fallback：首行预览加总行数并指向 Raw
-// 不把整段文本复制进 Summary，模型需要细节时从 Raw 读取
+// 非表格成功输出（describe、logs 等）的 fallback：首尾行预览加总行数，并提示可翻页
+// 不把整段文本复制进 Summary；模型需要细节时经 evidence.read 翻页或从 Raw 读取
+// 总行数按物理行计（含空行），与 evidence.read 行级切片的 total 一致，模型可据此定位窗口
 func fallbackSummary(stdout string) string {
 	lines := nonBlankLines(stdout)
 	if len(lines) == 0 {
 		return "kubectl 执行完成（非表格输出）"
 	}
+	total := len(strings.Split(strings.TrimRight(stdout, "\r\n"), "\n"))
 	first := truncateRunes(strings.TrimSpace(lines[0]), 80)
-	return fmt.Sprintf("kubectl 输出（非表格，共 %d 行）：%s … 见 raw", len(lines), first)
+	s := fmt.Sprintf("kubectl 输出（非表格，共 %d 行）：%s", total, first)
+	if len(lines) > 1 {
+		last := truncateRunes(strings.TrimSpace(lines[len(lines)-1]), 80)
+		s += " … 尾行：" + last
+	}
+	s += " … 可用 evidence.read 按 offset/limit 翻页读原文（有 evidenceId 时）"
+	return s
 }
 
 // 取输出中的首个非空行，去掉首尾空白；无内容时返回空串

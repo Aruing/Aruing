@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-14（**`0.1.0-beta15` 已归档**：行内 TUI 双模式 #73/#74/#76 + hotfix；历程《行内 TUI 与双模式》。**下一步重开候选窗口**。前序：beta14 已归档）
+> 最后更新：2026-08-14（**`0.1.0-beta16` 进行中**：非表格输出行级分页。前序：beta15 已归档）
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta16` / 巨输出分页（非表格输出行级页式）** ⏳ 进行中（2026-08-14）：arc《工具输出导航》Step 3b 残留收尾。k8s `Slicer` 行级兜底（非表格 stdout 按物理行拆单列、空行保留、`Columns=nil`）；`evidence.read` 行模式渲染（绝对行号 + 单行 240 runes 截断标注 + 元信息）；`fallbackSummary` 首尾行预览 + 翻页提示；Spec / tower prompt 教学同步。core / 编排 / 协议零改。plan 在笔记 `plan/0.1.0-beta16/`。
 
 **`0.1.0-beta15` / 行内 TUI（pi 留痕风格）+ 双模式** ✅ 完成并归档（2026-08-14；#73 行内引擎（自写翻车→ ergochat/readline + shift+enter 软换行）；#74 轮间 divider + glamour + 每轮自适应宽；#76 `--ui`/`tui.mode` 双模式接选 + app 模式 tty 预检/AltScreen/渲染绑真终端 hotfix ×2；toolchain go1.26.6 清标准库 CVE）。历程《行内 TUI 与双模式》。plan 在 `plan/archive/0.1.0-beta15/`。
 
@@ -65,6 +67,7 @@
 | beta13 | 工具输出 L3 腿 B（普适证据导航） | ✅ | #67 `internal/tools/summary`；#68 `Slicer` + `evidence.read` + 轮内 `ObservationIndex` + k8s Slicer + `MaxStdoutBytes` 配置；core 零改 |
 | beta14 | 交互式 TUI + 启动 banner | ✅ | #70 banner + #71 TUI 骨架+容错 + #72 markdown+主题；新硬约束 #20；不触 §4 |
 | beta15 | 行内 TUI + 双模式 | ✅ | #73（ergochat/readline + 软换行 + 容错）；#74（divider + glamour + 每轮自适应宽）；#76（--ui 双模式 + hotfix）；不触 §4 |
+| beta16 | 巨输出分页（非表格行级页式） | ⏳ | k8s `Slicer` 行级兜底 + `evidence.read` 行渲染（行号/截断标注）+ `fallbackSummary` 首尾预览 + 翻页提示；core 零改；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -72,9 +75,9 @@
 
 ## 下一步
 
-**下一项**：**重开候选窗口**——beta15 已归档（行内 TUI 双模式交付）。维护者下次会话先定方向。
+**下一项**：完成 `0.1.0-beta16`（非表格输出行级分页；当前 PR 落地中），随后回归候选窗口。
 
-**0.1.0 候选**（重开后选择）：
+**0.1.0 候选**（beta16 之后）：
 
 1. **logs / events 时间游标**（arc《工具输出导航》3b 残留；`SliceQuery` 已留位）
 2. **磁盘持久化 / 超巨输出页式**（0.2+ 或重开远景；arc《TUI》缺口同批解）
@@ -94,7 +97,7 @@
 **arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
 
 - Step **3a** 大表中段可读 → **`0.1.0-beta12`（done，#66）**
-- Step **3b** 证据导航 / 巨输出载波 → **`0.1.0-beta13`（done 主段，#67+#68）**；logs 时间游标与超巨页式仍见 arc 缺口
+- Step **3b** 证据导航 / 巨输出载波 → **`0.1.0-beta13`（done 主段，#67+#68）**；logs 时间游标仍见 arc 缺口；非表格输出的页式内存变体（行级兜底）→ **`0.1.0-beta16`（进行中）**，落盘页式仍 0.2+
 - Step 4 map-reduce（0.2+）
 - Step 5 子 agent 分治（0.2+，#15/#17）
 

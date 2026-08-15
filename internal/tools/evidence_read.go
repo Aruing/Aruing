@@ -17,6 +17,8 @@ import (
 const (
 	evidenceReadToolName = "evidence.read"
 	evidenceReadSource   = "evidence"
+	// 行模式单行渲染截断上限（runes）：logs 单行可极长，截断加省略号，全文仍在源证据 Raw（#18 不静默丢）
+	lineRenderTruncateRunes = 240
 )
 
 // 按 evidenceId 从轮内索引取 Raw，经源工具 Slicer 切出一页
@@ -65,7 +67,9 @@ func (t *EvidenceReadTool) Spec() ToolSpec {
 		Name: evidenceReadToolName,
 		Description: "按 evidenceId 对已有工具观察做行级切片（offset/limit），不重新执行后端命令。" +
 			"evidenceId 来自本轮 observations 中的 evidenceId 字段。" +
-			"仅支持源工具实现了表格切片的观察（如 k8s 文本表 / JSON Table）；" +
+			"表格（k8s 文本表 / JSON Table）与 describe/logs/events 等非表格输出均可切片；" +
+			"非表格切片逐行返回并带行号，单行超长会截断标注。" +
+			"logs 大输出建议先用源工具加 --since-time / --tail 收窄。" +
 			"不可切片时返回错误说明，可改用源工具重新查询（如 k8s 加 --field-selector / -o jsonpath）。",
 		InputSchema: append(json.RawMessage(nil), t.specJSON...),
 	}
@@ -111,10 +115,20 @@ func (t *EvidenceReadTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 
 	label := fmt.Sprintf("evidence.read %s", q.EvidenceID)
-	pageSummary := summary.Render(label, view.Columns, view.Rows, false)
-	// 小表 Render 会全行写出；此处 rows 已是窗口。补充分页元信息
+	// 非表格切片（Columns 为空）走行渲染：避免大表抽样逻辑误伤行模式，也带行号便于继续翻页
+	var pageSummary string
+	var truncatedLines int
+	if len(view.Columns) == 0 {
+		pageSummary, truncatedLines = renderLines(view)
+	} else {
+		// 小表 Render 会全行写出；此处 rows 已是窗口
+		pageSummary = summary.Render(label, view.Columns, view.Rows, false)
+	}
 	meta := fmt.Sprintf("切片 · total=%d offset=%d limit=%d 本页=%d 行 · 源工具=%s",
 		view.Total, view.Offset, view.Limit, len(view.Rows), rec.ToolName)
+	if truncatedLines > 0 {
+		meta += fmt.Sprintf(" · %d 行超长截断（全文在源证据 raw）", truncatedLines)
+	}
 	fullSummary := meta + "\n" + pageSummary
 
 	rawPayload, _ := json.Marshal(map[string]any{
@@ -173,6 +187,27 @@ func navErrorEvidence(evidenceID, msg string) *core.Evidence {
 		Error:       msg,
 		Raw:         json.RawMessage(`{}`),
 	}
+}
+
+// 行模式渲染：非表格切片逐行输出，每行前缀绝对行号，模型可据此定位下一窗
+// 单行超 lineRenderTruncateRunes 截断加省略号；返回被截断的行数供元信息标注，全文仍在源证据 Raw
+func renderLines(view SliceView) (string, int) {
+	var b strings.Builder
+	truncated := 0
+	for i, row := range view.Rows {
+		line := ""
+		if len(row) > 0 {
+			line = row[0]
+		}
+		r := []rune(line)
+		if len(r) > lineRenderTruncateRunes {
+			r = r[:lineRenderTruncateRunes]
+			truncated++
+			line = string(r) + "…"
+		}
+		fmt.Fprintf(&b, "%d: %s\n", view.Offset+i, line)
+	}
+	return strings.TrimRight(b.String(), "\n"), truncated
 }
 
 func compileEvidenceReadSchema(schema json.RawMessage) (*jsonschema.Schema, error) {

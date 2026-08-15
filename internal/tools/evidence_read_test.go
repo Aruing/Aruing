@@ -108,6 +108,57 @@ func TestEvidenceReadSlicesTable(t *testing.T) {
 	}
 }
 
+// 非表格切片（Columns 为空）走行渲染：带绝对行号，超长行截断标注，元信息含 total/offset
+func TestEvidenceReadSlicesLines(t *testing.T) {
+	idx := tools.NewObservationIndex()
+	reg := tools.NewRegistry()
+	long := strings.Repeat("x", 300)
+	fake := &sliceableFake{
+		name: "fake.logs",
+		cols: nil,
+		rows: [][]string{
+			{"2026-08-14T01:00:00Z starting"},
+			{""},
+			{long},
+			{"2026-08-14T01:00:02Z ready"},
+		},
+	}
+	if err := reg.Register(fake); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	idx.Put("e_logs", tools.ObsRecord{Raw: json.RawMessage(`{"ok":true}`), ToolName: "fake.logs"})
+
+	tool, err := tools.NewEvidenceReadTool(idx, reg)
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	ev, err := tool.Execute(context.Background(), mustJSON(t, map[string]any{
+		"evidenceId": "e_logs",
+		"offset":     2,
+		"limit":      2,
+	}))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if ev.Error != "" {
+		t.Fatalf("unexpected error field: %s", ev.Error)
+	}
+	if !strings.Contains(ev.Summary, "total=4") || !strings.Contains(ev.Summary, "offset=2") {
+		t.Fatalf("summary missing page meta:\n%s", ev.Summary)
+	}
+	// 行号从 offset 起计，超长行截断并计数标注
+	if !strings.Contains(ev.Summary, "2: "+long[:240]+"…") || !strings.Contains(ev.Summary, "3: 2026-08-14T01:00:02Z ready") {
+		t.Fatalf("summary missing numbered lines:\n%s", ev.Summary)
+	}
+	if !strings.Contains(ev.Summary, "1 行超长截断") {
+		t.Fatalf("summary missing truncation note:\n%s", ev.Summary)
+	}
+	// 全长行不得整段进入摘要
+	if strings.Contains(ev.Summary, long) {
+		t.Fatal("untruncated long line leaked into summary")
+	}
+}
+
 // 未知 evidenceId → 业务错误写在 Evidence.Error，非语言错误
 func TestEvidenceReadUnknownID(t *testing.T) {
 	idx := tools.NewObservationIndex()

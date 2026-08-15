@@ -75,14 +75,14 @@ func TestProjectSummary(t *testing.T) {
 			name:    "describe falls back",
 			argv:    []string{"describe", "pod", "demo-api"},
 			stdout:  "Name:         demo-api\nNamespace:    default\n",
-			wantHas: []string{"非表格", "见 raw", "demo-api"},
+			wantHas: []string{"非表格", "共 2 行", "demo-api", "尾行：Namespace:    default", "evidence.read", "翻页"},
 			wantNot: []string{"行 · 列"},
 		},
 		{
 			name:    "logs falls back",
 			argv:    []string{"logs", "demo-api"},
 			stdout:  "2026-08-11T01:02:03Z starting\n2026-08-11T01:02:04Z ready\n",
-			wantHas: []string{"非表格", "见 raw"},
+			wantHas: []string{"非表格", "尾行：2026-08-11T01:02:04Z ready", "evidence.read"},
 			wantNot: []string{"行 · 列"},
 		},
 		{
