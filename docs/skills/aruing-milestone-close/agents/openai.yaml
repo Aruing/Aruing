@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing Milestone Close"
+  short_description: "里程碑关闭收尾清单：状态更新、归档、文档四方同步、历程起草"
+  default_prompt: "Use $aruing-milestone-close when closing a completed milestone for this repository."
+
+policy:
+  allow_implicit_invocation: true
