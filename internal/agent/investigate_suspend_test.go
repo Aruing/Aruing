@@ -100,6 +100,12 @@ func TestOrchestratorInvestigateSuspendAndResume(t *testing.T) {
 	if len(got) == 0 || !strings.Contains(got[len(got)-1][0], "九点") {
 		t.Fatalf("clarifications seen: %+v", got)
 	}
+	// 规划输入不得丢已确认目标（含挂起与续跑的每次调用）
+	for i, n := range planner.GotTargetCounts {
+		if n == 0 {
+			t.Fatalf("plan call %d saw zero targets (targets dropped from planner input)", i)
+		}
+	}
 }
 
 // Resume 后再次提议澄清：快照更新、可多次挂起（#18 澄清不限次）

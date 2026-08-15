@@ -548,7 +548,7 @@ func (o *Orchestrator) investigateLoop(
 		o.progressf("调查第 %d 轮…", round+1)
 		plan, planErr := o.planner.Plan(ctx, PlanState{
 			Query:            query,
-			Targets:          seedTargetsOf(query),
+			Targets:          state.Targets,
 			Evidence:         evidence,
 			Verdicts:         verdicts,
 			ClusterResources: clusterResources,
@@ -572,6 +572,7 @@ func (o *Orchestrator) investigateLoop(
 			state.Evidence = evidence
 			state.Verdicts = verdicts
 			state.Round = round
+			// Targets 来自 seed 不变，显式保留语义清晰（挂起快照需携带）
 			return nil, nil, &ClarifyRequest{
 				Question: strings.TrimSpace(plan.Clarify.Question),
 				Options:  slices.Clone(plan.Clarify.Options),
@@ -610,12 +611,6 @@ func (o *Orchestrator) investigateLoop(
 	}
 
 	return evidence, verdicts, nil, InvestigateState{}, nil
-}
-
-// 从问题结构提取定位阶段已确认的目标引用（investigateLoop 喂规划器的输入视图）
-// 目标实体本身由调用链持有；此处仅按需传目标，保持规划输入与 ResolveState 一致
-func seedTargetsOf(query core.Query) []core.Target {
-	return nil
 }
 
 // 判断是否存在被证据支持的猜想，存在即已找到根因、循环应结束

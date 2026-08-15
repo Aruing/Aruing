@@ -142,6 +142,8 @@ type FakePlanner struct {
 	keepPlanOnClarify bool
 	// 已收到的历次规划状态中的澄清答复（测试断言用）
 	GotClarifications [][]string
+	// 每次规划收到的目标数量（防「规划输入丢目标」回归断言用）
+	GotTargetCounts []int
 }
 
 // 使用固定计划模板创建可重复使用的假规划器
@@ -171,6 +173,7 @@ func (p *FakePlanner) Plan(ctx context.Context, state agent.PlanState) (agent.Pl
 	if len(state.Clarifications) > 0 {
 		p.GotClarifications = append(p.GotClarifications, append([]string(nil), state.Clarifications...))
 	}
+	p.GotTargetCounts = append(p.GotTargetCounts, len(state.Targets))
 	if p.clarify != nil {
 		req := *p.clarify
 		p.clarify = nil
