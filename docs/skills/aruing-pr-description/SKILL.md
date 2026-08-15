@@ -82,7 +82,7 @@ gh pr create --base main --head <当前分支名> \
   --title "<commit message 主题或一句话概括>" \
   --body "<模板内容>" \
   --assignee @me \
-  --label "<按第 8 步映射，可多个，空格分隔>"
+  --label "<按第 8 步映射，每个 label 一个 --label 标志>"
 ```
 
 - `--title` 用本分支第一个 commit 的主题，或基于工作内容一句话改写
@@ -111,6 +111,7 @@ gh pr create --base main --head <当前分支名> \
 
 - 多类型 PR 取并集（如 `feat`+`docs` → `enhancement documentation`，与 #77/#78 一致）
 - **只用仓库已存在的 label**，不新建；拿不准时先 `gh label list` 核对
+- 多个 label 用**多个 `--label` 标志或逗号分隔**，不得空格分隔（会被当成单个 label 名导致创建失败）
 - `Review effort N/5` 由 pr-agent 自动打，本 skill 不管
 - 若 label 拼错导致 `gh` 报错，去掉 `--label` 重试并在 PR 创建后手动补，不要卡住流程
 
