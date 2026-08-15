@@ -90,10 +90,26 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 			width = w
 			md = buildRenderer(tuiTheme, width)
 		}
-		// readline 提交后输入行（prompt + 内容）天然留在终端，不重复打印用户消息
+		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项在此消费，
+		// 守 #20：与 app 模式 viewport 历史的「你 」措辞一致）
+		echoUserMessage(out, st, text)
 		waitTurn(ctx, out, st, md, svc, sessionID, text)
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
 		renderMessageDivider(out, st, width)
+	}
+}
+
+// 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行），
+// 用 user 样式项渲染「你 + 内容」。行数按软换行计数（与提交前回显一致）。
+func echoUserMessage(out io.Writer, st styles, text string) {
+	lines := strings.Split(text, "\n")
+	// 光标回到回显首行：当前在末行行首（提交后），上移 n-1 行
+	if len(lines) > 1 {
+		fmt.Fprintf(out, "\x1b[%dA", len(lines)-1)
+	}
+	for _, line := range lines {
+		clearLine(out)
+		fmt.Fprintln(out, st.user.Render("你 ")+line)
 	}
 }
 
