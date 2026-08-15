@@ -35,8 +35,11 @@ const (
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // 行内模式入口：readline 循环 + Turn 等待（spinner）+ 助手留痕 + 容错
-func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string, out io.Writer) error {
-	st := loadStyles(tuiTheme)
+func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, out io.Writer) error {
+	st, err := loadStyles(tuiTheme, themeFile)
+	if err != nil {
+		return err
+	}
 	// 行内引擎逐键读取依赖 raw mode：非 tty（管道 / 脚本）明确报错不降级；
 	// 无人值守场景应用单句模式（chat "问题"，一次 Turn 后退出）
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -164,6 +167,8 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 					fmt.Fprintln(out, st.assistant.Render("aruing ")+mv.text)
 				}
 			}
+			// 助手回复块之后留一行空隙（轮间呼吸感）：经 assistant 样式项下边距，主题可调
+			fmt.Fprintln(out)
 			return
 		case <-ticker.C:
 			frame = (frame + 1) % len(spinnerFrames)
@@ -259,15 +264,13 @@ func translateNewlineSeqs(in []byte) ([]byte, int) {
 	return out, soft + 1
 }
 
-// 渲染轮间分割线：空行 + 主题色水平线 + 空行。
-// 封装单函数：后续用户自定义开关 / 样式（arc《TUI》Step 2）只改这里；宽度非法时回退 80
+// 渲染轮间分割线：divider 样式项自带上下外边距（默认各 1 行空行，主题 YAML 可调）
+// 宽度非法时回退 80；线本身的颜色经 divider 样式项前景色（#20：无硬编码样式）
 func renderMessageDivider(out io.Writer, st styles, width int) {
 	if width <= 0 {
 		width = 80
 	}
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, st.divider.Render(strings.Repeat("─", width)))
-	fmt.Fprintln(out)
+	fmt.Fprint(out, st.divider.Render(strings.Repeat("─", width)), "\n")
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）

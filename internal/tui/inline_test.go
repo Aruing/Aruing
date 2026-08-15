@@ -98,16 +98,17 @@ func TestConsumeSoft(t *testing.T) {
 
 // 轮间分割线：空行 + 水平线 + 空行结构；宽度自适应与非法回退
 func TestRenderMessageDivider(t *testing.T) {
-	st := loadStyles("dark")
+	st := mustLoadStyles("dark")
 
 	var b strings.Builder
 	renderMessageDivider(&b, st, 10)
 	got := b.String()
-	// 结构：空行 + 满宽水平线 + 空行（首尾各一个换行，线后留空行）
-	if !strings.HasPrefix(got, "\n") || !strings.HasSuffix(got, "\n\n") {
+	// 结构：上边距空行 + 满宽水平线 + 下边距空行；边距经 divider 样式项渲染（主题可调）
+	lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+	if len(lines) != 3 || strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[2]) != "" {
 		t.Fatalf("want blank/line/blank structure, got %q", got)
 	}
-	if !strings.Contains(got, strings.Repeat("─", 10)) {
+	if !strings.Contains(lines[1], strings.Repeat("─", 10)) {
 		t.Fatalf("divider line missing in %q", got)
 	}
 

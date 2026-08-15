@@ -31,36 +31,60 @@ func resolveTheme(theme string) string {
 	}
 }
 
-// 按配置主题加载样式色表
-func loadStyles(theme string) styles {
-	if resolveTheme(theme) == "dark" {
-		return darkStyles()
+// 按配置主题加载样式表；themeFile 非空时解析覆盖文件并在基底上合成
+// （部分覆盖：未声明样式项回落内置；解析/校验失败返回人话错误，启动即失败不静默降级）
+func loadStyles(theme, themeFile string) (styles, error) {
+	ov, err := loadThemeOverrides(themeFile)
+	if err != nil {
+		return styles{}, err
 	}
-	return lightStyles()
+	base := "light"
+	if resolveTheme(theme) == "dark" {
+		base = "dark"
+	}
+	if ov != nil && ov.base != "" {
+		base = ov.base
+	}
+	var st styles
+	if base == "dark" {
+		st = darkStyles()
+	} else {
+		st = lightStyles()
+	}
+	return applyThemeOverrides(st, ov, themeFile)
 }
 
 // 暗色主题色表（ANSI 256 色）
 func darkStyles() styles {
 	return styles{
-		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
+		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true).MarginTop(1),
+		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("252")).MarginBottom(1),
 		err:       lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
 		system:    lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 		spinner:   lipgloss.NewStyle().Foreground(lipgloss.Color("212")),
 		prompt:    lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginTop(1).MarginBottom(1),
 	}
 }
 
 // 亮色主题色表
 func lightStyles() styles {
 	return styles{
-		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
-		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("238")),
+		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true).MarginTop(1),
+		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("238")).MarginBottom(1),
 		err:       lipgloss.NewStyle().Foreground(lipgloss.Color("124")).Bold(true),
 		system:    lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
 		spinner:   lipgloss.NewStyle().Foreground(lipgloss.Color("99")),
 		prompt:    lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
-		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
+		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("250")).MarginTop(1).MarginBottom(1),
 	}
+}
+
+// 测试便利：加载失败即 Fatal（测试用；产品路径须经 loadStyles 显式处理错误）
+func mustLoadStyles(theme string) styles {
+	st, err := loadStyles(theme, "")
+	if err != nil {
+		panic(err)
+	}
+	return st
 }

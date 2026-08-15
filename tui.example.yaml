@@ -1,0 +1,59 @@
+# TUI 主题覆盖示例 —— 复制到任意路径，然后在 aruing 配置中写明：
+#
+#   tui:
+#     theme_file: <该文件路径>
+#
+# 语义：写明才加载；文件里只覆盖你声明的样式项，其余回落内置基底（dark/light）。
+# base 不写则取 tui.theme 的归一结果（dark/light/auto → dark 或 light）。
+#
+# 角色名（styles 的键，只允许这些；写错启动会报错）：
+#   user      你输入的内容
+#   assistant aruing 的回复正文
+#   err       错误提示
+#   system    系统提示（banner 等）
+#   spinner   思考中动画
+#   prompt    输入提示符（❯）
+#   divider   轮与轮之间的分隔线
+#
+# 颜色格式：ANSI 256 编号（如 "205"）或 hex（如 "#ff005f"）。
+# padding / margin：四个数 [上, 右, 下, 左]，单位为行/格，非负。
+#   - user.margin-top    = 你输入与上方内容的间隔
+#   - assistant.margin-bottom = 回复与下一轮的间隔
+#   - divider 的上下 margin = 分隔线周围空行数
+
+base: dark
+
+styles:
+  user:
+    foreground: "#00aaff"   # 你的输入颜色（默认 dark: 39）
+    bold: true
+    margin: [1, 0, 0, 0]    # 输入行上方留 1 行空隙
+
+  assistant:
+    foreground: "252"        # 回复正文颜色（默认 dark: 252）
+    margin: [0, 0, 1, 0]    # 回复块下方留 1 行空隙
+
+  err:
+    foreground: "#ff5f5f"
+    bold: true
+
+  system:
+    foreground: "245"
+
+  spinner:
+    foreground: "212"
+
+  prompt:
+    foreground: "#00aaff"
+    bold: true
+
+  divider:
+    foreground: "240"        # 分隔线颜色
+    margin: [1, 0, 1, 0]     # 分隔线上下各留 1 行空行
+
+  # 边框示例（当前 UI 尚未启用边框；声明后供未来组件消费，不会破坏现有渲染）：
+  # assistant:
+  #   border:
+  #     color: "240"
+  #     rounded: true
+  #   padding: [0, 1, 0, 1]

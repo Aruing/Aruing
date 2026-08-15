@@ -66,6 +66,9 @@ type TUI struct {
 	Theme string `yaml:"theme"`
 	// inline | app；空或未知值按 inline 处理
 	Mode string `yaml:"mode"`
+	// 主题覆盖文件路径（YAML）：写明才加载，覆盖 tui 命名样式项（颜色/边框/内边距/间距）；
+	// 空 = 用内置 dark/light 默认样式。仅此一处入口（无 env、无默认搜索链）
+	ThemeFile string `yaml:"theme_file"`
 }
 
 // 配置文件反序列化用的根形状，仅本包内部使用

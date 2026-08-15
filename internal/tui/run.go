@@ -27,7 +27,7 @@ func Run(ctx context.Context, svc *session.Service, sessionID, format string, ou
 	if tuiCfg.Mode == "app" {
 		return appRun(ctx, svc, sessionID, format, out, tuiCfg)
 	}
-	return inlineRun(ctx, svc, sessionID, format, tuiCfg.Theme, out)
+	return inlineRun(ctx, svc, sessionID, format, tuiCfg.Theme, tuiCfg.ThemeFile, out)
 }
 
 // app 模式入口（bubbletea 全屏）：config.TUI.Mode=="app" 或 --ui app 时经 Run 调入。
@@ -43,17 +43,23 @@ func appRun(ctx context.Context, svc *session.Service, sessionID, format string,
 	defer cancel()
 	// 全屏模式渲染直写真终端（os.Stdout）并接管 alt-screen：传入的 out 可能是
 	// 缓冲/管道（CLI 测试注入），在非 tty 输出上 bubbletea 渲染不生效会表现为卡死
-	p := tea.NewProgram(newModel(ctx, svc, sessionID, format, tuiCfg.Theme), tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen())
-	_, err := p.Run()
+	m, err := newModel(ctx, svc, sessionID, format, tuiCfg.Theme, tuiCfg.ThemeFile)
 	if err != nil {
-		return fmt.Errorf("app UI failed to start (needs an interactive terminal): %w", err)
+		return err
+	}
+	p := tea.NewProgram(m, tea.WithInput(os.Stdin), tea.WithOutput(os.Stdout), tea.WithAltScreen())
+	if _, runErr := p.Run(); runErr != nil {
+		return fmt.Errorf("app UI failed to start (needs an interactive terminal): %w", runErr)
 	}
 	return nil
 }
 
 // 构造初始 Model：textarea 输入、viewport 历史、spinner 等待指示；按主题加载样式色表
-func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string) Model {
-	st := loadStyles(tuiTheme)
+func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string) (Model, error) {
+	st, err := loadStyles(tuiTheme, themeFile)
+	if err != nil {
+		return Model{}, err
+	}
 
 	ta := textarea.New()
 	ta.Prompt = "" // 提示符由 View 自绘，避免与输入框自身提示重复
@@ -77,5 +83,5 @@ func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiT
 		viewport:  vp,
 		spinner:   sp,
 		ctx:       ctx,
-	}
+	}, nil
 }

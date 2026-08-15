@@ -26,7 +26,7 @@ func newTestModel() Model {
 		height:   24,
 		tuiTheme: "dark",
 	}
-	m.styles = loadStyles("dark")
+	m.styles = mustLoadStyles("dark")
 	return m
 }
 
@@ -154,8 +154,8 @@ func TestResolveTheme(t *testing.T) {
 
 // dark 与 light 色表不同（可定制生效）
 func TestLoadStylesDiffersByTheme(t *testing.T) {
-	d := loadStyles("dark")
-	l := loadStyles("light")
+	d := mustLoadStyles("dark")
+	l := mustLoadStyles("light")
 	if d.user.GetForeground() == l.user.GetForeground() {
 		t.Fatal("dark/light user foreground should differ")
 	}

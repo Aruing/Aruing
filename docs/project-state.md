@@ -1,10 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-15（**`0.1.0-beta19` 已归档**：调查阶段挂起 #80。**下一步重开候选窗口**（不评估 0.1.0 关版本，维护者指示）。前序：beta17 已归档；beta18 工程效能并行推进中（#79 已合并 1/2））
+> 最后更新：2026-08-15（**`0.1.0-beta20` 交付中**：主题 YAML 完整化（TUI L3 收尾）。前序：beta19 已归档（#80）；beta18 工程效能并行（#79/#81 已合并））
 
 ## 当前阶段
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+
+**`0.1.0-beta20` / 主题 YAML 完整化（TUI L3 收尾）** 🚧 交付中：`tui.theme_file`（写明才加载，无 env/搜索链）→ 主题 YAML 基于内置 dark/light 基底**部分覆盖**样式项（前景/背景色、粗体、边框、内边距、块间距全量面）；非法值/未知角色名启动明确报错；`tui.example.yaml` 全注释示例；divider/user/assistant 间距从渲染调用点硬编码收敛为样式项（#20 全量兑现）。core/agent/session 零改。arc《TUI》Step 1 尾巴收口，L4/L5 留 0.2+。
 
 **`0.1.0-beta19` / 调查阶段挂起（investigate clarify）** ✅ 完成并归档（2026-08-15；#80）：`Plan` 增可选 `Clarify`（规划器在证据不足以继续且缺口信息用户知道时提议；与任务/猜想互斥，LLM 侧与编排侧双层校验）；`InvestigateState` 种子化（调查循环可续跑，镜像定位循环）；挂起快照带 `Stage` **与侦察产物**（`reconResult`：证据 + 资源清单 + 插位，续跑复用），`Resume` 派发：investigate 路径保留调查进度（猜想/任务/证据/判决）续跑、重置轮次预算、不重复解析/侦察；planner prompt + LLM 输出结构 + agenttest 脚本假实现。session/Tower/CLI 零改（beta9 通用抽象兑现检验）。pr-agent 两轮评审抓到并修复两个真回归（规划输入丢目标、快照丢侦察产物）。plan 在 `plan/archive/0.1.0-beta19/`。
 
@@ -73,7 +75,8 @@
 | beta15 | 行内 TUI + 双模式 | ✅ | #73（ergochat/readline + 软换行 + 容错）；#74（divider + glamour + 每轮自适应宽）；#76（--ui 双模式 + hotfix）；不触 §4 |
 | beta16 | 巨输出分页（非表格行级页式） | ✅ | #77 k8s `Slicer` 行级兜底 + `evidence.read` 行渲染（行号/截断标注）+ `fallbackSummary` 首尾预览 + 翻页提示；core 零改；不触 §4 |
 | beta17 | logs 时间游标（时间窗切片） | ✅ |
-| beta19 | 调查阶段挂起（investigate clarify） | ✅ | `Plan.Clarify` + `InvestigateState` 种子化 + `Resume` 按 Stage 派发（保留进度续跑）；session/Tower/CLI 零改；不触 §4.1/§4.3/§4.5 以外禁止项 | #78 `SliceQuery.Since/Until`（RFC3339 闭区间，通用契约）；k8s 行首 RFC3339 机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导；窗内首末时间戳 meta；`scenarios/log-time-window`；不触 §4 |
+| beta19 | 调查阶段挂起（investigate clarify） | ✅ |
+| beta20 | 主题 YAML 完整化（TUI L3 收尾） | 🚧 | `tui.theme_file` 部分覆盖 + 全样式项（颜色/边框/间距）+ 间距收敛进样式项 + 示例文件；#20 全量兑现 | `Plan.Clarify` + `InvestigateState` 种子化 + `Resume` 按 Stage 派发（保留进度续跑）；session/Tower/CLI 零改；不触 §4.1/§4.3/§4.5 以外禁止项 | #78 `SliceQuery.Since/Until`（RFC3339 闭区间，通用契约）；k8s 行首 RFC3339 机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导；窗内首末时间戳 meta；`scenarios/log-time-window`；不触 §4 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
