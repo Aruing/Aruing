@@ -8,7 +8,6 @@ package config
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -81,11 +80,6 @@ type fileConfig struct {
 	TUI TUI `yaml:"tui"`
 	// 是否输出调试进度
 	Debug bool `yaml:"debug"`
-}
-
-// 从当前进程环境加载配置（无文件）
-func Load() Config {
-	return LoadFrom(os.Getenv)
 }
 
 // 用注入的环境读取函数加载配置，便于单测不依赖真实环境
