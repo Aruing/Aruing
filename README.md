@@ -2,6 +2,10 @@
 
 [English](README.md) | [中文](README.zh-CN.md)
 
+[![CI](https://github.com/Aruing/aruing/actions/workflows/pr-check.yml/badge.svg)](https://github.com/Aruing/aruing/actions/workflows/pr-check.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.26-00ADD8.svg)](go.mod)
+
 **A Kubernetes ops agent that answers with tools and evidence—not vibes.**
 
 Ask in natural language. The agent reasons, calls cluster tools for real evidence, forms hypotheses, and—when you need root cause—runs a forced evidence-adjudication chain so every conclusion is traceable.
@@ -18,20 +22,11 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-**In active development — closing the diagnostic loop.** Targeting a usable closed loop by **end of August 2026**.
+**`0.1.0` — usable diagnostic assistant, released for evaluation.** Runs end-to-end against a real cluster with a real LLM: interactive terminal chat (inline or fullscreen), theme customization, evidence navigation with time-window slicing, and clarify-suspend/resume on ambiguous asks.
 
-Aruing runs end-to-end today, but it's still early:
+Not yet built (planned 0.2+): disk persistence (sessions are in-memory and lost on exit), streaming responses, write tools with approval, multi-cluster, Web UI. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
-- **Only simple trials / testing are supported right now** — not production-ready
-- **Supporting UX & engineering is still in progress** — terminal input UX, structured logging, and similar polish are not yet built
-
-What works today (version `0.1.0`, in progress):
-
-- `aruing run` / `chat` — LLM required; YAML config and/or `ARUING_*` env (`--config`, see `aruing.example.yaml`)
-- `aruing run` — single-shot diagnosis via linear Orchestrator (ambiguity → clarify message + non-zero exit; no resume)
-- `aruing chat` — multi-turn Session + Tower; escalate when root cause is needed; resolve clarify suspend/resume; `RunLedger` + `prior_run_details`; after compaction, range rehydrate
-
-Details: [`docs/project-state.md`](docs/project-state.md).
+⚠️ Only simple trials / testing are supported right now — not production-ready.
 
 ## Core data flow
 
@@ -47,6 +42,15 @@ Run → Query → Target → Hypothesis → Task → Evidence → Verdict → Re
 - **Verdict** — only from Evidence  
 - **Report** — cites Verdict + Evidence; does not invent  
 
+## Requirements
+
+| Requirement | Notes |
+| --- | --- |
+| Go 1.26+ | build only |
+| kubectl | cluster access; path auto-detected or set `tools.kubectl_path` |
+| LLM (OpenAI-compatible) | any base URL + model; required by `run` / `chat` |
+| Docker + kind | optional — only for the reproducible fault scenarios |
+
 ## Quick start
 
 ```bash
@@ -54,44 +58,46 @@ make build              # build cmd/aruing
 make test               # all tests
 make check              # full CI (test-ci + vet + lint + fmt + tidy + vuln)
 
-./bin/aruing run why is demo-api in default unreachable
-./bin/aruing run --format json why is demo-api in default unreachable
-./bin/aruing chat hello                                    # multi-turn (LLM required; session id on stderr)
-./bin/aruing chat --session sess_xxx check redis again
+cp aruing.example.yaml playground/config.yaml   # fill llm.* (gitignored)
+./bin/aruing run --config playground/config.yaml why is demo-api in default unreachable
+./bin/aruing chat --config playground/config.yaml hello   # interactive TUI (inline mode)
 ```
+
+`run` / `chat` **require** a complete LLM config. Priority: CLI flags (e.g. `--verbose`, `--ui`) > env (`ARUING_*`) > YAML file > zeros. Config search: `--config` / `ARUING_CONFIG` → `playground/config.yaml` → `$XDG_CONFIG_HOME/aruing` → `/etc/aruing`.
+
+Other examples:
+
+```bash
+./bin/aruing run --format json why is demo-api in default unreachable
+./bin/aruing chat --session sess_xxx check redis again   # resume a session
+./bin/aruing chat --ui app                               # fullscreen mode
+```
+
+### Terminal UI
+
+`aruing chat` ships two modes (config `tui.mode` or `--ui`):
+
+- **inline** (default) — scrollback-style chat in your terminal, markdown rendered via glamour, soft newlines (shift+enter)
+- **app** — fullscreen bubbletea interface
+
+Themes: built-in `dark` / `light` / `auto` (config `tui.theme`). For full customization, copy [`tui.example.yaml`](tui.example.yaml) and point `tui.theme_file` at it — declare only the style entries you want to override; the rest falls back to the built-in base.
 
 ### Reproducible scenarios (kind)
 
 One-shot fault clusters for manual smoke. Verification targets `chat` (see [`scenarios/README.md`](scenarios/README.md)):
 
 ```bash
-make lab-up   NAME=crashloop-bad-image   # kind cluster + fault manifests
+make lab-list                                     # known scenarios + cluster state
+make lab-up   NAME=crashloop-bad-image            # kind cluster + fault manifests
 make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting"
 make lab-down NAME=crashloop-bad-image
 ```
 
-`lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
+Four scenarios ship today: `crashloop-bad-image`, `svc-wrong-selector`, `same-name-multi-ns` (incl. a multi-turn clarify-suspend case), `log-time-window` (evidence time-window slicing). `lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
 
 ### Configuration & local LLM
 
-`run` / `chat` **require** a complete LLM config (file and/or env). Priority: CLI flags (e.g. `--verbose`) > env (`ARUING_*`) > YAML file > zeros.
-
-```bash
-cp aruing.example.yaml playground/config.yaml   # fill llm.*; gitignored under playground/
-./bin/aruing run --config playground/config.yaml why is demo-api unreachable
-# or: ARUING_CONFIG=... / search playground → $XDG_CONFIG_HOME/aruing → /etc/aruing
-```
-
-Make + `.env` still works (repo ignores `.env`; package does not parse the file itself):
-
-```bash
-cp .env.example .env    # BaseURL / APIKey / Model
-make print-env
-make run-llm
-make run-llm QUESTION='why is demo-api in default unreachable'
-make chat
-make chat CHAT_MSG='hello'
-```
+Full reference: [`aruing.example.yaml`](aruing.example.yaml) (annotated: llm / tools / tui / debug). Env fallback: [`.env.example`](.env.example) with `make run-llm` / `make print-env` (Make sources `.env`; the binary itself does not parse it).
 
 ## Constraints (short)
 
@@ -110,6 +116,9 @@ Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15�
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Architecture facts: modules, data model, trust boundary, hard constraints |
 | [`docs/project-state.md`](docs/project-state.md) | Stage, work units, next step |
+| [`docs/README.md`](docs/README.md) | What lives in docs/ vs the private notebook |
+| [`scenarios/README.md`](scenarios/README.md) | Kind fault scenarios: usage, cases protocol, verification |
+| [`aruing.example.yaml`](aruing.example.yaml) / [`tui.example.yaml`](tui.example.yaml) | Annotated config / theme references |
 | [`docs/skills/`](docs/skills) | Project skills (docs, tests, comments, PR description, milestone close, self-check, cluster smoke, retrospective) |
 | [`AGENTS.md`](AGENTS.md) | AI tooling / skill install |
 
