@@ -110,7 +110,7 @@ make chat CHAT_MSG='hello'
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | 架构事实：模块职责、数据结构、信任边界、硬约束 |
 | [`docs/project-state.md`](docs/project-state.md) | 当前阶段、工作单元状态、下一步 |
-| [`docs/skills/`](docs/skills) | 项目级 skill（注释规范、测试规范、文档规范） |
+| [`docs/skills/`](docs/skills) | 项目级 skill（文档/测试/注释规范、PR 描述、里程碑收尾、全量自检、真集群测试纪律、回顾审计） |
 | [`AGENTS.md`](AGENTS.md) | AI 工具安装与项目 skill 约定 |
 
 更长的方案、设计推理、阶段计划、预留问题记录在 `arui-note/aruing/` 笔记目录，由维护者个人保管。
