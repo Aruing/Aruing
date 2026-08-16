@@ -173,8 +173,6 @@ func TestThemeBaseTables(t *testing.T) {
 	if got, ok := light.assistant.GetForeground().(lipgloss.Color); !ok || string(got) != "238" {
 		t.Fatalf("light assistant: %v", got)
 	}
-	// 间距样式项在基底表内（原硬编码行为等价迁移）
-	if dark.divider.GetMarginTop() != 1 || dark.user.GetMarginTop() != 1 || dark.assistant.GetMarginBottom() != 1 {
-		t.Fatal("base spacing tokens missing")
-	}
+	// 间距不再进基底表：消费点显式读 margin 配置，未配置时 fallback 默认行数
+	// （视觉基线由消费点保证，见 renderMessageDivider / echoUserMessage / waitTurn）
 }

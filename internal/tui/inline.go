@@ -117,6 +117,16 @@ func echoUserMessage(out io.Writer, st styles, text string) {
 	if echoRows > 0 {
 		fmt.Fprintf(out, "\x1b[%dA", echoRows)
 	}
+	// 上方空隙读样式项 margin-top（主题可调；不并入 Render 避免与清行计数耦合）；
+	// 未配置时默认 1 行（视觉基线与历史行为一致）
+	userTop := st.user.GetMarginTop()
+	if userTop == 0 {
+		userTop = 1
+	}
+	for i := 0; i < userTop; i++ {
+		clearLine(out)
+		fmt.Fprintln(out)
+	}
 	for _, line := range logical {
 		clearLine(out)
 		fmt.Fprint(out, st.user.Render("你 "+line), "\n")
@@ -215,7 +225,8 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
 			} else {
 				for _, mv := range renderAssistant(md, msg.result) {
-					// 整行经 assistant 样式项渲染：下边距属于回复块（块间呼吸感主题可调）
+					// 块级渲染：标签 + 正文整体经样式项（下边距属于回复块；逐行渲染会把
+					// margin 插在标签与正文之间、多行间也会各插空行——pr-agent 评审）
 					fmt.Fprint(out, st.assistant.Render("aruing "+mv.text), "\n")
 				}
 			}
@@ -320,8 +331,21 @@ func renderMessageDivider(out io.Writer, st styles, width int) {
 	if width <= 0 {
 		width = 80
 	}
-	// margin 渲染产出 空/线/空 三行但不带终止换行：补单个 \n 让光标落到下一行
+	// 上下空行数读样式项 margin 配置（主题可调）；未配置时默认各 1 行（视觉基线与历史行为一致）
+	top, bottom := st.divider.GetMarginTop(), st.divider.GetMarginBottom()
+	if top == 0 {
+		top = 1
+	}
+	if bottom == 0 {
+		bottom = 1
+	}
+	for i := 0; i < top; i++ {
+		fmt.Fprintln(out)
+	}
 	fmt.Fprint(out, st.divider.Render(strings.Repeat("─", width)), "\n")
+	for i := 0; i < bottom; i++ {
+		fmt.Fprintln(out)
+	}
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）

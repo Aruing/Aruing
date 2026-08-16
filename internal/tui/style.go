@@ -54,29 +54,30 @@ func loadStyles(theme, themeFile string) (styles, error) {
 	return applyThemeOverrides(st, ov, themeFile)
 }
 
-// 暗色主题色表（ANSI 256 色）
+// 暗色主题色表（ANSI 256 色）。margin 语义不进基底表：块间距由消费点显式
+// 读样式项 margin 配置输出（lipgloss margin 属块级渲染，逐行应用会插错位置）
 func darkStyles() styles {
 	return styles{
-		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true).MarginTop(1),
-		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("252")).MarginBottom(1),
+		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
+		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
 		err:       lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
 		system:    lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 		spinner:   lipgloss.NewStyle().Foreground(lipgloss.Color("212")),
 		prompt:    lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")).MarginTop(1).MarginBottom(1),
+		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
 	}
 }
 
 // 亮色主题色表
 func lightStyles() styles {
 	return styles{
-		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true).MarginTop(1),
-		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("238")).MarginBottom(1),
+		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
+		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("238")),
 		err:       lipgloss.NewStyle().Foreground(lipgloss.Color("124")).Bold(true),
 		system:    lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
 		spinner:   lipgloss.NewStyle().Foreground(lipgloss.Color("99")),
 		prompt:    lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
-		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("250")).MarginTop(1).MarginBottom(1),
+		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
 	}
 }
 
