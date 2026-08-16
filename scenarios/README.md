@@ -94,7 +94,8 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 | --- | --- | --- |
 | `crashloop-bad-image` | Deployment 引用不存在的镜像 tag | 主路径：ImagePull / 起不来 |
 | `svc-wrong-selector` | Service selector 与 Pod label 不一致 | 「访问不到」类；应查到 endpoints 空 |
-| `same-name-multi-ns` | 两个 ns 同名 Deployment（一好一坏），提示词不带 ns | beta9 clarify 挂起或歧义并列 |
+| `same-name-multi-ns` | 两个 ns 同名 Deployment（一好一坏），提示词不带 ns | cases 多轮：`01-default` 歧义并列；`02-investigate-clarify` 挂起反问→答复→续出报告（beta19 链路） |
+| `log-time-window` | 业务容器周期性故意崩溃重启 | logs `--timestamps` + `evidence.read` 时间窗切片（beta17 链路） |
 
 ## 约束
 
