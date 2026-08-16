@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"aruing/internal/config"
@@ -258,10 +259,17 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stderr, "session: %s\n", sessionID)
 	}
 
-	// 单句模式：一次会话后退出
+	// 单句模式：一次会话后退出。无交互界面，TUI 主题/样式不参与（纯文本输出），
+	// 加提示避免「配置了主题没生效」的误解
 	if question != "" {
+		if cfg.TUI.ThemeFile != "" {
+			fmt.Fprintln(stderr, "config: note: 单句模式无界面，tui.theme_file 不参与渲染（交互模式生效）")
+		}
 		return chatTurn(ctx, svc, sessionID, question, formatVal, stdout)
 	}
+
+	// 主题文件相对路径以 config 文件所在目录为基准（配置引用跟着配置走，与 cwd 无关）
+	resolveThemeFilePath(&cfg, usedPath)
 
 	// 非 tty stdin：逐行读取直到 exit/quit/EOF（usage 承诺的行为；供脚本/smoke 驱动多轮）
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -343,4 +351,15 @@ func writeReport(stdout io.Writer, format string, report core.Report, evidence [
 	default:
 		return fmt.Errorf("unknown format %q: use markdown or json", format)
 	}
+}
+
+// theme_file 相对路径基准：config 文件所在目录（绝对路径不动；configPath 空则不动）
+func resolveThemeFilePath(cfg *config.Config, configPath string) {
+	if cfg == nil || cfg.TUI.ThemeFile == "" || configPath == "" {
+		return
+	}
+	if filepath.IsAbs(cfg.TUI.ThemeFile) {
+		return
+	}
+	cfg.TUI.ThemeFile = filepath.Join(filepath.Dir(configPath), cfg.TUI.ThemeFile)
 }

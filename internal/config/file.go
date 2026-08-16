@@ -33,6 +33,13 @@ func LoadFile(path string) (Config, error) {
 			AllowDiagnosticExec: fc.Tools.AllowDiagnosticExec,
 			MaxStdoutBytes:      fc.Tools.MaxStdoutBytes,
 		},
+		// TUI 段同样从文件带入：此前漏拷导致 config 文件里的 tui.* 全部静默失效
+		// （只有 env 覆盖路径生效）；theme/mode/theme_file 一并修复
+		TUI: TUI{
+			Theme:     strings.TrimSpace(fc.TUI.Theme),
+			Mode:      strings.TrimSpace(fc.TUI.Mode),
+			ThemeFile: strings.TrimSpace(fc.TUI.ThemeFile),
+		},
 		Debug: fc.Debug,
 	}, nil
 }

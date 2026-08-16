@@ -279,6 +279,27 @@ func TestChatBadUIMode(t *testing.T) {
 	}
 }
 
+// theme_file 相对路径以 config 文件目录为基准；绝对路径与空值不动
+func TestResolveThemeFilePath(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.TUI.ThemeFile = "theme.yaml"
+	resolveThemeFilePath(cfg, "/etc/aruing/config.yaml")
+	if cfg.TUI.ThemeFile != "/etc/aruing/theme.yaml" {
+		t.Fatalf("relative: %q", cfg.TUI.ThemeFile)
+	}
+	cfg.TUI.ThemeFile = "/abs/theme.yaml"
+	resolveThemeFilePath(cfg, "/etc/aruing/config.yaml")
+	if cfg.TUI.ThemeFile != "/abs/theme.yaml" {
+		t.Fatalf("absolute: %q", cfg.TUI.ThemeFile)
+	}
+	cfg.TUI.ThemeFile = ""
+	resolveThemeFilePath(cfg, "/etc/aruing/config.yaml")
+	if cfg.TUI.ThemeFile != "" {
+		t.Fatalf("empty: %q", cfg.TUI.ThemeFile)
+	}
+	resolveThemeFilePath(nil, "/x") // nil 不 panic
+}
+
 // 非 tty stdin 行模式：逐行同会话跑 Turn；空行忽略、exit 停止（smoke 脚本依赖此行为）
 func TestChatStdinLoop(t *testing.T) {
 	factory := core.NewFactory()

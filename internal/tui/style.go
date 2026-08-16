@@ -31,15 +31,31 @@ func resolveTheme(theme string) string {
 	}
 }
 
-// 按配置主题加载样式色表
-func loadStyles(theme string) styles {
-	if resolveTheme(theme) == "dark" {
-		return darkStyles()
+// 按配置主题加载样式表；themeFile 非空时解析覆盖文件并在基底上合成
+// （部分覆盖：未声明样式项回落内置；解析/校验失败返回人话错误，启动即失败不静默降级）
+func loadStyles(theme, themeFile string) (styles, error) {
+	ov, err := loadThemeOverrides(themeFile)
+	if err != nil {
+		return styles{}, err
 	}
-	return lightStyles()
+	base := "light"
+	if resolveTheme(theme) == "dark" {
+		base = "dark"
+	}
+	if ov != nil && ov.base != "" {
+		base = ov.base
+	}
+	var st styles
+	if base == "dark" {
+		st = darkStyles()
+	} else {
+		st = lightStyles()
+	}
+	return applyThemeOverrides(st, ov, themeFile)
 }
 
-// 暗色主题色表（ANSI 256 色）
+// 暗色主题色表（ANSI 256 色）。margin 语义不进基底表：块间距由消费点显式
+// 读样式项 margin 配置输出（lipgloss margin 属块级渲染，逐行应用会插错位置）
 func darkStyles() styles {
 	return styles{
 		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
@@ -63,4 +79,13 @@ func lightStyles() styles {
 		prompt:    lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
 		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
 	}
+}
+
+// 测试便利：加载失败即 Fatal（测试用；产品路径须经 loadStyles 显式处理错误）
+func mustLoadStyles(theme string) styles {
+	st, err := loadStyles(theme, "")
+	if err != nil {
+		panic(err)
+	}
+	return st
 }

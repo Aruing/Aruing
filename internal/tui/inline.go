@@ -35,8 +35,11 @@ const (
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // 行内模式入口：readline 循环 + Turn 等待（spinner）+ 助手留痕 + 容错
-func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme string, out io.Writer) error {
-	st := loadStyles(tuiTheme)
+func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, out io.Writer) error {
+	st, err := loadStyles(tuiTheme, themeFile)
+	if err != nil {
+		return err
+	}
 	// 行内引擎逐键读取依赖 raw mode：非 tty（管道 / 脚本）明确报错不降级；
 	// 无人值守场景应用单句模式（chat "问题"，一次 Turn 后退出）
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -87,11 +90,72 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 			width = w
 			md = buildRenderer(tuiTheme, width)
 		}
-		// readline 提交后输入行（prompt + 内容）天然留在终端，不重复打印用户消息
+		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项在此消费，
+		// 守 #20：与 app 模式 viewport 历史的「你 」措辞一致）
+		echoUserMessage(out, st, text)
 		waitTurn(ctx, out, st, md, svc, sessionID, text)
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
 		renderMessageDivider(out, st, width)
 	}
+}
+
+// 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行、长行在终端折行），
+// 用 user 样式项渲染「你 + 内容」。
+// 回车后光标停在回显区下一行：须上移完整回显行数（echoRows）回到首行再逐行清印，
+// 少移一行会把「你 xx」打在原始回显下方、造成每轮输入重复显示。
+// 行数按回显真实占用估算：每逻辑行 ceil(显示宽/终端宽) 折行，「❯ 」前缀约 2 列，CJK 按 2 列。
+func echoUserMessage(out io.Writer, st styles, text string) {
+	width := terminalWidth()
+	echoRows := 0
+	logical := strings.Split(text, "\n")
+	for _, line := range logical {
+		// 「❯ 」前缀约 2 列；保守按显示宽度折行计数（CJK 粗略按 2 列估，宁可多清一行也不残留）
+		cols := 2 + displayCols(line)
+		echoRows += rowsFor(cols, width)
+	}
+	// 回车后光标在回显区下一行行首：上移完整回显行数覆盖首行（差一行会留下原始回显致重复）
+	if echoRows > 0 {
+		fmt.Fprintf(out, "\x1b[%dA", echoRows)
+	}
+	// 上方空隙读样式项 margin-top（主题可调；不并入 Render 避免与清行计数耦合）；
+	// 未配置时默认 1 行（视觉基线与历史行为一致）
+	userTop := st.user.GetMarginTop()
+	if userTop == 0 {
+		userTop = 1
+	}
+	for i := 0; i < userTop; i++ {
+		clearLine(out)
+		fmt.Fprintln(out)
+	}
+	for _, line := range logical {
+		clearLine(out)
+		fmt.Fprint(out, st.user.Render("你 "+line), "\n")
+	}
+}
+
+// 折行行数：列数除以终端宽向上取整，至少 1
+func rowsFor(cols, width int) int {
+	if width <= 0 {
+		width = 80
+	}
+	rows := (cols + width - 1) / width
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+// 粗估显示列数：CJK 与全角按 2 列，其余 1 列（用于折行行数估算，宁多勿少）
+func displayCols(s string) int {
+	cols := 0
+	for _, r := range s {
+		if r > 0x2E80 { // CJK 区块及以右粗略按宽字符
+			cols += 2
+		} else {
+			cols++
+		}
+	}
+	return cols
 }
 
 // 读多行输入：shift/option+enter（软换行，由 keys 标记）直接换行拼接下一行；
@@ -161,7 +225,9 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
 			} else {
 				for _, mv := range renderAssistant(md, msg.result) {
-					fmt.Fprintln(out, st.assistant.Render("aruing ")+mv.text)
+					// 块级渲染：标签 + 正文整体经样式项（下边距属于回复块；逐行渲染会把
+					// margin 插在标签与正文之间、多行间也会各插空行——pr-agent 评审）
+					fmt.Fprint(out, st.assistant.Render("aruing "+mv.text), "\n")
 				}
 			}
 			return
@@ -259,15 +325,27 @@ func translateNewlineSeqs(in []byte) ([]byte, int) {
 	return out, soft + 1
 }
 
-// 渲染轮间分割线：空行 + 主题色水平线 + 空行。
-// 封装单函数：后续用户自定义开关 / 样式（arc《TUI》Step 2）只改这里；宽度非法时回退 80
+// 渲染轮间分割线：divider 样式项自带上下外边距（默认各 1 行空行，主题 YAML 可调）
+// 宽度非法时回退 80；线本身的颜色经 divider 样式项前景色（#20：无硬编码样式）
 func renderMessageDivider(out io.Writer, st styles, width int) {
 	if width <= 0 {
 		width = 80
 	}
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, st.divider.Render(strings.Repeat("─", width)))
-	fmt.Fprintln(out)
+	// 上下空行数读样式项 margin 配置（主题可调）；未配置时默认各 1 行（视觉基线与历史行为一致）
+	top, bottom := st.divider.GetMarginTop(), st.divider.GetMarginBottom()
+	if top == 0 {
+		top = 1
+	}
+	if bottom == 0 {
+		bottom = 1
+	}
+	for i := 0; i < top; i++ {
+		fmt.Fprintln(out)
+	}
+	fmt.Fprint(out, st.divider.Render(strings.Repeat("─", width)), "\n")
+	for i := 0; i < bottom; i++ {
+		fmt.Fprintln(out)
+	}
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）
