@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing Retrospective"
+  short_description: "代码质量反思审计：卫生扫描（死代码/占位裁决）+ 守规审计（覆盖率/规范/结构性），只报告不动手"
+  default_prompt: "Use $aruing-retrospective when scanning for dead code, auditing quality/coverage, or reviewing structural health."
+
+policy:
+  allow_implicit_invocation: true
