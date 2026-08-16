@@ -110,7 +110,7 @@ Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15�
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Architecture facts: modules, data model, trust boundary, hard constraints |
 | [`docs/project-state.md`](docs/project-state.md) | Stage, work units, next step |
-| [`docs/skills/`](docs/skills) | Project skills (comments, tests, docs) |
+| [`docs/skills/`](docs/skills) | Project skills (docs, tests, comments, PR description, milestone close, self-check, cluster smoke, retrospective) |
 | [`AGENTS.md`](AGENTS.md) | AI tooling / skill install |
 
 Longer design notes live in a private `arui-note/aruing/` notebook (maintainer only).
