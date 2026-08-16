@@ -20,6 +20,8 @@ Ask in natural language. The agent reasons, calls cluster tools for real evidenc
 
 Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend, policy for auth). Model output never pretends to be Evidence.
 
+![Aruing inline chat diagnosing a crashloop pod](docs/assets/example.png)
+
 ## Current stage
 
 **`0.1.0` — usable diagnostic assistant, released for evaluation.** Runs end-to-end against a real cluster with a real LLM: interactive terminal chat (inline or fullscreen), theme customization, evidence navigation with time-window slicing, and clarify-suspend/resume on ambiguous asks.
@@ -121,5 +123,6 @@ Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15�
 | [`aruing.example.yaml`](aruing.example.yaml) / [`tui.example.yaml`](tui.example.yaml) | Annotated config / theme references |
 | [`docs/skills/`](docs/skills) | Project skills (docs, tests, comments, PR description, milestone close, self-check, cluster smoke, retrospective) |
 | [`AGENTS.md`](AGENTS.md) | AI tooling / skill install |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute: setup, PR rules, verification |
 
 Longer design notes live in a private `arui-note/aruing/` notebook (maintainer only).

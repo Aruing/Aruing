@@ -20,6 +20,8 @@
 
 工具经共享 **Registry / Dispatcher**（shell-less kubectl 后端 + 授权 Policy）。模型输出永远不冒充 Evidence。
 
+![Aruing 行内对话诊断 crashloop Pod](docs/assets/example.png)
+
 ## 当前阶段
 
 **`0.1.0` —— 可用的诊断助手，发布供评估。** 真集群 + 真 LLM 端到端可用：交互式终端对话（行内 / 全屏双模式）、主题定制、证据导航（含时间窗切片）、歧义提问的澄清挂起与恢复。
@@ -121,5 +123,6 @@ make lab-down NAME=crashloop-bad-image
 | [`aruing.example.yaml`](aruing.example.yaml) / [`tui.example.yaml`](tui.example.yaml) | 带注释的配置 / 主题参考 |
 | [`docs/skills/`](docs/skills) | 项目级 skill（文档/测试/注释规范、PR 描述、里程碑收尾、全量自检、真集群测试纪律、回顾审计） |
 | [`AGENTS.md`](AGENTS.md) | AI 工具约定 / skill 安装 |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | 参与贡献：环境、PR 规则、验证要求 |
 
 更长的设计笔记在私人 `arui-note/aruing/` 笔记目录（仅维护者）。
