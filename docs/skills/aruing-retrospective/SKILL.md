@@ -1,6 +1,6 @@
 ---
 name: aruing-retrospective
-description: Use when asked to scan for dead/garbage code, audit code quality, check test coverage status, verify compliance with project test/comment guidelines, or review structural health (encapsulation/package splits). Triggered by tasks like "扫一下代码卫生", "质量审计", "死代码检查", "覆盖率怎么样", "该不该拆这个包", and at milestone close after large code changes.
+description: Use when asked to scan for dead/garbage code, audit code quality, check test coverage status, verify compliance with project test/comment guidelines, review structural health (encapsulation/package splits), or hunt change-narration leakage in evergreen docs. Triggered by tasks like "扫一下代码卫生", "质量审计", "死代码检查", "覆盖率怎么样", "该不该拆这个包", "文档怎么在讲历史", and at milestone close after large code changes.
 ---
 
 # Retrospective
@@ -46,6 +46,7 @@ make lint                                              # golangci-lint 已含 un
    按包列出现状 + 明显缺口（哪些关键路径没测试），首次审计附基线建议
 2. **规范抽查**：按 `aruing-test-guidelines`（断言是否证明关键行为、helper 重复度）与 `aruing-code-comments`（注释规范）抽查近期新增/修改的测试与注释——**抽查而非全读**（每包挑代表性文件）
 3. **结构性嗅探**：对照 `docs/architecture.md` 模块职责表读实际代码，找「该封装未封装 / 该拆未拆 / 职责越界」。主观性最强：建议单列「结构性建议」段，**每条标置信度（高/中/低）**，只是候选
+4. **文档时态嗅探**（常青文档讲历史而非现状）：扫 `README*` / `docs/*.md` / 代码注释中的变更叙事——「以前是 X，现在是 Y」「betaN 起」「本次 PR 改了」「评审时认为」这类需要作者语境才看得懂的话。常青文档只放当前事实（`aruing-docs`）；发现即列偏离项交维护者裁决。**过度修剪陷阱**：改写不得丢事实——「已修复 X，因为 Y」改写为现在时反事实「无 X 时会 Y」，不是删掉；被硬约束 / 信任边界钉住的事实一律保留
 
 ### 报告
 
@@ -60,6 +61,7 @@ make lint                                              # golangci-lint 已含 un
 ### 守规
 - 覆盖率现状：按包 <表>；缺口 <关键路径>
 - 规范抽查：符合/偏离项
+- 文档时态偏离项：<清单，每条附建议改写>
 - 结构性建议：<每条 + 置信度>
 ### 建议的后续 PR
 - <按工作量排序的候选清单>

@@ -98,18 +98,10 @@
 5. **`/` 运行时命令（/mode /theme 热切）**（延后项，版本未定）
 6. ~~后续阶段挂起~~ ✅ investigate 已交付（beta19，#80）；parse 阶段挂起维持不做（无场景驱动）
 
-**0.1.0 候选**（beta14 之后）：
-
-1. **logs / events 时间游标**（arc《工具输出导航》3b 残留；`SliceQuery` 已留位）
-2. **磁盘持久化 / 超巨输出页式**（0.2+ 或重开远景）
-3. **TUI 布局可配（L4）/ 组件可插拔（L5）**（arc《TUI》Step 2/3）
-4. **流式响应**（arc《流式响应》，0.2+）
-5. 后续阶段挂起（investigate / parse 复用 `Suspension`）
-
 **arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
 
 - Step **3a** 大表中段可读 → **`0.1.0-beta12`（done，#66）**
-- Step **3b** 证据导航 / 巨输出载波 → **`0.1.0-beta13`（done 主段，#67+#68）**；非表格输出的页式内存变体（行级兜底）→ **`0.1.0-beta16`（done，#77）**，落盘页式与 logs 时间游标仍 0.2+
+- Step **3b** 证据导航 / 巨输出载波 → **`0.1.0-beta13`（done 主段，#67+#68）**；非表格输出的页式内存变体（行级兜底）→ **`0.1.0-beta16`（done，#77）**；logs 时间游标 → **`0.1.0-beta17`（done，#78）**；落盘页式（超 `MaxStdoutBytes` 留存）仍 0.2+
 - Step 4 map-reduce（0.2+）
 - Step 5 子 agent 分治（0.2+，#15/#17）
 
