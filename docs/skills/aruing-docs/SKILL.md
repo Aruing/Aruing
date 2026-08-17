@@ -31,7 +31,8 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 ### `README.md` / `README.zh-CN.md`
 
 - 默认展示 **英文** `README.md`；顶部 `[English](README.md) | [中文](README.zh-CN.md)`，中文正文在 `README.zh-CN.md`
-- 两语结构对齐；对外叙事突出 **agent + tool-driven evidence**（不是普通 chatbot）
+- **两语成对维护**：改任一侧（含当前阶段段、命令示例、文档入口），另一侧必须在**同一 PR** 内同步（结构对齐 + 语义一致），不得只改一侧留另一侧过期
+- 对外叙事突出 **agent + tool-driven evidence**（不是普通 chatbot）
 
 固定部分（按顺序）：
 
@@ -102,7 +103,7 @@ description: Use when <触发条件>. Triggered by <示例任务>.
 ## 写法要求
 
 - 仓库文档以中文为主（`docs/architecture.md`、`project-state.md` 等），关键术语保留英文（如 `Run`、`Query`、`Evidence`）；**对外 README 默认英文**，中文见 `README.zh-CN.md`
-- 只放当前事实，不放设计推理、讨论过程、备选方案
+- 只放当前事实，不放设计推理、讨论过程、备选方案；用现在时陈述当前事实，变更叙事（「以前是 X」「本次 PR 改了」「betaN 起」）不属于当前事实，须改写为现状或删除
 - AI 看的文档前 20 行必须能让工具抓住本质：项目是什么、当前阶段、下一步
 - 表格 / 列表优先，避免长段落
 - 硬约束用"必须 / 不得"，不用"应该 / 建议"
@@ -125,5 +126,6 @@ description: Use when <触发条件>. Triggered by <示例任务>.
 | 完成工作单元 | `project-state.md` 工作单元表 + 已完成 PR 列表 + 下一步 | 三处同步 |
 | 阶段切换（如 beta2 → beta3） | `project-state.md`（重写）+ `README.md` / `README.zh-CN.md` 当前阶段段 | 三处联动 |
 | 创建 / 修改 skill | 本 skill 的 §Skill 自身规范；若改的是文档规范本身，同步本 skill | 遵守元规范 |
+| 改 `README.md` / `README.zh-CN.md` 任一侧 | 另一侧 README | 同 PR 同步（结构 + 语义） |
 
 不确定某项改动是否影响文档时，**先在 PR 描述里说明**（"本 PR 不影响架构文档，因为 ..."），让 reviewer 显式确认，而不是默认漏改。
