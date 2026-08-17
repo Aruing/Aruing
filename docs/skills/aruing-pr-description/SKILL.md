@@ -120,6 +120,7 @@ gh pr create --base main --head <当前分支名> \
 - 多个 label 用**多个 `--label` 标志或逗号分隔**，不得空格分隔（会被当成单个 label 名导致创建失败）
 - `Review effort N/5` 由 pr-agent 自动打，本 skill 不管
 - 若 label 拼错导致 `gh` 报错，去掉 `--label` 重试并在 PR 创建后手动补，不要卡住流程
+- **创建后必须核对**：`gh pr view <N> --json labels` 确认 label 实际落上——创建命令可能静默丢 label（如仓库迁移重定向）；未落上时用 REST 补：`gh api repos/<owner>/<repo>/issues/<N>/labels -f 'labels[]=<label>'`
 
 ## 模板
 
