@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/core"
-	"aruing/internal/session"
-	"aruing/internal/store"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/store"
 )
 
 // 账本记录映射为既往运行详情，含结论与证据编号与摘要

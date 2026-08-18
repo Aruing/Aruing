@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"aruing/internal/core"
-	"aruing/internal/session"
-	"aruing/internal/store"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/store"
 )
 
 func TestMemoryRunLedgerPutGet(t *testing.T) {

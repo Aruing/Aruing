@@ -1,14 +1,14 @@
 package tools_test
 
 import (
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools"
 	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"aruing/internal/core"
-	"aruing/internal/tools/toolstest"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools/toolstest"
 )
 
 // -------------------------- 模拟一个工具 --------------------------

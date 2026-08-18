@@ -9,8 +9,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"aruing/internal/core"
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 var errBoom = errors.New("boom")

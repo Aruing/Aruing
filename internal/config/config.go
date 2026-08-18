@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/llm"
 )
 
 // 进程级配置，由各类加载入口填充

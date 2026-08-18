@@ -14,8 +14,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"aruing/internal/llm"
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 //go:embed prompts/compact.md

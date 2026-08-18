@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 func TestFormatDiagnosticReplyRich(t *testing.T) {

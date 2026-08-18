@@ -16,10 +16,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"aruing/internal/config"
-	"aruing/internal/core"
-	"aruing/internal/session"
-	"aruing/internal/tui"
+	"github.com/Aruing/Aruing/internal/config"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/tui"
 
 	"golang.org/x/term"
 )

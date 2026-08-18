@@ -11,10 +11,10 @@ import (
 	"slices"
 	"strings"
 
-	"aruing/internal/agent"
-	"aruing/internal/core"
-	"aruing/internal/session"
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 可复用的假解析器，始终返回构造时给定的问题模板

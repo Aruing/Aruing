@@ -12,14 +12,14 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"aruing/internal/agent"
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
-	"aruing/internal/llm"
-	"aruing/internal/session"
-	"aruing/internal/store"
-	"aruing/internal/tools"
-	"aruing/internal/tools/toolstest"
+	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/store"
+	"github.com/Aruing/Aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools/toolstest"
 )
 
 func writeChatCompletion(w http.ResponseWriter, content string) {

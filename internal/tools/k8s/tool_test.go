@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 用临时脚本伪造集群命令，验证参数透传与证据语义

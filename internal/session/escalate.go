@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 建运行并执行正式诊断；完成写账本，挂起则返回澄清模式应答

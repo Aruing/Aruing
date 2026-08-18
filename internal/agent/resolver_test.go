@@ -1,14 +1,14 @@
 package agent_test
 
 import (
-	"aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/agent"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 假定位器应按问题节点生成目标，节点编号来自输入而非模板固定值

@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 假解析器应稳定返回预设的问题结构，并把结果绑定到当前运行

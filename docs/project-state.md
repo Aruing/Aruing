@@ -86,6 +86,7 @@
 | beta21 | TUI 留白统一与称呼可配 | ✅ | #92 spacing 归一（margin 剥离样式项）+ labels 称呼开关（默认关）+ spinner 归入助手块；默认无称呼前缀；TurnProgress 修复 spinner 与进度行同屏踩踏 |
 | beta22 | 发布管线与多渠道分发 | ⏳ | 分支模型 main→production + tag 驱动 release workflow + npm 平台子包 + `aruing update`；完成后执行 0.1.0 发布 |
 | beta22-1 | 版本注入（ldflags） | ✅ | `var version/commit/date`（源码默认 dev）+ Makefile LDFLAGS；`make version` 改为构建后跑；version 输出三行（版本/commit/构建时间） |
+| beta22-2 | 模块路径替换 | ✅ | `aruing` → `github.com/Aruing/Aruing`（go.mod + 70 文件 152 行 import，纯机械）；`go install` 渠道随 v0.1.0 tag 生效 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
@@ -94,7 +95,7 @@
 
 ## 下一步
 
-**下一项**：**`0.1.0-beta22` 步骤 2：模块路径替换 `aruing` → `github.com/Aruing/Aruing`**（纯机械替换，须在首个 tag 前定形，避免版本线断裂；首步版本注入已交付）。后续步骤：production 分支 + 发布检查 workflow → GoReleaser + release workflow → 安装脚本 → npm 子包 → `aruing update`。plan 在笔记 `plan/0.1.0-beta22/`。完成后执行 0.1.0 发布（打 `v0.1.0` tag + 版本收尾，发布即管线首次真实执行）。
+**下一项**：**`0.1.0-beta22` 步骤 3：production 分支 + 全量发布检查 workflow**（main→production PR 触发 `make check` 全项 + 5 平台交叉编译；决策 7/8：tag 只认 production、merge commit 合并）。后续步骤：GoReleaser + release workflow → 安装脚本 → npm 子包 → `aruing update`。plan 在笔记 `plan/0.1.0-beta22/`。完成后执行 0.1.0 发布（打 `v0.1.0` tag + 版本收尾，发布即管线首次真实执行）。
 
 **0.1.0 候选**（发布后转入 0.2.0 远景排序）：
 

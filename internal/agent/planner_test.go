@@ -1,14 +1,14 @@
 package agent_test
 
 import (
-	"aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/agent"
 	"context"
 	"encoding/json"
 	"testing"
 	"time"
 
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 规划结果必须绑定当前运行并保留开放引用，才能同时支持不同问题和资源类型

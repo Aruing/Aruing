@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"aruing/internal/config"
+	"github.com/Aruing/Aruing/internal/config"
 )
 
 // config banner 的一行键值对，统一渲染为 `config: <key>=<value>`

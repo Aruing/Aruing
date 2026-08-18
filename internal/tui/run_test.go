@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/config"
+	"github.com/Aruing/Aruing/internal/config"
 )
 
 // Run 按模式分发：app 走 bubbletea 全屏；inline/空走行内（非 tty 下报明确错误证明走了行内）

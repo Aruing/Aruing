@@ -13,8 +13,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 
-	"aruing/internal/core"
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 // 渲染视图的一条消息（用户 / 助手 / 错误 / 系统），是展示层视图、非业务事实（守 #20）

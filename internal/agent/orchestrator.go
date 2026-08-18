@@ -28,7 +28,7 @@ import (
 	"sync"
 	"time"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 描述编排器理解原始问题所需的最小能力

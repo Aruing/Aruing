@@ -3,8 +3,8 @@ package agent
 import (
 	"encoding/json"
 
-	"aruing/internal/core"
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 const (

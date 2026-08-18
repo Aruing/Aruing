@@ -19,7 +19,7 @@ import (
 	"github.com/ergochat/readline"
 	"golang.org/x/term"
 
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 // spinner 帧间隔与帧表

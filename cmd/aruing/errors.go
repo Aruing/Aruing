@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"aruing/internal/agent"
-	"aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/llm"
 )
 
 // 为单次运行失败补充可操作的人话提示

@@ -13,14 +13,14 @@ import (
 	"os/exec"
 	"time"
 
-	"aruing/internal/agent"
-	"aruing/internal/config"
-	"aruing/internal/core"
-	"aruing/internal/llm"
-	"aruing/internal/session"
-	"aruing/internal/store"
-	"aruing/internal/tools"
-	"aruing/internal/tools/k8s"
+	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/config"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/store"
+	"github.com/Aruing/Aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools/k8s"
 )
 
 // 生产环境调查阶段规划轮数上限

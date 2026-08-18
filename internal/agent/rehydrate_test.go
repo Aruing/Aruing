@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/session"
-	"aruing/internal/store"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/store"
 )
 
 // 检查点或折叠/截断标记存在即说明视图丢了旧文

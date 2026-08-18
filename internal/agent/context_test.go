@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 // 短消息远超原最近二十条时，预算内应全量进载荷，禁止按固定条数截断

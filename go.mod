@@ -1,4 +1,4 @@
-module aruing
+module github.com/Aruing/Aruing
 
 go 1.26
 

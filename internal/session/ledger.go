@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 按运行编号找不到正式诊断记录时由诊断账本查询返回

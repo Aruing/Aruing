@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sync"
 
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 // 进程内会话与消息存储，实现会话存储接口

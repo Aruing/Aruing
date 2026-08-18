@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"aruing/internal/agent"
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
-	"aruing/internal/tools"
-	"aruing/internal/tools/toolstest"
+	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools/toolstest"
 )
 
 // 组装带完整假角色与 k8s 假工具的编排器（investigate 挂起测试共用）
