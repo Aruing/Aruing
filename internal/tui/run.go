@@ -23,11 +23,17 @@ const inputHeight = 3
 
 // Run 接收交互入口，按模式分发：app（bubbletea 全屏）或默认 inline（行内留痕）。
 // tuiCfg 提供主题与模式；Mode 为 "app" 走全屏，其余（含空）走行内。
-func Run(ctx context.Context, svc *session.Service, sessionID, format string, out io.Writer, tuiCfg config.TUI) error {
+// prog 为进度协调器（cmd wiring 已把它注入编排/Tower 的 progress 出口）：
+// inline 绑定后进度行与 spinner 同屏重绘；app 不绑定（透传 fallback 维持 stderr 现状）。
+// prog 为 nil 时内部建丢弃协调器（测试/非交互调用方便利，不影响分发行为）
+func Run(ctx context.Context, svc *session.Service, sessionID, format string, out io.Writer, tuiCfg config.TUI, prog *TurnProgress) error {
+	if prog == nil {
+		prog = NewTurnProgress(io.Discard)
+	}
 	if tuiCfg.Mode == "app" {
 		return appRun(ctx, svc, sessionID, format, out, tuiCfg)
 	}
-	return inlineRun(ctx, svc, sessionID, format, tuiCfg.Theme, tuiCfg.ThemeFile, out)
+	return inlineRun(ctx, svc, sessionID, format, tuiCfg.Theme, tuiCfg.ThemeFile, out, prog)
 }
 
 // app 模式入口（bubbletea 全屏）：config.TUI.Mode=="app" 或 --ui app 时经 Run 调入。

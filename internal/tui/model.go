@@ -166,23 +166,52 @@ func (m Model) View() string {
 	return b.String()
 }
 
-// 把 messages 渲染成文本塞进 viewport 并滚到底
+// 把 messages 渲染成历史文本，塞进 viewport 并滚到底
 func syncViewport(m *Model) {
+	m.viewport.SetContent(renderHistory(m))
+	m.viewport.GotoBottom()
+}
+
+// 渲染消息历史：块间距与称呼开关与 inline 模式同规则（user 上方空行、
+// 助手块上下空行、称呼独立行）；连续 assistant/error 视为同一助手块，
+// 空行与称呼只加在块首，块内（正文 + 报告）不隔开
+func renderHistory(m *Model) string {
 	var b strings.Builder
-	for _, mv := range m.messages {
+	sp, lab := m.styles.spacing, m.styles.labels
+	for i, mv := range m.messages {
+		next := ""
+		if i+1 < len(m.messages) {
+			next = m.messages[i+1].kind
+		}
 		switch mv.kind {
 		case "user":
-			b.WriteString(m.styles.user.Render("你 ") + mv.text + "\n")
-		case "assistant":
-			b.WriteString(m.styles.assistant.Render("aruing ") + mv.text + "\n")
-		case "error":
-			b.WriteString(m.styles.err.Render("错误 ") + mv.text + "\n")
+			printGap(&b, sp.userTop)
+			if lab.enabled {
+				b.WriteString(m.styles.user.Render(lab.user) + "\n")
+			}
+			b.WriteString(m.styles.user.Render(mv.text) + "\n")
+		case "assistant", "error":
+			// 块首：空行 + （assistant 开头时）称呼行；error 开头不加称呼（「错误 」是语义标记）
+			if i == 0 || (m.messages[i-1].kind != "assistant" && m.messages[i-1].kind != "error") {
+				printGap(&b, sp.assistantTop)
+				if lab.enabled && mv.kind == "assistant" {
+					b.WriteString(m.styles.assistant.Render(lab.assistant) + "\n")
+				}
+			}
+			if mv.kind == "assistant" {
+				b.WriteString(m.styles.assistant.Render(mv.text) + "\n")
+			} else {
+				b.WriteString(m.styles.err.Render("错误 ") + mv.text + "\n")
+			}
+			// 块尾：助手块收尾空行
+			if next != "assistant" && next != "error" {
+				printGap(&b, sp.assistantBottom)
+			}
 		case "system":
 			b.WriteString(m.styles.system.Render(mv.text) + "\n")
 		}
 	}
-	m.viewport.SetContent(b.String())
-	m.viewport.GotoBottom()
+	return b.String()
 }
 
 // 用 markdown 渲染器把一轮 Turn 结果渲染为消息视图（正文 + 诊断报告）

@@ -19,8 +19,63 @@ import (
 type themeFile struct {
 	// 基底选择：dark | light；空 = 取 tui.theme 归一结果
 	Base string `yaml:"base"`
+	// 称呼开关与文案（可选；默认关，开启后称呼独立一行 + 换行 + 内容）
+	Labels *labelsSpec `yaml:"labels"`
 	// 各语义角色的样式覆盖（只覆盖声明的字段）
 	Styles map[string]styleSpec `yaml:"styles"`
+}
+
+// 称呼声明：enabled 缺省视为关；文案留空回落默认（你 / aruing）
+type labelsSpec struct {
+	// 显式开关称呼行；未声明 = 关
+	Enabled *bool `yaml:"enabled"`
+	// 用户消息称呼文案；空 = 默认「你」
+	User string `yaml:"user"`
+	// 助手消息称呼文案；空 = 默认「aruing」
+	Assistant string `yaml:"assistant"`
+}
+
+// 块间距的显式值（行数）：主题 margin 声明解析而来，未声明的项用默认视觉基线。
+// margin 不写进 lipgloss 样式项：Render 会按块级应用 margin，与渲染调用点的
+// 手动空行叠加会双倍；且显式 0 也是合法间距，须与「未配置」区分，故单独承载
+type spacing struct {
+	// 用户输入块上方空行数（默认 1）
+	userTop int
+	// 用户输入与助手块（spinner / 回复 / 错误）之间空行数（默认 1）
+	assistantTop int
+	// 助手块下方空行数（默认 0）
+	assistantBottom int
+	// 轮间分割线上方空行数（默认 1）
+	dividerTop int
+	// 轮间分割线下方空行数（默认 0；与下轮输入之间的空行由 userTop 提供，避免双空行）
+	dividerBottom int
+}
+
+// 默认块间距（视觉基线）：输入与回复之间恰 1 行、分割线两侧各恰 1 行
+func defaultSpacing() spacing {
+	return spacing{userTop: 1, assistantTop: 1, assistantBottom: 0, dividerTop: 1, dividerBottom: 0}
+}
+
+// 称呼配置的解析后形态：开关 + 两角色文案；渲染点消费（默认关）
+type labels struct {
+	// 是否输出称呼行（独立一行 + 换行 + 内容）
+	enabled bool
+	// 用户消息称呼文案
+	user string
+	// 助手消息称呼文案
+	assistant string
+}
+
+// 归一称呼声明：文案留空回落默认，enabled 缺省为关
+func normalizeLabels(spec *labelsSpec) labels {
+	out := labels{enabled: spec.Enabled != nil && *spec.Enabled, user: "你", assistant: "aruing"}
+	if strings.TrimSpace(spec.User) != "" {
+		out.user = spec.User
+	}
+	if strings.TrimSpace(spec.Assistant) != "" {
+		out.assistant = spec.Assistant
+	}
+	return out
 }
 
 // 单个角色的样式覆盖声明；指针与切片区分「未声明」与「显式零值」
@@ -35,7 +90,8 @@ type styleSpec struct {
 	Border *borderSpec `yaml:"border"`
 	// 内边距 [上, 右, 下, 左]；非负；未声明不改动基底
 	Padding []int `yaml:"padding"`
-	// 外边距 [上, 右, 下, 左]；非负；未声明不改动基底
+	// 外边距 [上, 右, 下, 左]；非负；仅 user / assistant / divider 消费（解析为块间距
+	// spacing，左右值当前无消费点）；未声明不改动默认间距
 	Margin []int `yaml:"margin"`
 }
 
@@ -51,6 +107,8 @@ type borderSpec struct {
 type themeOverrides struct {
 	// 基底（dark | light，已归一）
 	base string
+	// 称呼声明（可为 nil）
+	labels *labelsSpec
 	// 角色名 → 已校验的覆盖声明
 	styles map[string]styleSpec
 }
@@ -74,7 +132,7 @@ func loadThemeOverrides(path string) (*themeOverrides, error) {
 	if err := yaml.Unmarshal(data, &tf); err != nil {
 		return nil, fmt.Errorf("parse theme file %s: %w", path, err)
 	}
-	ov := &themeOverrides{base: strings.TrimSpace(tf.Base), styles: tf.Styles}
+	ov := &themeOverrides{base: strings.TrimSpace(tf.Base), labels: tf.Labels, styles: tf.Styles}
 	if ov.base != "" && ov.base != "dark" && ov.base != "light" {
 		return nil, fmt.Errorf("theme file %s: base must be dark or light, got %q", path, ov.base)
 	}
@@ -121,6 +179,15 @@ func validateStyleSpec(path, role string, spec styleSpec) error {
 			}
 		}
 	}
+	// margin 语义是块间距，只有 user / assistant / divider 有消费点；
+	// 其余角色声明即报错，防拼写/误解后静默无效
+	if spec.Margin != nil {
+		switch role {
+		case "user", "assistant", "divider":
+		default:
+			return fmt.Errorf("theme file %s: styles.%s.margin: only user/assistant/divider consume spacing (move it or drop it)", path, role)
+		}
+	}
 	return nil
 }
 
@@ -139,7 +206,7 @@ func validColor(color string) bool {
 
 // 把覆盖应用到基底样式表：逐角色逐字段覆盖，未声明字段保持基底
 func applyThemeOverrides(base styles, ov *themeOverrides, path string) (styles, error) {
-	if ov == nil || len(ov.styles) == 0 {
+	if ov == nil {
 		return base, nil
 	}
 	out := base
@@ -162,6 +229,20 @@ func applyThemeOverrides(base styles, ov *themeOverrides, path string) (styles, 
 		}
 	}
 	for role, spec := range ov.styles {
+		// margin 解析为 spacing 显式值（不写 lipgloss 样式项，见 spacing 注释）；
+		// 左右值当前无消费点，忽略
+		if len(spec.Margin) == 4 {
+			switch role {
+			case "user":
+				out.spacing.userTop = spec.Margin[0]
+			case "assistant":
+				out.spacing.assistantTop = spec.Margin[0]
+				out.spacing.assistantBottom = spec.Margin[2]
+			case "divider":
+				out.spacing.dividerTop = spec.Margin[0]
+				out.spacing.dividerBottom = spec.Margin[2]
+			}
+		}
 		set(role, func(s *lipgloss.Style) {
 			if spec.Foreground != "" {
 				*s = s.Foreground(lipgloss.Color(spec.Foreground))
@@ -185,10 +266,11 @@ func applyThemeOverrides(base styles, ov *themeOverrides, path string) (styles, 
 			if len(spec.Padding) == 4 {
 				*s = s.Padding(spec.Padding[0], spec.Padding[1], spec.Padding[2], spec.Padding[3])
 			}
-			if len(spec.Margin) == 4 {
-				*s = s.Margin(spec.Margin[0], spec.Margin[1], spec.Margin[2], spec.Margin[3])
-			}
 		})
+	}
+	// 称呼声明在样式之后归一（文案回落默认 / enabled 缺省为关）
+	if ov.labels != nil {
+		out.labels = normalizeLabels(ov.labels)
 	}
 	_ = path // 定位信息已在解析阶段校验并报错，此处无额外用途
 	return out, nil

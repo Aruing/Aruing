@@ -243,7 +243,10 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	writeStartupBanner(stderr, usedPath, cfg, ci)
 
 	factory := core.NewFactory()
-	svc, err := newSessionStack(factory, cfg, stderr)
+	// 进度协调器：编排/Tower 的 progress 行先落到这里；inline 模式绑定终端后
+	// 与 spinner 同屏重绘，其余模式（单句 / stdin 行 / app）透传 stderr 维持现状
+	progress := tui.NewTurnProgress(stderr)
+	svc, err := newSessionStack(factory, cfg, progress)
 	if err != nil {
 		return formatRunError(err)
 	}
@@ -277,7 +280,7 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	}
 
 	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回
-	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI)
+	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI, progress)
 }
 
 // 非 tty stdin 行模式：每行一 Turn，同会话；空行忽略，exit/quit 停止。

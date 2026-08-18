@@ -8,6 +8,7 @@ import (
 )
 
 // 一套主题下的样式 token
+// spacing / labels 随样式表一起加载（margin 从样式项剥离后的显式承载，见 theme.go）
 type styles struct {
 	user      lipgloss.Style
 	assistant lipgloss.Style
@@ -16,6 +17,10 @@ type styles struct {
 	spinner   lipgloss.Style
 	prompt    lipgloss.Style
 	divider   lipgloss.Style
+	// 块间距显式值（默认 defaultSpacing；主题 margin 声明覆盖）
+	spacing spacing
+	// 称呼开关与文案（默认关；开启后称呼独立一行 + 换行 + 内容）
+	labels labels
 }
 
 // 把主题名归一到 dark/light；空 / auto / 未知用 termenv 检测终端背景
@@ -51,11 +56,14 @@ func loadStyles(theme, themeFile string) (styles, error) {
 	} else {
 		st = lightStyles()
 	}
+	// 间距与称呼先落默认视觉基线，再由覆盖声明逐项替换（显式 0 合法，不会被默认值顶掉）
+	st.spacing = defaultSpacing()
+	st.labels = labels{user: "你", assistant: "aruing"}
 	return applyThemeOverrides(st, ov, themeFile)
 }
 
-// 暗色主题色表（ANSI 256 色）。margin 语义不进基底表：块间距由消费点显式
-// 读样式项 margin 配置输出（lipgloss margin 属块级渲染，逐行应用会插错位置）
+// 暗色主题色表（ANSI 256 色）。基底表只存颜色/粗体；块间距解析为 spacing
+// 显式值由消费点输出（margin 若进样式项，Render 块级应用会与手动空行双重叠加）
 func darkStyles() styles {
 	return styles{
 		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),

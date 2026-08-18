@@ -78,19 +78,114 @@ styles:
 	}
 }
 
-// margin/padding 覆盖生效
+// margin 覆盖语义：声明解析为 spacing 显式值，不再写 lipgloss 样式项
+// （Render 会按块级应用 margin，与渲染点手动空行双重叠加；显式 0 也须与未配置可区分）
 func TestThemeOverrideSpacing(t *testing.T) {
 	path := writeTheme(t, `
 styles:
   divider:
     margin: [2, 0, 3, 0]
+  user:
+    margin: [2, 0, 0, 0]
+  assistant:
+    margin: [0, 0, 2, 0]
 `)
 	st, err := loadStyles("dark", path)
 	if err != nil {
 		t.Fatalf("loadStyles: %v", err)
 	}
-	if got := st.divider.GetMarginTop(); got != 2 || st.divider.GetMarginBottom() != 3 {
-		t.Fatalf("divider margin override: top=%d bottom=%d", got, st.divider.GetMarginBottom())
+	if st.spacing.userTop != 2 {
+		t.Fatalf("userTop = %d, want 2", st.spacing.userTop)
+	}
+	// assistant 显式 0 合法：与未配置（默认 1）可区分
+	if st.spacing.assistantTop != 0 || st.spacing.assistantBottom != 2 {
+		t.Fatalf("assistant spacing = %d/%d, want 0/2", st.spacing.assistantTop, st.spacing.assistantBottom)
+	}
+	if st.spacing.dividerTop != 2 || st.spacing.dividerBottom != 3 {
+		t.Fatalf("divider spacing = %d/%d, want 2/3", st.spacing.dividerTop, st.spacing.dividerBottom)
+	}
+	// margin 不进 lipgloss 样式项：避免 Render 块级应用与手动空行双重叠加
+	if st.divider.GetMarginTop() != 0 || st.divider.GetMarginBottom() != 0 {
+		t.Fatal("margin must not be applied to lipgloss styles")
+	}
+}
+
+// 未声明 margin：默认视觉基线（输入上 1、助手块上 1 下 0、分割线上 1 下 0）
+func TestSpacingDefaults(t *testing.T) {
+	st, err := loadStyles("dark", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := spacing{userTop: 1, assistantTop: 1, assistantBottom: 0, dividerTop: 1, dividerBottom: 0}
+	if st.spacing != want {
+		t.Fatalf("default spacing = %+v, want %+v", st.spacing, want)
+	}
+}
+
+// 无间距消费点的角色声明 margin：启动报错（防误解后静默无效）
+func TestMarginUnsupportedRole(t *testing.T) {
+	path := writeTheme(t, `
+styles:
+  err:
+    margin: [1, 0, 0, 0]
+`)
+	if _, err := loadStyles("dark", path); err == nil || !strings.Contains(err.Error(), "styles.err.margin") {
+		t.Fatalf("want error for err.margin, got: %v", err)
+	}
+}
+
+// 称呼开关：默认关；enabled + 文案覆盖；文案留空回落默认；enabled 缺省为关
+func TestLabelsOverride(t *testing.T) {
+	// 默认：关 + 默认文案
+	st, err := loadStyles("dark", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.labels.enabled || st.labels.user != "你" || st.labels.assistant != "aruing" {
+		t.Fatalf("default labels = %+v", st.labels)
+	}
+	// 开启 + 自定义文案
+	path := writeTheme(t, `
+labels:
+  enabled: true
+  user: "me"
+  assistant: "bot"
+`)
+	st, err = loadStyles("dark", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.labels.enabled || st.labels.user != "me" || st.labels.assistant != "bot" {
+		t.Fatalf("labels = %+v", st.labels)
+	}
+	// 开启但文案留空：回落默认 你 / aruing
+	path = writeTheme(t, `
+labels:
+  enabled: true
+`)
+	st, err = loadStyles("dark", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.labels.enabled || st.labels.user != "你" || st.labels.assistant != "aruing" {
+		t.Fatalf("labels fallback = %+v", st.labels)
+	}
+	// 声明 labels 但未写 enabled：视为关
+	path = writeTheme(t, `
+labels:
+  user: "me"
+`)
+	st, err = loadStyles("dark", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.labels.enabled {
+		t.Fatal("labels without enabled must stay off")
+	}
+	// enabled 非布尔：YAML 解析报错
+	path = writeTheme(t, "labels:\n  enabled: yes-please\n")
+	if _, err := loadStyles("dark", path); err == nil {
+		t.Fatal("invalid labels type should error")
 	}
 }
 
@@ -173,6 +268,6 @@ func TestThemeBaseTables(t *testing.T) {
 	if got, ok := light.assistant.GetForeground().(lipgloss.Color); !ok || string(got) != "238" {
 		t.Fatalf("light assistant: %v", got)
 	}
-	// 间距不再进基底表：消费点显式读 margin 配置，未配置时 fallback 默认行数
-	// （视觉基线由消费点保证，见 renderMessageDivider / echoUserMessage / waitTurn）
+	// 间距不进基底表：margin 解析为 spacing 显式值由消费点输出，
+	// 未配置时默认见 defaultSpacing（TestSpacingDefaults 锚定）
 }

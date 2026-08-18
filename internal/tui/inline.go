@@ -35,11 +35,13 @@ const (
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // 行内模式入口：readline 循环 + Turn 等待（spinner）+ 助手留痕 + 容错
-func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, out io.Writer) error {
+func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, out io.Writer, prog *TurnProgress) error {
 	st, err := loadStyles(tuiTheme, themeFile)
 	if err != nil {
 		return err
 	}
+	// 进度协调器接管终端：此后编排/Tower 的进度行与 spinner 同屏重绘
+	prog.bind(out, st)
 	// 行内引擎逐键读取依赖 raw mode：非 tty（管道 / 脚本）明确报错不降级；
 	// 无人值守场景应用单句模式（chat "问题"，一次 Turn 后退出）
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -90,19 +92,19 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 			width = w
 			md = buildRenderer(tuiTheme, width)
 		}
-		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项在此消费，
-		// 守 #20：与 app 模式 viewport 历史的「你 」措辞一致）
+		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项与
+		// 称呼开关在此消费，守 #20：与 app 模式 viewport 历史同规则）
 		echoUserMessage(out, st, text)
-		waitTurn(ctx, out, st, md, svc, sessionID, text)
+		waitTurn(ctx, out, st, md, svc, sessionID, text, prog)
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
 		renderMessageDivider(out, st, width)
 	}
 }
 
 // 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行、长行在终端折行），
-// 用 user 样式项渲染「你 + 内容」。
+// 用 user 样式项逐行渲染内容；称呼开关开启时先单独一行渲染称呼。
 // 回车后光标停在回显区下一行：须上移完整回显行数（echoRows）回到首行再逐行清印，
-// 少移一行会把「你 xx」打在原始回显下方、造成每轮输入重复显示。
+// 少移一行会把留痕打在原始回显下方、造成每轮输入重复显示。
 // 行数按回显真实占用估算：每逻辑行 ceil(显示宽/终端宽) 折行，「❯ 」前缀约 2 列，CJK 按 2 列。
 func echoUserMessage(out io.Writer, st styles, text string) {
 	width := terminalWidth()
@@ -117,19 +119,18 @@ func echoUserMessage(out io.Writer, st styles, text string) {
 	if echoRows > 0 {
 		fmt.Fprintf(out, "\x1b[%dA", echoRows)
 	}
-	// 上方空隙读样式项 margin-top（主题可调；不并入 Render 避免与清行计数耦合）；
-	// 未配置时默认 1 行（视觉基线与历史行为一致）
-	userTop := st.user.GetMarginTop()
-	if userTop == 0 {
-		userTop = 1
-	}
-	for i := 0; i < userTop; i++ {
+	// 输入上方空行读 spacing.userTop（主题可配，显式 0 合法）；覆盖旧回显行须逐行清印
+	for i := 0; i < st.spacing.userTop; i++ {
 		clearLine(out)
 		fmt.Fprintln(out)
 	}
+	if st.labels.enabled {
+		clearLine(out)
+		fmt.Fprint(out, st.user.Render(st.labels.user), "\n")
+	}
 	for _, line := range logical {
 		clearLine(out)
-		fmt.Fprint(out, st.user.Render("你 "+line), "\n")
+		fmt.Fprint(out, st.user.Render(line), "\n")
 	}
 }
 
@@ -196,46 +197,61 @@ func continuation(line string) (content string, more bool) {
 	return line + "\n", false
 }
 
-// 等待一轮 Turn 完成：期间单行 spinner 动画；完成后 print 助手 / 错误（留痕）
+// 等待一轮 Turn 完成：期间单行 spinner 动画（经 TurnProgress 协调器，与进度行
+// 同屏重绘：进度行落屏时 spinner 让位、重画到最新行下方）；完成后 print 助手 / 错误（留痕）
 // 容错：Turn 失败 print 错误后返回，外层循环继续读输入（不杀会话）
+// spinner 与回复同属助手块：块首空行读 spacing.assistantTop，spinner 行完成后被内容原位替换
 // 流式留位（#20）：流式落地时本函数扩展为逐 chunk print 留痕，循环结构不变
-func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRenderer, svc *session.Service, sessionID, text string) {
+func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRenderer, svc *session.Service, sessionID, text string, prog *TurnProgress) {
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	turnCh := make(chan turnMsg, 1)
+
+	ticker := time.NewTicker(spinnerInterval)
+	defer ticker.Stop()
+	// 助手块首：空行 + （称呼开启时）称呼行 + spinner 首帧（协调器接管 spinner 行）。
+	// Turn goroutine 必须在 spinnerStart 之后启动：否则多核下首条进度可能在 spinner
+	// 上屏前直达终端，落到块首空行/称呼行上方，破坏屏序
+	printGap(out, st.spacing.assistantTop)
+	if st.labels.enabled {
+		fmt.Fprint(out, st.assistant.Render(st.labels.assistant), "\n")
+	}
+	prog.spinnerStart(st)
 	go func() {
 		result, err := svc.Turn(turnCtx, sessionID, text)
 		turnCh <- turnMsg{result: result, err: err}
 	}()
-
-	ticker := time.NewTicker(spinnerInterval)
-	defer ticker.Stop()
-	frame := 0
-	renderSpinner(out, st, frame)
 	for {
 		select {
 		case msg := <-turnCh:
-			clearLine(out)
+			// 清 spinner 行（上方空行与称呼行保留；进度行已是留痕），内容从原位接排
+			prog.spinnerStop()
 			// ctx 已取消时 Turn 多半返回 context canceled：静默退出，不打印伪错误
 			// （select 在 turnCh 与 ctx.Done 同时就绪时随机选中，需显式优先取消）
 			if turnCtx.Err() != nil {
 				return
 			}
 			if msg.err != nil {
+				// 错误不是助手发言：无进度行时称呼行紧邻 spinner，擦除它再印错误
+				// （与 app 模式 renderHistory 一致）；有进度行时称呼行领衔的是这次调查，
+				// 保留不动——擦相邻行会销毁最后一条进度留痕
+				if st.labels.enabled && prog.progressLines() == 0 {
+					erasePrevLine(out)
+				}
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
 			} else {
 				for _, mv := range renderAssistant(md, msg.result) {
-					// 块级渲染：标签 + 正文整体经样式项（下边距属于回复块；逐行渲染会把
-					// margin 插在标签与正文之间、多行间也会各插空行——pr-agent 评审）
-					fmt.Fprint(out, st.assistant.Render("aruing "+mv.text), "\n")
+					// 正文整行经 assistant 样式项渲染，无称呼前缀（称呼行由 labels 开启时单独输出）
+					fmt.Fprint(out, st.assistant.Render(mv.text), "\n")
 				}
 			}
+			// 助手块收尾空行（默认 0；主题可配）
+			printGap(out, st.spacing.assistantBottom)
 			return
 		case <-ticker.C:
-			frame = (frame + 1) % len(spinnerFrames)
-			renderSpinner(out, st, frame)
+			prog.spinnerTick()
 		case <-ctx.Done():
-			clearLine(out)
+			prog.spinnerStop()
 			return
 		}
 	}
@@ -325,27 +341,16 @@ func translateNewlineSeqs(in []byte) ([]byte, int) {
 	return out, soft + 1
 }
 
-// 渲染轮间分割线：divider 样式项自带上下外边距（默认各 1 行空行，主题 YAML 可调）
-// 宽度非法时回退 80；线本身的颜色经 divider 样式项前景色（#20：无硬编码样式）
+// 渲染轮间分割线：上下空行数读 spacing（主题可配，显式 0 合法；默认上 1 下 0，
+// 分割线与下轮输入之间的空行由 userTop 提供避免双空行）；
+// 线本身的颜色经 divider 样式项前景色（#20：无硬编码样式）
 func renderMessageDivider(out io.Writer, st styles, width int) {
 	if width <= 0 {
 		width = 80
 	}
-	// 上下空行数读样式项 margin 配置（主题可调）；未配置时默认各 1 行（视觉基线与历史行为一致）
-	top, bottom := st.divider.GetMarginTop(), st.divider.GetMarginBottom()
-	if top == 0 {
-		top = 1
-	}
-	if bottom == 0 {
-		bottom = 1
-	}
-	for i := 0; i < top; i++ {
-		fmt.Fprintln(out)
-	}
+	printGap(out, st.spacing.dividerTop)
 	fmt.Fprint(out, st.divider.Render(strings.Repeat("─", width)), "\n")
-	for i := 0; i < bottom; i++ {
-		fmt.Fprintln(out)
-	}
+	printGap(out, st.spacing.dividerBottom)
 }
 
 // 渲染 spinner 行（清行 + 写当前帧）
@@ -357,4 +362,19 @@ func renderSpinner(out io.Writer, st styles, frame int) {
 // 清当前行
 func clearLine(out io.Writer) {
 	fmt.Fprint(out, "\r\033[2K")
+}
+
+// 印 n 行空行（块间距消费点共用；n<=0 不输出）
+func printGap(out io.Writer, n int) {
+	for i := 0; i < n; i++ {
+		fmt.Fprintln(out)
+	}
+}
+
+// 擦除上一行并把光标移回当前行（上移一行 → 清行 → 下移回来）；
+// 用于错误路径撤回已印的称呼行，当前行留给错误消息原位接排
+func erasePrevLine(out io.Writer) {
+	fmt.Fprint(out, "\x1b[1A")
+	clearLine(out)
+	fmt.Fprint(out, "\x1b[1B")
 }

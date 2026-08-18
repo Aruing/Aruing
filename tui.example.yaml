@@ -17,11 +17,23 @@
 #
 # 颜色格式：ANSI 256 编号（如 "205"）或 hex（如 "#ff005f"）。
 # padding / margin：四个数 [上, 右, 下, 左]，单位为行/格，非负。
-#   - user.margin-top    = 你输入与上方内容的间隔
-#   - assistant.margin-bottom = 回复与下一轮的间隔
-#   - divider 的上下 margin = 分隔线周围空行数
+#   margin 是块间距（消息块上下空行数），显式写 0 也生效（0 就是 0）：
+#   - user.margin-top                = 你输入上方空行数（默认 1）
+#   - assistant.margin-top/bottom    = 输入与回复（含思考中动画）之间 / 回复块下方空行数（默认 1 / 0）
+#   - divider.margin-top/bottom      = 轮间分隔线上 / 下空行数（默认 1 / 0）
+#   左右两值当前无消费点，填 0。仅 user / assistant / divider 支持 margin，
+#   其他角色写 margin 启动会报错（防误解后静默无效）。
+#
+# labels（称呼开关，顶层键，默认关）：
+#   默认消息直接呈现内容、无称呼前缀；开启后每条消息先单独一行称呼
+#   （user / assistant 样式渲染），再换行放内容。文案不写则默认 你 / aruing。
 
 base: dark
+
+# labels:
+#   enabled: true
+#   user: "你"
+#   assistant: "aruing"
 
 styles:
   user:
@@ -31,7 +43,7 @@ styles:
 
   assistant:
     foreground: "252"        # 回复正文颜色（默认 dark: 252）
-    margin: [0, 0, 1, 0]    # 回复块下方留 1 行空隙
+    margin: [1, 0, 0, 0]    # 输入与回复之间留 1 行空隙（动画与回复共用）
 
   err:
     foreground: "#ff5f5f"
@@ -49,7 +61,7 @@ styles:
 
   divider:
     foreground: "240"        # 分隔线颜色
-    margin: [1, 0, 1, 0]     # 分隔线上下各留 1 行空行
+    margin: [1, 0, 0, 0]     # 分隔线上方留 1 行空行（下方默认 0，与下轮输入的空行由 user.margin-top 提供）
 
   # 边框示例（当前 UI 尚未启用边框；声明后供未来组件消费，不会破坏现有渲染）：
   # assistant:
