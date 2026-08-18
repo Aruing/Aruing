@@ -96,24 +96,36 @@ func TestConsumeSoft(t *testing.T) {
 	}
 }
 
-// 轮间分割线：空行 + 水平线 + 空行结构；宽度自适应与非法回退
+// 轮间分割线：默认结构 = 上 1 空行 + 水平线（下方 0 空行，与下轮输入的空行由 userTop 提供）；
+// margin 覆盖结构；宽度自适应与非法回退
 func TestRenderMessageDivider(t *testing.T) {
 	st := mustLoadStyles("dark")
 
 	var b strings.Builder
 	renderMessageDivider(&b, st, 10)
 	got := b.String()
-	// 结构：上边距空行 + 满宽水平线 + 下边距空行（margin 由 divider 样式项渲染），
-	// 末尾以单个换行结束，不再有额外空行
-	if !strings.HasSuffix(got, "\n") || strings.HasSuffix(got, "\n\n\n") {
-		t.Fatalf("divider must end with exactly one newline: %q", got)
+	// 默认 spacing：divider 上 1 下 0 → 空行 + 线，恰一个结尾换行
+	if !strings.HasSuffix(got, "─\n") || strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("divider must end with the line + one newline: %q", got)
 	}
 	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
-	if len(lines) != 3 || strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[2]) != "" {
-		t.Fatalf("want blank/line/blank structure, got %q", got)
+	if len(lines) != 2 || strings.TrimSpace(lines[0]) != "" {
+		t.Fatalf("want blank/line structure, got %q", got)
 	}
 	if !strings.Contains(lines[1], strings.Repeat("─", 10)) {
 		t.Fatalf("divider line missing in %q", got)
+	}
+
+	// margin 覆盖：上 2 下 1 → 2 空行 + 线 + 1 空行
+	over, err := loadStyles("dark", writeTheme(t, "styles:\n  divider:\n    margin: [2, 0, 1, 0]\n"))
+	if err != nil {
+		t.Fatalf("loadStyles: %v", err)
+	}
+	b.Reset()
+	renderMessageDivider(&b, over, 10)
+	lines = strings.Split(strings.TrimSuffix(b.String(), "\n"), "\n")
+	if len(lines) != 4 || strings.TrimSpace(lines[0]) != "" || strings.TrimSpace(lines[1]) != "" || strings.TrimSpace(lines[3]) != "" {
+		t.Fatalf("want 2 blank + line + 1 blank, got %q", b.String())
 	}
 
 	// 非法宽度回退 80
@@ -121,6 +133,19 @@ func TestRenderMessageDivider(t *testing.T) {
 	renderMessageDivider(&b, st, 0)
 	if !strings.Contains(b.String(), strings.Repeat("─", 80)) {
 		t.Fatal("width<=0 should fall back to 80")
+	}
+}
+
+// printGap：n 行空行；n<=0 不输出
+func TestPrintGap(t *testing.T) {
+	var b strings.Builder
+	printGap(&b, 0)
+	if b.Len() != 0 {
+		t.Fatalf("gap 0 should print nothing, got %q", b.String())
+	}
+	printGap(&b, 2)
+	if b.String() != "\n\n" {
+		t.Fatalf("gap 2 = %q, want two newlines", b.String())
 	}
 }
 

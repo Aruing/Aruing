@@ -160,3 +160,45 @@ func TestLoadStylesDiffersByTheme(t *testing.T) {
 		t.Fatal("dark/light user foreground should differ")
 	}
 }
+
+// 历史渲染：默认无称呼前缀，内容整行经角色样式
+func TestRenderHistoryNoLabels(t *testing.T) {
+	m := newTestModel()
+	m.messages = []msgView{
+		{kind: "user", text: "hi"},
+		{kind: "assistant", text: "hello"},
+	}
+	got := renderHistory(&m)
+	if !strings.Contains(got, "hi") || !strings.Contains(got, "hello") {
+		t.Fatalf("history = %q", got)
+	}
+	if strings.Contains(got, "你 ") || strings.Contains(got, "aruing ") {
+		t.Fatalf("default history must not carry label prefixes: %q", got)
+	}
+}
+
+// 称呼开启：称呼独立一行 + 换行 + 内容；连续 assistant 视图（正文 + 报告）同一块只一个称呼
+func TestRenderHistoryLabels(t *testing.T) {
+	m := newTestModel()
+	st, err := loadStyles("dark", writeTheme(t, "labels:\n  enabled: true\n"))
+	if err != nil {
+		t.Fatalf("loadStyles: %v", err)
+	}
+	m.styles = st
+	m.messages = []msgView{
+		{kind: "user", text: "hi"},
+		{kind: "assistant", text: "body"},
+		{kind: "assistant", text: "report"},
+	}
+	got := renderHistory(&m)
+	if !strings.Contains(got, "你\nhi") {
+		t.Fatalf("user label line missing: %q", got)
+	}
+	// 助手块一个称呼 + 两条内容（块内不重复加称呼）
+	if n := strings.Count(got, "aruing\n"); n != 1 {
+		t.Fatalf("assistant label count = %d, want 1: %q", n, got)
+	}
+	if !strings.Contains(got, "body") || !strings.Contains(got, "report") {
+		t.Fatalf("contents missing: %q", got)
+	}
+}
