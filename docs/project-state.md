@@ -81,7 +81,7 @@
 | beta17 | logs 时间游标（时间窗切片） | ✅ | #78 `SliceQuery.Since/Until`（RFC3339 闭区间，通用契约）；k8s 行首 RFC3339 机械过滤再开窗；无时间戳/表格遇时间窗明确报错引导；窗内首末时间戳 meta；`scenarios/log-time-window`；不触 §4 |
 | beta19 | 调查阶段挂起（investigate clarify） | ✅ | #80 `Plan.Clarify` + `InvestigateState` 种子化 + `Resume` 按 Stage 派发（保留进度续跑）；挂起快照携带侦察产物；session/Tower/CLI 零改 |
 | beta20 | 主题 YAML 完整化（TUI L3 收尾） | ✅ | #82 `tui.theme_file` 部分覆盖 + 全样式项 + 示例文件；根因修复 LoadFile 漏拷 TUI 段（beta8 起潜伏）；#20 全量兑现 |
-| beta21 | TUI 留白统一与称呼可配 | ✅ | #92 spacing 归一（margin 剥离样式项）+ labels 称呼开关（默认关）+ spinner 归入助手块；默认无称呼前缀 |
+| beta21 | TUI 留白统一与称呼可配 | ✅ | #92 spacing 归一（margin 剥离样式项）+ labels 称呼开关（默认关）+ spinner 归入助手块；默认无称呼前缀；TurnProgress 修复 spinner 与进度行同屏踩踏 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。

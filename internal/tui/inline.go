@@ -35,11 +35,13 @@ const (
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // 行内模式入口：readline 循环 + Turn 等待（spinner）+ 助手留痕 + 容错
-func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, out io.Writer) error {
+func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, out io.Writer, prog *TurnProgress) error {
 	st, err := loadStyles(tuiTheme, themeFile)
 	if err != nil {
 		return err
 	}
+	// 进度协调器接管终端：此后编排/Tower 的进度行与 spinner 同屏重绘
+	prog.bind(out, st)
 	// 行内引擎逐键读取依赖 raw mode：非 tty（管道 / 脚本）明确报错不降级；
 	// 无人值守场景应用单句模式（chat "问题"，一次 Turn 后退出）
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
@@ -93,7 +95,7 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项与
 		// 称呼开关在此消费，守 #20：与 app 模式 viewport 历史同规则）
 		echoUserMessage(out, st, text)
-		waitTurn(ctx, out, st, md, svc, sessionID, text)
+		waitTurn(ctx, out, st, md, svc, sessionID, text, prog)
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
 		renderMessageDivider(out, st, width)
 	}
@@ -195,11 +197,12 @@ func continuation(line string) (content string, more bool) {
 	return line + "\n", false
 }
 
-// 等待一轮 Turn 完成：期间单行 spinner 动画；完成后 print 助手 / 错误（留痕）
+// 等待一轮 Turn 完成：期间单行 spinner 动画（经 TurnProgress 协调器，与进度行
+// 同屏重绘：进度行落屏时 spinner 让位、重画到最新行下方）；完成后 print 助手 / 错误（留痕）
 // 容错：Turn 失败 print 错误后返回，外层循环继续读输入（不杀会话）
 // spinner 与回复同属助手块：块首空行读 spacing.assistantTop，spinner 行完成后被内容原位替换
 // 流式留位（#20）：流式落地时本函数扩展为逐 chunk print 留痕，循环结构不变
-func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRenderer, svc *session.Service, sessionID, text string) {
+func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRenderer, svc *session.Service, sessionID, text string, prog *TurnProgress) {
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	turnCh := make(chan turnMsg, 1)
@@ -210,18 +213,17 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 
 	ticker := time.NewTicker(spinnerInterval)
 	defer ticker.Stop()
-	frame := 0
-	// 助手块首：空行 + （称呼开启时）称呼行 + spinner 首帧
+	// 助手块首：空行 + （称呼开启时）称呼行 + spinner 首帧（协调器接管 spinner 行）
 	printGap(out, st.spacing.assistantTop)
 	if st.labels.enabled {
 		fmt.Fprint(out, st.assistant.Render(st.labels.assistant), "\n")
 	}
-	renderSpinner(out, st, frame)
+	prog.spinnerStart(st)
 	for {
 		select {
 		case msg := <-turnCh:
-			// 只清 spinner 行（上方空行与称呼行保留），内容从原位接排
-			clearLine(out)
+			// 清 spinner 行（上方空行与称呼行保留；进度行已是留痕），内容从原位接排
+			prog.spinnerStop()
 			// ctx 已取消时 Turn 多半返回 context canceled：静默退出，不打印伪错误
 			// （select 在 turnCh 与 ctx.Done 同时就绪时随机选中，需显式优先取消）
 			if turnCtx.Err() != nil {
@@ -244,10 +246,9 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 			printGap(out, st.spacing.assistantBottom)
 			return
 		case <-ticker.C:
-			frame = (frame + 1) % len(spinnerFrames)
-			renderSpinner(out, st, frame)
+			prog.spinnerTick()
 		case <-ctx.Done():
-			clearLine(out)
+			prog.spinnerStop()
 			return
 		}
 	}
