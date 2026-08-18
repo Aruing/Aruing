@@ -87,6 +87,51 @@ func TestDispatchChatBadFormat(t *testing.T) {
 	}
 }
 
+// 版本子命令首行格式稳定，供脚本与后续自更新能力解析；注入值应原样透出
+func TestRunVersion(t *testing.T) {
+	cases := []struct {
+		name    string
+		version string
+		commit  string
+		date    string
+		want    []string
+	}{
+		{
+			name:    "注入发布信息",
+			version: "0.1.0",
+			commit:  "e7b862c",
+			date:    "2026-08-18T15:00:00Z",
+			want:    []string{"aruing version 0.1.0\n", "commit: e7b862c\n", "built:  2026-08-18T15:00:00Z\n"},
+		},
+		{
+			name:    "未注入时输出默认值",
+			version: "dev",
+			commit:  "none",
+			date:    "unknown",
+			want:    []string{"aruing version dev\n", "commit: none\n", "built:  unknown\n"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// 临时改写包级变量模拟链接期注入，用完恢复，避免影响其他用例
+			oldVersion, oldCommit, oldDate := version, commit, date
+			t.Cleanup(func() { version, commit, date = oldVersion, oldCommit, oldDate })
+			version, commit, date = tc.version, tc.commit, tc.date
+
+			var stdout bytes.Buffer
+			if err := runVersion(nil, &stdout); err != nil {
+				t.Fatalf("runVersion: %v", err)
+			}
+			got := stdout.String()
+			for _, line := range tc.want {
+				if !strings.Contains(got, line) {
+					t.Fatalf("output missing %q, got:\n%s", line, got)
+				}
+			}
+		})
+	}
+}
+
 // 组装会话栈在无大模型配置时应硬失败
 func TestNewSessionStackRequiresLLM(t *testing.T) {
 	cfg := config.Config{}

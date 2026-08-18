@@ -6,7 +6,7 @@
 
 **版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
 
-**`0.1.0-beta22` / 发布管线与多渠道分发** ⏳ 进行中（维护者 2026-08-18 定向）：分支模型（main → production，PR 触发全量发布检查）+ tag 驱动 release workflow（6 平台产物挂 GitHub Release）+ npm 平台子包 + `aruing update` 自更新 + README 一行安装命令。发布（打 `v0.1.0` tag + 版本收尾）在本里程碑完成后执行，发布即管线首次真实执行。plan 在笔记 `plan/0.1.0-beta22/`。
+**`0.1.0-beta22` / 发布管线与多渠道分发** ⏳ 进行中（维护者 2026-08-18 定向）：分支模型（main → production，PR 触发全量发布检查）+ tag 驱动 release workflow（5 平台产物挂 GitHub Release：darwin amd64/arm64、linux amd64/arm64、windows amd64）+ npm 平台子包（主包 + 5 个 `aruing-<os>-<arch>`）+ `aruing update` 自更新 + README 一行安装命令。发布（打 `v0.1.0` tag + 版本收尾）在本里程碑完成后执行，发布即管线首次真实执行。plan 在笔记 `plan/0.1.0-beta22/`。
 
 **`0.1.0-beta21` / TUI 留白统一与称呼可配** ✅ 完成并归档（2026-08-18；#92）：块间距从 lipgloss 样式项剥离为 spacing 显式值（根治 Render 块级 margin 与手动空行双重叠加；显式 0 合法），默认视觉基线 = 输入与 spinner/回复间恰 1 空行、轮间分割线两侧各恰 1 空行；默认消息无「你 / aruing」前缀，主题 labels 开关（默认关）开启后称呼独立一行 + 换行 + 内容；TurnProgress 协调器修复 spinner 与编排进度行同屏踩踏（beta15 起遗留：进度行落屏前清 spinner、落后重画到最新行下方）。YAML 面 `styles.<role>.margin` 不变（beta20 主题文件兼容）；core / agent / session / config 零改。收尾 self-check：静态链全绿 + 四场景 smoke 全 ok（log-time-window / svc-wrong-selector 两场景 attention 为环境网络抖动与 expect 口径，非产品回归）。plan 在笔记 `plan/archive/0.1.0-beta21/`。
 
@@ -85,6 +85,7 @@
 | beta20 | 主题 YAML 完整化（TUI L3 收尾） | ✅ | #82 `tui.theme_file` 部分覆盖 + 全样式项 + 示例文件；根因修复 LoadFile 漏拷 TUI 段（beta8 起潜伏）；#20 全量兑现 |
 | beta21 | TUI 留白统一与称呼可配 | ✅ | #92 spacing 归一（margin 剥离样式项）+ labels 称呼开关（默认关）+ spinner 归入助手块；默认无称呼前缀；TurnProgress 修复 spinner 与进度行同屏踩踏 |
 | beta22 | 发布管线与多渠道分发 | ⏳ | 分支模型 main→production + tag 驱动 release workflow + npm 平台子包 + `aruing update`；完成后执行 0.1.0 发布 |
+| beta22-1 | 版本注入（ldflags） | ✅ | `var version/commit/date`（源码默认 dev）+ Makefile LDFLAGS；`make version` 改为构建后跑；version 输出三行（版本/commit/构建时间） |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
@@ -93,7 +94,7 @@
 
 ## 下一步
 
-**下一项**：**`0.1.0-beta22` 发布管线与多渠道分发**（维护者 2026-08-18 定向；首步版本注入，plan 在笔记 `plan/0.1.0-beta22/`）。完成后执行 0.1.0 发布（打 `v0.1.0` tag + 版本收尾，发布即管线首次真实执行）。
+**下一项**：**`0.1.0-beta22` 步骤 2：模块路径替换 `aruing` → `github.com/Aruing/Aruing`**（纯机械替换，须在首个 tag 前定形，避免版本线断裂；首步版本注入已交付）。后续步骤：production 分支 + 发布检查 workflow → GoReleaser + release workflow → 安装脚本 → npm 子包 → `aruing update`。plan 在笔记 `plan/0.1.0-beta22/`。完成后执行 0.1.0 发布（打 `v0.1.0` tag + 版本收尾，发布即管线首次真实执行）。
 
 **0.1.0 候选**（发布后转入 0.2.0 远景排序）：
 
