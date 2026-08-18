@@ -206,19 +206,21 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 	turnCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	turnCh := make(chan turnMsg, 1)
-	go func() {
-		result, err := svc.Turn(turnCtx, sessionID, text)
-		turnCh <- turnMsg{result: result, err: err}
-	}()
 
 	ticker := time.NewTicker(spinnerInterval)
 	defer ticker.Stop()
-	// 助手块首：空行 + （称呼开启时）称呼行 + spinner 首帧（协调器接管 spinner 行）
+	// 助手块首：空行 + （称呼开启时）称呼行 + spinner 首帧（协调器接管 spinner 行）。
+	// Turn goroutine 必须在 spinnerStart 之后启动：否则多核下首条进度可能在 spinner
+	// 上屏前直达终端，落到块首空行/称呼行上方，破坏屏序
 	printGap(out, st.spacing.assistantTop)
 	if st.labels.enabled {
 		fmt.Fprint(out, st.assistant.Render(st.labels.assistant), "\n")
 	}
 	prog.spinnerStart(st)
+	go func() {
+		result, err := svc.Turn(turnCtx, sessionID, text)
+		turnCh <- turnMsg{result: result, err: err}
+	}()
 	for {
 		select {
 		case msg := <-turnCh:
@@ -230,9 +232,10 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 				return
 			}
 			if msg.err != nil {
-				// 错误不是助手发言：擦除已印的称呼行，与 app 模式 renderHistory 一致
-				// （错误块不带称呼，「错误 」是语义标记）
-				if st.labels.enabled {
+				// 错误不是助手发言：无进度行时称呼行紧邻 spinner，擦除它再印错误
+				// （与 app 模式 renderHistory 一致）；有进度行时称呼行领衔的是这次调查，
+				// 保留不动——擦相邻行会销毁最后一条进度留痕
+				if st.labels.enabled && prog.progressLines() == 0 {
 					erasePrevLine(out)
 				}
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())

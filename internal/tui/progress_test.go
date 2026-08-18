@@ -8,7 +8,8 @@ import (
 	"testing"
 )
 
-// 绑定后协调：进度行先清 spinner 再落行，spinner 重画到进度行下方（无残留帧）
+// 绑定后协调：进度行先清 spinner 再落行，spinner 重画到进度行下方（无残留帧）；
+// spinnerStart 以来进度行计数归零、写入累加
 func TestTurnProgressCoordination(t *testing.T) {
 	var b strings.Builder
 	p := NewTurnProgress(io.Discard)
@@ -18,9 +19,15 @@ func TestTurnProgressCoordination(t *testing.T) {
 	if !strings.Contains(b.String(), "思考中") {
 		t.Fatalf("spinner start missing: %q", b.String())
 	}
+	if got := p.progressLines(); got != 0 {
+		t.Fatalf("progressLines at start = %d, want 0", got)
+	}
 	b.Reset()
 	if _, err := p.Write([]byte("  执行 k8s：列出 Ingress\n")); err != nil {
 		t.Fatalf("write: %v", err)
+	}
+	if got := p.progressLines(); got != 1 {
+		t.Fatalf("progressLines after write = %d, want 1", got)
 	}
 	got := stripANSI(b.String())
 	// 顺序：进度行在前、spinner 重画在后（思考中不残留在进度行行尾）

@@ -29,6 +29,8 @@ type TurnProgress struct {
 	visible bool
 	// 当前 spinner 帧下标
 	frame int
+	// spinnerStart 以来落屏的进度行数（错误路径判断称呼行是否紧邻 spinner 用）
+	lines int
 	// 串行化进度行与 spinner 帧的写序（两条流来自不同 goroutine）
 	mu sync.Mutex
 }
@@ -61,6 +63,7 @@ func (p *TurnProgress) Write(b []byte) (int, error) {
 			clearLine(p.out)
 		}
 		fmt.Fprintln(p.out, line)
+		p.lines++
 		if p.visible {
 			p.draw()
 		}
@@ -78,6 +81,7 @@ func (p *TurnProgress) spinnerStart(st styles) {
 	p.st = st
 	p.visible = true
 	p.frame = 0
+	p.lines = 0
 	p.draw()
 }
 
@@ -101,6 +105,14 @@ func (p *TurnProgress) spinnerStop() {
 	}
 	p.visible = false
 	clearLine(p.out)
+}
+
+// progressLines 报告 spinnerStart 以来落屏的进度行数（spinner 不在屏时为最后一次
+// 统计值；调用方用于判断称呼行与 spinner 是否相邻）
+func (p *TurnProgress) progressLines() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lines
 }
 
 // draw 在当前行画 spinner 帧（调用方须持锁）
