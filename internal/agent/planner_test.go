@@ -1,9 +1,9 @@
 package agent_test
 
 import (
-	"github.com/Aruing/Aruing/internal/agent"
 	"context"
 	"encoding/json"
+	"github.com/Aruing/Aruing/internal/agent"
 	"testing"
 	"time"
 

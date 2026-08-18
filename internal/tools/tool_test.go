@@ -1,9 +1,9 @@
 package tools_test
 
 import (
-	"github.com/Aruing/Aruing/internal/tools"
 	"context"
 	"encoding/json"
+	"github.com/Aruing/Aruing/internal/tools"
 	"strings"
 	"testing"
 
