@@ -59,15 +59,23 @@ help:
 	go run $(CMD) help
 
 version:
-	go run $(CMD) version
+	$(MAKE) build
+	./"$(BIN)" version
 
 # ---------------- build -----------------
+
+# 版本信息在链接期注入（-X 只能改写包级 var，不能改写 const）
+# 无 git 环境（源码 tarball）时凭 shell 兑底为 dev/none，不阻断构建
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
 
 .PHONY: build test test-ci fmt fmt-check vet lint lint-fix tidy-check vuln check clean
 
 build:
 	@mkdir -p "$(BIN_DIR)"
-	$(GO) build -o "$(BIN)" $(CMD)
+	$(GO) build -ldflags "$(LDFLAGS)" -o "$(BIN)" $(CMD)
 
 test:
 	$(GO) test $(GO_PACKAGES)

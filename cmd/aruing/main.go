@@ -24,8 +24,13 @@ import (
 	"golang.org/x/term"
 )
 
-// 对外展示的版本号，发布时应作为命令行输出的唯一来源
-const version = "0.1.0"
+// 构建期版本信息，经 -ldflags -X 注入（Makefile 与发布流水线同源注入）
+// 源码直接 go run / go build 不经注入时保留默认值，仅表示开发自建
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 // 顶层帮助文案覆盖当前支持的入口，保持和命令分发逻辑一致
 const usage = `aruing is a Kubernetes diagnosis assistant.
@@ -91,6 +96,7 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 
 // 解析版本子命令的参数并输出当前版本信息
 // 这里保留独立参数集，后续扩展版本命令时不会影响其他子命令
+// 首行格式（aruing version <版本>）保持稳定，供脚本与后续自更新能力解析
 func runVersion(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("version", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -99,6 +105,8 @@ func runVersion(args []string, stdout io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(stdout, "aruing version %s\n", version)
+	fmt.Fprintf(stdout, "commit: %s\n", commit)
+	fmt.Fprintf(stdout, "built:  %s\n", date)
 	return nil
 }
 
