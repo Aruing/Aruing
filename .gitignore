@@ -40,3 +40,6 @@ go.work.sum
 # Scenario harness: ephemeral kind kubeconfigs (written by scripts/scenario-up.sh)
 /scenarios/.kube/
 /scenarios/.smoke/
+
+# macOS noise
+.DS_Store
