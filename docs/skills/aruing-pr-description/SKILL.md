@@ -121,6 +121,7 @@ gh pr create --base main --head <当前分支名> \
 - `Review effort N/5` 由 pr-agent 自动打，本 skill 不管
 - 若 label 拼错导致 `gh` 报错，去掉 `--label` 重试并在 PR 创建后手动补，不要卡住流程
 - **创建后必须核对**：`gh pr view <N> --json labels` 确认 label 实际落上——创建命令可能静默丢 label（如仓库迁移重定向）；未落上时用 REST 补：`gh api repos/<owner>/<repo>/issues/<N>/labels -f 'labels[]=<label>'`
+- **向已有 PR 追加提交前必须核验 PR 仍 OPEN**：`gh pr view <N> --json state`；已 MERGED/CLOSED 的 PR 追加提交不会生效（无新 PR 包含它），须基于 main 另开新分支新 PR（历史案例：PR #89 合并后向其分支追加截图 commit，内容搁置在分支上未进 main）
 
 ## 模板
 
