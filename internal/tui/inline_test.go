@@ -149,6 +149,15 @@ func TestPrintGap(t *testing.T) {
 	}
 }
 
+// erasePrevLine：上移 → 清行 → 下移回原行（错误路径撤回称呼行的光标序列）
+func TestErasePrevLine(t *testing.T) {
+	var b strings.Builder
+	erasePrevLine(&b)
+	if got, want := b.String(), "\x1b[1A\r\x1b[2K\x1b[1B"; got != want {
+		t.Fatalf("erasePrevLine = %q, want %q", got, want)
+	}
+}
+
 // 行内 markdown：有 renderer 时输出含 glamour 样式（非降级原文）
 func TestInlineMarkdownRendered(t *testing.T) {
 	r, err := newMarkdownRenderer("dark", 80)

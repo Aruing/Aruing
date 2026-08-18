@@ -190,7 +190,7 @@ func TestRenderHistoryLabels(t *testing.T) {
 		{kind: "assistant", text: "body"},
 		{kind: "assistant", text: "report"},
 	}
-	got := renderHistory(&m)
+	got := stripANSI(renderHistory(&m))
 	if !strings.Contains(got, "你\nhi") {
 		t.Fatalf("user label line missing: %q", got)
 	}

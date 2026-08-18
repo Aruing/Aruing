@@ -1,9 +1,16 @@
 package tui
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
+
+// 剥离 ANSI 转义序列（测试断言只关心文本相邻性；lipgloss 在管道下不发色、
+// 在强制色 profile 下会发，断言不应依赖这个环境行为）
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
 
 // user 样式项 inline 消费：重印留痕为整行 user 样式内容，默认无称呼前缀；多行逐行渲染
 func TestEchoUserMessage(t *testing.T) {
@@ -45,8 +52,8 @@ func TestEchoUserMessageLabels(t *testing.T) {
 	}
 	var b strings.Builder
 	echoUserMessage(&b, st, "hello")
-	got := b.String()
-	// clearLine 转义在每行行首，断言只验顺序：称呼行先于内容行出现
+	got := stripANSI(b.String())
+	// 断言只验顺序：称呼行先于内容行出现，中间无其它文本
 	if i, j := strings.Index(got, "你\n"), strings.Index(got, "hello"); i < 0 || j < 0 || i > j {
 		t.Fatalf("want label line then content: %q", got)
 	}

@@ -228,6 +228,11 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 				return
 			}
 			if msg.err != nil {
+				// 错误不是助手发言：擦除已印的称呼行，与 app 模式 renderHistory 一致
+				// （错误块不带称呼，「错误 」是语义标记）
+				if st.labels.enabled {
+					erasePrevLine(out)
+				}
 				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
 			} else {
 				for _, mv := range renderAssistant(md, msg.result) {
@@ -360,4 +365,12 @@ func printGap(out io.Writer, n int) {
 	for i := 0; i < n; i++ {
 		fmt.Fprintln(out)
 	}
+}
+
+// 擦除上一行并把光标移回当前行（上移一行 → 清行 → 下移回来）；
+// 用于错误路径撤回已印的称呼行，当前行留给错误消息原位接排
+func erasePrevLine(out io.Writer) {
+	fmt.Fprint(out, "\x1b[1A")
+	clearLine(out)
+	fmt.Fprint(out, "\x1b[1B")
 }
