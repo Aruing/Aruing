@@ -1,0 +1,40 @@
+# GoReleaser 发版配置：production 上的 v* tag 触发（见 .github/workflows/release.yml）
+# 产物命名是分发渠道契约：安装脚本（scripts/install.sh）与 npm 平台子包按此 URL 下载
+# 版本钉死见 release.yml（goreleaser-action version 字段）；升级版本须整链验证后改
+version: 2
+project_name: aruing
+
+builds:
+  - id: aruing
+    main: ./cmd/aruing
+    binary: aruing
+    env: [CGO_ENABLED=0]
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+    # 决策 4：windows 只发 amd64（arm64 用户近零且无验证路径，后续按需加一行即可）
+    ignore:
+      - goos: windows
+        goarch: arm64
+    # 与 Makefile LDFLAGS 同源注入（决策 9：版本完全由 tag 驱动）
+    ldflags:
+      - -X main.version={{.Version}} -X main.commit={{.FullCommit}} -X main.date={{.Date}}
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+# 决策（2026-08-19）：先 draft，维护者网页过目附件后手动 publish
+# prerelease auto：tag 含 -rc/-beta 等预发布段时 GitHub 自动标记 Pre-release
+release:
+  draft: true
+  prerelease: auto
+
+# snapshot（本地验证）不发布，只产 dist/ 产物
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
