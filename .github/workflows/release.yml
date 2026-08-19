@@ -1,0 +1,55 @@
+# 正式发版：production 上的 v* tag 触发
+# 流程契约（CONTRIBUTING「发布流程」）：main 快照分支 → PR → 全量检查 → merge commit 合并 →
+# 在 production 打 v* tag → 本 workflow 构建产物挂 GitHub Release（draft，人工过目后 publish）
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # 创建 Release 与上传附件的最低权限集
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # 发版不互相取消，排队执行
+
+jobs:
+  release:
+    name: Build and attach release artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # 先完整 checkout（tag 触发的 SHA 已在此），再校验；不能浅 fetch：
+      # 嫁接截断历史后 --is-ancestor 无法走到祖先，历史 commit 上的合法 tag 会被误拒
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 完整历史：tag 位置校验 + GoReleaser 版本推导都依赖
+
+      # 决策 7：tag 必须落在 production 上才允许发版；main 上误打的 tag 在此拒绝
+      # tag 指向 production 历史 commit（非当前 tip）也应放行，故必须完整 fetch
+      - name: Verify tag is on production
+        run: |
+          git fetch origin production
+          if git merge-base --is-ancestor "$GITHUB_SHA" origin/production; then
+            echo "tag $GITHUB_REF_NAME is on production, proceed"
+          else
+            echo "::error::tag $GITHUB_REF_NAME is NOT on production — refusing to release" && exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # 决策（2026-08-19）：钉死 goreleaser 版本，保证发版行为可复现；升级走显式 PR
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.12.7
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

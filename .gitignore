@@ -10,6 +10,9 @@ bin/
 *.so
 *.dylib
 
+# GoReleaser build output (snapshot / release artifacts land in dist/)
+dist/
+
 # Test binary, built with `go test -c`
 *.test
 
