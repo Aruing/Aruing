@@ -41,6 +41,7 @@ Usage:
 Commands:
   version          Print version information
   help             Print this help message
+  connect          Interactive wizard: configure LLM (base URL / API key / model)
   run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
 
@@ -50,13 +51,14 @@ Configuration (file then env, env wins):
   $XDG_CONFIG_HOME/aruing/config.yaml
   /etc/aruing/config.yaml  (non-Windows)
 
-LLM (required for run/chat):
+LLM (required for run/chat; easiest: run "aruing connect"):
   llm.base_url / ARUING_LLM_BASE_URL
   llm.api_key  / ARUING_LLM_API_KEY
   llm.model    / ARUING_LLM_MODEL
 
 Examples:
   aruing version
+  aruing connect
   aruing run --config playground/config.yaml why is demo-api unreachable
   aruing chat hello
   aruing chat --session sess_xxx what about the redis dependency
@@ -85,6 +87,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return nil
+	case "connect":
+		return runConnect(args[1:], os.Stdin, stdout, stderr)
 	case "run":
 		return runRun(args[1:], stdout, stderr)
 	case "chat":

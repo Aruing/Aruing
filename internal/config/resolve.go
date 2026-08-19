@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // 解析配置路径时可注入的依赖，仅用于单测替换真实文件系统与环境
@@ -139,4 +142,70 @@ func LoadResolvedWith(explicit string, opt ResolveOptions) (Config, string, erro
 		return cfg, path, err
 	}
 	return cfg, path, nil
+}
+
+// 返回用户级配置文件的规范落点（connect 向导的写入目标）
+//
+// 与 ResolveConfigPath 搜索链中的用户级候选一致：$XDG_CONFIG_HOME 或
+// os.UserConfigDir 下的 aruing/config.yaml；无法解析用户目录时返回错误
+// （此时 connect 应提示改用 --config 显式路径）
+func UserConfigPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user config dir: %w", err)
+	}
+	return filepath.Join(dir, "aruing", "config.yaml"), nil
+}
+
+// 把大模型三件套写入配置文件；已存在时仅覆盖 llm 段，其余段原样保留
+//
+// 这是 aruing connect 的落盘函数：读旧文件（可不存在）→ 覆盖 llm → 序列化写回。
+// 远期多渠道（channels + 优先级降级）演进时升级文件 schema，此函数仍是唯一写入口
+func SaveLLM(path string, llmCfg LLM) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("config path is empty")
+	}
+	// 用 map 承载旧文件：未知顶层段（未来新增或用户自定义键）原样保留，
+	// 仅替换 llm 段（pr-agent 评审采纳：固定结构体反序列化会静默丢弃未知段）
+	var doc map[string]any
+	data, readErr := os.ReadFile(path)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return fmt.Errorf("read existing config %s: %w", path, readErr)
+	}
+	if readErr == nil {
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return fmt.Errorf("parse existing config %s: %w", path, err)
+		}
+	}
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	llmOut, err := yaml.Marshal(llmCfg)
+	if err != nil {
+		return fmt.Errorf("marshal llm config: %w", err)
+	}
+	var llmNode any
+	llmErr := yaml.Unmarshal(llmOut, &llmNode)
+	if llmErr != nil {
+		return fmt.Errorf("remarshal llm config: %w", llmErr)
+	}
+	doc["llm"] = llmNode
+	out, err := yaml.Marshal(doc)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create config dir %s: %w", dir, err)
+		}
+	}
+	// 权限收紧到 0600（含已存在文件的宽松权限场景，pr-agent 安全评审采纳）；
+	// O_CREATE|O_TRUNC 显式开文件后 chmod，避免 WriteFile 对已存在文件不触碰权限
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("chmod config %s: %w", path, err)
+	}
+	return nil
 }
