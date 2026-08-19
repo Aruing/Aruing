@@ -1,0 +1,86 @@
+# 发布分支专项检查：只在 PR 目标为 production 时触发
+# pr-check（make check 三 job）与 pr-agent 对所有 PR 触发、已覆盖 production PR，
+# 本文件只承载发布增量层：5 平台交叉编译可构建性 + 三系真机执行冒烟
+name: Release checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [production]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 交叉编译验证：5 个发布平台都必须能构建
+  # 项目无 cgo 依赖，CGO_ENABLED=0 保证跨平台链接无需目标机工具链
+  cross-build:
+    name: Cross build (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build for ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -o "build/aruing-${{ matrix.goos }}-${{ matrix.goarch }}" ./cmd/aruing
+      - name: Show artifact
+        run: ls -lh build/
+
+  # 真机冒烟：三系 runner 各自原生构建并执行 version，验证二进制真能跑起来
+  # Windows 是首次真实验证（README 标 experimental 的口径依据）
+  # linux/arm64 无托管 runner，可构建性由 cross-build 覆盖（维护者决策 1A）
+  platform-smoke:
+    name: Platform smoke (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            ext: ""
+          - runner: ubuntu-latest
+            ext: ""
+          - runner: windows-latest
+            ext: ".exe"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build
+        run: go build -o "bin/aruing${{ matrix.ext }}" ./cmd/aruing
+      # 统一用 bash（Windows runner 自带 git bash），断言首行格式供脚本与自更新消费
+      - name: Run version smoke
+        shell: bash
+        run: "./bin/aruing${{ matrix.ext }} version | grep -q '^aruing version '"
