@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 把结构化报告与调查证据渲染成标记文本

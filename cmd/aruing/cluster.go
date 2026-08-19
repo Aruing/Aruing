@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"aruing/internal/config"
+	"github.com/Aruing/Aruing/internal/config"
 )
 
 // kubectl 来源标签

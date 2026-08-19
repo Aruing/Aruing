@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"strings"
 
-	"aruing/internal/core"
-	"aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/llm"
 )
 
 // 编译时嵌入解析角色的提示词，保持提示词与代码分离，又避免运行时读文件

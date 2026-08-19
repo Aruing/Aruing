@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/core"
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 实现 Slicer 的假工具，供 evidence.read 走通路径

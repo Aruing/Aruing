@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/tools"
-	"aruing/internal/tools/toolstest"
+	"github.com/Aruing/Aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools/toolstest"
 )
 
 // 无调度器时基线集群资源侦察返回空

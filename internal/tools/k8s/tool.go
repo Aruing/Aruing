@@ -21,9 +21,9 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"aruing/internal/core"
-	"aruing/internal/tools"
-	"aruing/internal/tools/summary"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools/summary"
 )
 
 const (

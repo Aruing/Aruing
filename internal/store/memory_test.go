@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"aruing/internal/session"
-	"aruing/internal/store"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/store"
 )
 
 func TestMemoryStoreSessionLifecycle(t *testing.T) {

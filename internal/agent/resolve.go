@@ -9,7 +9,7 @@ import (
 	"context"
 	"encoding/json"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 定位阶段默认最多执行的工具调用次数，防止模型空转

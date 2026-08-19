@@ -1,14 +1,14 @@
 package tools_test
 
 import (
-	"aruing/internal/tools"
 	"context"
 	"encoding/json"
+	"github.com/Aruing/Aruing/internal/tools"
 	"strings"
 	"testing"
 
-	"aruing/internal/core"
-	"aruing/internal/tools/toolstest"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools/toolstest"
 )
 
 // 只读策略必须放行常见只读集群子命令

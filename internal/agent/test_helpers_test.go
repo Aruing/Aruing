@@ -3,7 +3,7 @@ package agent
 import (
 	"context"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 白盒测试共用：假诊断管道，记录收到的运行并返回固定结果

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 一轮会话的可观察结果，供调用方与测试断言

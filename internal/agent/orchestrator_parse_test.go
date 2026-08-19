@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"aruing/internal/core"
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 四列默认输出与五列含版本列均正确解析；超出保留上限时截断且不按类别挑选

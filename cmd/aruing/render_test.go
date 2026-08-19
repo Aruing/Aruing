@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 完整报告应渲染出标题、摘要、结论分组、证据编号和建议

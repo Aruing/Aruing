@@ -1,18 +1,18 @@
 package agent_test
 
 import (
-	"aruing/internal/agent"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/Aruing/Aruing/internal/agent"
 	"strings"
 	"testing"
 	"time"
 
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
-	"aruing/internal/tools"
-	"aruing/internal/tools/toolstest"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools/toolstest"
 )
 
 // 提供可观察的固定元数据，验证编排器是否统一生成证据身份和时间

@@ -9,8 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"aruing/internal/core"
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 标准路径：模型提交带证据的目标

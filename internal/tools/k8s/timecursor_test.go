@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 全 RFC3339 行：since 闭区间过滤保留边界行，并回填窗内首末时间戳

@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"aruing/internal/core"
-	"aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/llm"
 )
 
 // 按测试需要把任意正文包装成兼容对话补全响应

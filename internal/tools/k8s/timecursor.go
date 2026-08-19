@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"aruing/internal/tools"
-	"aruing/internal/tools/summary"
+	"github.com/Aruing/Aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/tools/summary"
 )
 
 // 日志时间游标：对 kubectl logs --timestamps 产物（行首 RFC3339 前缀）做机械时间窗过滤

@@ -6,7 +6,7 @@
 package agent
 
 import (
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 汇总一次规划产生的候选猜想和待执行任务，只作为模块间返回值

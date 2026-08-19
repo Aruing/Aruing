@@ -20,7 +20,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 描述一个已注册工具的可发现元数据，供规划器构造提示词或工具列表

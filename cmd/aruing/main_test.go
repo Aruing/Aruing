@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/config"
-	"aruing/internal/core"
-	"aruing/internal/session"
-	"aruing/internal/store"
+	"github.com/Aruing/Aruing/internal/config"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/store"
 )
 
 // 单次运行在无大模型配置时应明确失败，不再走假实现

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 // 续行符判断：单个 \ 结尾续行，双 \\ 字面反斜杠

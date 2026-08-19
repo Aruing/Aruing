@@ -14,9 +14,9 @@ import (
 	"slices"
 	"strings"
 
-	"aruing/internal/core"
-	"aruing/internal/llm"
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 //go:embed prompts/resolver.md

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"aruing/internal/agent"
-	"aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/llm"
 )
 
 // 模型输出不一致错误应附带处置提示

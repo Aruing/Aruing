@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 判断结果必须绑定猜想所在运行并保留证据引用，才能形成可回溯结论

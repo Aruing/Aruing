@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"aruing/internal/agent/agenttest"
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/agent/agenttest"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 报告必须绑定当前运行并保留有效结论引用，才能向用户展示可核查结果

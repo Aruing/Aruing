@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 func testVerifyHypotheses() []core.Hypothesis {

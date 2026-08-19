@@ -19,10 +19,10 @@ import (
 	"io"
 	"strings"
 
-	"aruing/internal/core"
-	"aruing/internal/llm"
-	"aruing/internal/session"
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/llm"
+	"github.com/Aruing/Aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 //go:embed prompts/tower.md

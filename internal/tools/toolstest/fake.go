@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 
-	"aruing/internal/core"
-	"aruing/internal/tools"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 返回固定的容器组列表数据，模拟演示接口未就绪场景

@@ -13,7 +13,7 @@ import (
 	"regexp"
 	"strings"
 
-	"aruing/internal/tools/summary"
+	"github.com/Aruing/Aruing/internal/tools/summary"
 )
 
 var (

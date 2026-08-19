@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/core"
 )
 
 // 诊断管道入口；与编排器执行签名一致，便于注入真实现或测试替身

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"aruing/internal/core"
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 // 进程内正式诊断账本，实现会话诊断账本接口

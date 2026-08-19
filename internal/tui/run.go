@@ -14,8 +14,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 
-	"aruing/internal/config"
-	"aruing/internal/session"
+	"github.com/Aruing/Aruing/internal/config"
+	"github.com/Aruing/Aruing/internal/session"
 )
 
 // 输入框占用的终端行数（仅 app 模式 viewport 高度计算用）
