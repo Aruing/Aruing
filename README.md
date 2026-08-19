@@ -69,6 +69,8 @@ irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | i
 
 If `~/.aruing/bin` is not on your `PATH`, the installer prints the exact line to add. From source: `go install github.com/Aruing/Aruing/cmd/aruing@latest` (once v0.1.0 is tagged) or `make build`.
 
+Upgrade later with `aruing update` (self-update from GitHub Releases, checksum-verified). Binaries installed via npm should use `npm update -g aruing`.
+
 First run? Configure your LLM with the interactive wizard (writes the user-level config file, connectivity-tested before saving):
 
 ```bash
