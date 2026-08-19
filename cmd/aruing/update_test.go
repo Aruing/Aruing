@@ -1,7 +1,13 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"io"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -123,4 +129,94 @@ func TestRunUpdateCheckRealNetwork(t *testing.T) {
 	if !strings.Contains(out, "current: 0.0.1") {
 		t.Fatalf("missing current line:\n%s", out)
 	}
+}
+
+// extractBinary 端到端：真实 rc1 tar.gz 产物解包出可执行字节（网络下载，
+// E2E 门控同前）；解出的字节应能算哈希且与压缩包不同（证明真的解了包）
+func TestExtractBinaryRealArchive(t *testing.T) {
+	if os.Getenv("ARUING_UPDATE_E2E") != "1" {
+		t.Skip("set ARUING_UPDATE_E2E=1 to run the live archive test")
+	}
+	resp, err := http.Get("https://github.com/Aruing/Aruing/releases/download/v0.1.0-rc1/aruing_darwin_arm64.tar.gz")
+	if err != nil {
+		t.Fatalf("download: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	archive, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	bin, err := extractBinary(archive)
+	if err != nil {
+		t.Fatalf("extractBinary: %v", err)
+	}
+	if len(bin) < 1_000_000 {
+		t.Fatalf("extracted binary too small: %d bytes", len(bin))
+	}
+	if sha256.Sum256(bin) == sha256.Sum256(archive) {
+		t.Fatal("extracted bytes must differ from archive (not extracted)")
+	}
+}
+
+// 内存构造 zip / tar.gz 双格式验证解包（离线、确定性）
+func TestExtractBinaryFormats(t *testing.T) {
+	oldOS := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = oldOS })
+
+	runtimeGOOS = "darwin"
+	tgz := buildTestTarGz(t, "aruing", []byte("BINARY-DARWIN"))
+	got, err := extractBinary(tgz)
+	if err != nil || string(got) != "BINARY-DARWIN" {
+		t.Fatalf("tar.gz extract = %q, %v", got, err)
+	}
+
+	runtimeGOOS = "windows"
+	z := buildTestZip(t, map[string][]byte{"aruing.exe": []byte("BINARY-WIN"), "README.md": []byte("doc")})
+	got, err = extractBinary(z)
+	if err != nil || string(got) != "BINARY-WIN" {
+		t.Fatalf("zip extract = %q, %v", got, err)
+	}
+
+	// 目标缺失时报错而非空字节
+	runtimeGOOS = "darwin"
+	if _, err := extractBinary(buildTestTarGz(t, "other", []byte("x"))); err == nil {
+		t.Fatal("want error when binary not in archive")
+	}
+}
+
+func buildTestTarGz(t *testing.T, name string, content []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	hdr := &tar.Header{Name: "somedir/" + name, Mode: 0o755, Size: int64(len(content)), Typeflag: tar.TypeReg}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	tw.Close()
+	gz.Close()
+	return buf.Bytes()
+}
+
+func buildTestZip(t *testing.T, files map[string][]byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	zw.Close()
+	return buf.Bytes()
 }

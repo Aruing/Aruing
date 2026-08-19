@@ -12,7 +12,10 @@
 package main
 
 import (
+	"archive/tar"
+	"archive/zip"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,6 +24,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -152,18 +156,25 @@ func applyUpdate(ctx context.Context, exePath, asset string, stdout io.Writer) e
 	}
 	defer assetResp.Body.Close()
 
-	// 读全量校验（12MB 量级，内存可控）；校验过再从内存喂 Apply
-	body, err := io.ReadAll(assetResp.Body)
+	// 读全量：12MB 量级内存可控；checksums 校验的是压缩包哈希，先验包完整性
+	archive, err := io.ReadAll(assetResp.Body)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", asset, err)
 	}
-	sum := sha256.Sum256(body)
+	sum := sha256.Sum256(archive)
 	if !strings.EqualFold(hex.EncodeToString(sum[:]), expected) {
 		return fmt.Errorf("checksum mismatch for %s — refusing to update", asset)
 	}
-	fmt.Fprintf(stdout, "checksum ok, applying update...\n")
+	fmt.Fprintf(stdout, "checksum ok, extracting...\n")
 
-	if err := selfupdate.Apply(bytes.NewReader(body), selfupdate.Options{TargetPath: exePath}); err != nil {
+	// Apply 期望裸可执行流，压缩包必须先解出二进制（pr-agent 评审修复：
+	// 直接喂压缩包会“成功”写出坏二进制）
+	binary, err := extractBinary(archive)
+	if err != nil {
+		return err
+	}
+
+	if err := selfupdate.Apply(bytes.NewReader(binary), selfupdate.Options{TargetPath: exePath}); err != nil {
 		if rollErr := selfupdate.RollbackError(err); rollErr != nil {
 			return fmt.Errorf("update failed and rollback also failed: %v (manual recovery needed: reinstall via install script)", rollErr)
 		}
@@ -184,11 +195,80 @@ func sameAsRemote(ctx context.Context, exePath, asset string) (bool, error) {
 	if expected == "" {
 		return false, fmt.Errorf("no checksum entry for %s", asset)
 	}
+	// checksums 记录的是压缩包哈希；--check 的比较对象是解包后的远端二进制
+	// 与本地二进制（裸二进制 vs 压缩包哈希永远不等，会误报恒有更新）
+	archive, err := fetchBody(ctx, client, updateStableBase+"/"+asset)
+	if err != nil {
+		return false, fmt.Errorf("download %s: %w", asset, err)
+	}
+	sum := sha256.Sum256(archive)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), expected) {
+		return false, fmt.Errorf("checksum mismatch for %s", asset)
+	}
+	remote, err := extractBinary(archive)
+	if err != nil {
+		return false, err
+	}
 	local, err := fileSHA256(exePath)
 	if err != nil {
 		return false, err
 	}
-	return strings.EqualFold(local, expected), nil
+	return strings.EqualFold(hashBytes(remote), local), nil
+}
+
+// 从 tar.gz / zip 压缩包解出 aruing 可执行文件的裸字节（内存中完成，不落盘）
+//
+// 包内文件名与 .goreleaser.yaml 打包契约一致：aruing（或 windows 下 aruing.exe）
+// 伴随 LICENSE / README 等附件，按基名精确匹配目标；zip 与 tar.gz 按魔数识别
+func extractBinary(archive []byte) ([]byte, error) {
+	want := "aruing"
+	if runtimeGOOS == "windows" {
+		want = "aruing.exe"
+	}
+	if len(archive) > 4 && bytes.Equal(archive[:4], []byte("PK\x03\x04")) {
+		zr, err := zip.NewReader(bytes.NewReader(archive), int64(len(archive)))
+		if err != nil {
+			return nil, fmt.Errorf("open zip: %w", err)
+		}
+		for _, f := range zr.File {
+			if path.Base(f.Name) != want || f.FileInfo().IsDir() {
+				continue
+			}
+			rc, err := f.Open()
+			if err != nil {
+				return nil, fmt.Errorf("open %s in zip: %w", f.Name, err)
+			}
+			defer rc.Close()
+			return io.ReadAll(rc)
+		}
+		return nil, fmt.Errorf("%s not found in release zip", want)
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		return nil, fmt.Errorf("open tar.gz: %w", err)
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read tar: %w", err)
+		}
+		if hdr.Typeflag != tar.TypeReg || path.Base(hdr.Name) != want {
+			continue
+		}
+		return io.ReadAll(tr)
+	}
+	return nil, fmt.Errorf("%s not found in release tar.gz", want)
+}
+
+// sha256 十六进制（比较用）
+func hashBytes(b []byte) string {
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 // 从 checksums.txt 提取本产物的期望哈希（单行匹配，规避三方 sha256sum 行为差异）
