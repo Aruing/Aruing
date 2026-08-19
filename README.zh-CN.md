@@ -53,6 +53,22 @@ Run → Query → Target → Hypothesis → Task → Evidence → Verdict → Re
 | LLM（OpenAI 兼容） | 任意 base URL + 模型；`run` / `chat` 必需 |
 | Docker + kind | 可选——仅可复现故障场景需要 |
 
+## 安装
+
+一行命令（安装最新 Release 到 `~/.aruing/bin`，带 sha256 校验）：
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.sh | bash
+```
+
+```powershell
+# Windows（PowerShell）—— experimental：基础命令已验证；交互式 `chat` TUI 未在真实 Windows 终端验证
+irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | iex
+```
+
+`~/.aruing/bin` 不在 PATH 时安装器会打印需追加的那一行。从源码安装：`go install github.com/Aruing/Aruing/cmd/aruing@latest`（v0.1.0 tag 后生效）或 `make build`。
+
 ## 快速开始
 
 ```bash
