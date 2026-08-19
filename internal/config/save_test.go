@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,58 @@ func TestUserConfigPath(t *testing.T) {
 	}
 	if filepath.Base(filepath.Dir(p)) != "aruing" || filepath.Base(p) != "config.yaml" {
 		t.Fatalf("unexpected user config path: %s", p)
+	}
+}
+
+// 未知顶层段（未来新增或自定义键）应原样保留，仅 llm 被替换
+func TestSaveLLMPreservesUnknownSections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	seed := `llm:
+  base_url: https://old/v1
+  api_key: k
+  model: m
+future_feature:
+  channels:
+    - name: primary
+tools:
+  kubectl_path: /bin/kubectl
+`
+	if err := os.WriteFile(path, []byte(seed), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveLLM(path, LLM{BaseURL: "https://new/v1", APIKey: "k2", Model: "m2"}); err != nil {
+		t.Fatalf("SaveLLM: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), "future_feature") || !strings.Contains(string(data), "channels") {
+		t.Fatalf("unknown sections must be preserved:\n%s", data)
+	}
+	got, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile: %v", err)
+	}
+	if got.LLM.Model != "m2" || got.Tools.KubectlPath != "/bin/kubectl" {
+		t.Fatalf("llm replaced and tools preserved: %+v", got)
+	}
+}
+
+// 已存在文件权限宽松时，写入后应收紧到 0600（含密钥文件不应组/全局可读）
+func TestSaveLLMTightensPermissions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("llm: {}\n"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := SaveLLM(path, LLM{BaseURL: "u", APIKey: "secret", Model: "m"}); err != nil {
+		t.Fatalf("SaveLLM: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if fi.Mode().Perm() != 0o600 {
+		t.Fatalf("want 0600 after save, got %o", fi.Mode().Perm())
 	}
 }

@@ -165,18 +165,32 @@ func SaveLLM(path string, llmCfg LLM) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("config path is empty")
 	}
-	var fc fileConfig
+	// 用 map 承载旧文件：未知顶层段（未来新增或用户自定义键）原样保留，
+	// 仅替换 llm 段（pr-agent 评审采纳：固定结构体反序列化会静默丢弃未知段）
+	var doc map[string]any
 	data, readErr := os.ReadFile(path)
 	if readErr != nil && !os.IsNotExist(readErr) {
 		return fmt.Errorf("read existing config %s: %w", path, readErr)
 	}
 	if readErr == nil {
-		if err := yaml.Unmarshal(data, &fc); err != nil {
+		if err := yaml.Unmarshal(data, &doc); err != nil {
 			return fmt.Errorf("parse existing config %s: %w", path, err)
 		}
 	}
-	fc.LLM = llmCfg
-	out, err := yaml.Marshal(fc)
+	if doc == nil {
+		doc = map[string]any{}
+	}
+	llmOut, err := yaml.Marshal(llmCfg)
+	if err != nil {
+		return fmt.Errorf("marshal llm config: %w", err)
+	}
+	var llmNode any
+	llmErr := yaml.Unmarshal(llmOut, &llmNode)
+	if llmErr != nil {
+		return fmt.Errorf("remarshal llm config: %w", llmErr)
+	}
+	doc["llm"] = llmNode
+	out, err := yaml.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}
@@ -185,8 +199,13 @@ func SaveLLM(path string, llmCfg LLM) error {
 			return fmt.Errorf("create config dir %s: %w", dir, err)
 		}
 	}
+	// 权限收紧到 0600（含已存在文件的宽松权限场景，pr-agent 安全评审采纳）；
+	// O_CREATE|O_TRUNC 显式开文件后 chmod，避免 WriteFile 对已存在文件不触碰权限
 	if err := os.WriteFile(path, out, 0o600); err != nil {
 		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("chmod config %s: %w", path, err)
 	}
 	return nil
 }

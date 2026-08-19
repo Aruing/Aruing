@@ -33,7 +33,9 @@ func runConnect(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	fs := flag.NewFlagSet("connect", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	baseURL := fs.String("base-url", "", "LLM base URL (non-interactive mode)")
-	apiKey := fs.String("api-key", "", "LLM API key (non-interactive mode)")
+	// 密钥经命令行会进 shell history 与进程列表（ps 可见）；注释明示更安全的
+	// env 通道，flag 保留仅为自动化便利（pr-agent 安全评审缓解项）
+	apiKey := fs.String("api-key", "", "LLM API key (non-interactive; prefer ARUING_LLM_API_KEY env to avoid shell history)")
 	model := fs.String("model", "", "LLM model name (non-interactive mode)")
 	noTest := fs.Bool("no-test", false, "skip connectivity test")
 	configPath := fs.String("config", "", "write to this config path instead of the user config")
@@ -59,9 +61,15 @@ func runConnect(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 		target = p
 	}
 
+	// api key 优先取 flag；未给时读 env（避免命令行明文；与全局 env 键名一致）
+	apiKeyVal := strings.TrimSpace(*apiKey)
+	if apiKeyVal == "" {
+		apiKeyVal = strings.TrimSpace(os.Getenv("ARUING_LLM_API_KEY"))
+	}
+
 	llmCfg := config.LLM{
 		BaseURL: strings.TrimSpace(*baseURL),
-		APIKey:  strings.TrimSpace(*apiKey),
+		APIKey:  apiKeyVal,
 		Model:   strings.TrimSpace(*model),
 	}
 
@@ -87,10 +95,8 @@ func runConnect(args []string, stdin io.Reader, stdout, stderr io.Writer) error 
 	if _, err := os.Stat(target); err == nil {
 		if interactive {
 			if old, loadErr := config.LoadFile(target); loadErr == nil && old.LLM.Ready() {
+				// 密钥全掩码：连首字符也不暴露（pr-agent 安全评审采纳）
 				masked := "****"
-				if old.LLM.APIKey != "" {
-					masked = old.LLM.APIKey[:1] + "****"
-				}
 				fmt.Fprintf(stdout, "existing config at %s: base_url=%s model=%s api_key=%s\n",
 					target, old.LLM.BaseURL, old.LLM.Model, masked)
 				ok, err := promptConfirm(reader, stdout, "overwrite llm section? [y/N] ")
@@ -140,9 +146,12 @@ func promptLLMConfig(reader *bufio.Reader, partial config.LLM, stdin io.Reader, 
 		}
 	}
 	if cfg.APIKey == "" {
-		// 密钥隐藏输入；stdin 非 TTY（管道/脚本）退化为明文读（测试与自动化路径）
+		// 密钥隐藏输入；仅当缓冲已空时才直读终端（term.ReadPassword 绕过 bufio，
+		// 若用户一次性粘贴多行，密钥行可能已被预读进缓冲，直读会错位/阻塞——
+		// pr-agent 竞态评审采纳：Buffered()>0 一律走 reader，TTy 隐藏性在此场景
+		// 已不可能，安全性与正确性优先）
 		fmt.Fprint(stdout, "api key (input hidden): ")
-		if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) && reader.Buffered() == 0 {
 			b, readErr := term.ReadPassword(int(f.Fd()))
 			fmt.Fprintln(stdout)
 			if readErr != nil {
