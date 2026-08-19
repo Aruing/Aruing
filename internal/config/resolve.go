@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 // 解析配置路径时可注入的依赖，仅用于单测替换真实文件系统与环境
@@ -139,4 +142,51 @@ func LoadResolvedWith(explicit string, opt ResolveOptions) (Config, string, erro
 		return cfg, path, err
 	}
 	return cfg, path, nil
+}
+
+// 返回用户级配置文件的规范落点（connect 向导的写入目标）
+//
+// 与 ResolveConfigPath 搜索链中的用户级候选一致：$XDG_CONFIG_HOME 或
+// os.UserConfigDir 下的 aruing/config.yaml；无法解析用户目录时返回错误
+// （此时 connect 应提示改用 --config 显式路径）
+func UserConfigPath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user config dir: %w", err)
+	}
+	return filepath.Join(dir, "aruing", "config.yaml"), nil
+}
+
+// 把大模型三件套写入配置文件；已存在时仅覆盖 llm 段，其余段原样保留
+//
+// 这是 aruing connect 的落盘函数：读旧文件（可不存在）→ 覆盖 llm → 序列化写回。
+// 远期多渠道（channels + 优先级降级）演进时升级文件 schema，此函数仍是唯一写入口
+func SaveLLM(path string, llmCfg LLM) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("config path is empty")
+	}
+	var fc fileConfig
+	data, readErr := os.ReadFile(path)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return fmt.Errorf("read existing config %s: %w", path, readErr)
+	}
+	if readErr == nil {
+		if err := yaml.Unmarshal(data, &fc); err != nil {
+			return fmt.Errorf("parse existing config %s: %w", path, err)
+		}
+	}
+	fc.LLM = llmCfg
+	out, err := yaml.Marshal(fc)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create config dir %s: %w", dir, err)
+		}
+	}
+	if err := os.WriteFile(path, out, 0o600); err != nil {
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	return nil
 }
