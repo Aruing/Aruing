@@ -28,20 +28,31 @@ esac
 
 command -v curl >/dev/null 2>&1 || err "curl is required (macOS: built-in; debian/ubuntu: apt install curl)"
 
-# 版本解析：列表 API 第一个非 draft 项即最新（含 pre-release，决策：永远装最新）
-# 返回体为 JSON 数组；tag_name 字段机械提取，避免依赖 jq
-release_json="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=10")" \
-  || err "failed to query GitHub releases API (network issue, or anonymous rate limit — retry later)"
-tag="$(printf '%s' "$release_json" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"tag_name": *"//; s/"$//')"
-[ -n "$tag" ] || err "no published release found"
-
 asset="${asset_os}.tar.gz"
-base_url="https://github.com/${REPO}/releases/download/${tag}"
-echo "==> downloading ${asset} (${tag})"
-
 cd "$TMP_DIR"
-curl -fsSL -o "$asset" "${base_url}/${asset}" || err "download failed: ${asset}"
-curl -fsSL -o checksums.txt "${base_url}/checksums.txt" || err "download failed: checksums.txt"
+
+# 版本解析双层策略（免限流优先）：
+# 1) stable 直链：releases/latest/download/<产物> 是 CDN 永久别名，始终指向最新
+#    正式版（不含 pre-release），完全不经过 api.github.com——匿名 API 按出口 IP
+#    60 次/小时限流（公司 NAT/VPN/云容器池极易撞墙），直链对正常用户结构性免疫
+# 2) API 列表发现（回退）：仅当 stable 尚不存在（404，首发前的 rc 窗口）走到；
+#    此时取列表第一个非 draft 项（含 pre-release）。撞限流时给出 Releases 页面
+#    手工下载兜底，而不是让用户干等限流窗口
+stable_base="https://github.com/${REPO}/releases/latest/download"
+if curl -fsI -o /dev/null "${stable_base}/${asset}" 2>/dev/null; then
+  echo "==> downloading ${asset} (latest stable)"
+  curl -fsSL -o "$asset" "${stable_base}/${asset}" || err "download failed: ${asset}"
+  curl -fsSL -o checksums.txt "${stable_base}/checksums.txt" || err "download failed: checksums.txt"
+else
+  release_json="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=10")" \
+    || err "no stable release yet, and GitHub API failed (network, or anonymous rate limit — open https://github.com/${REPO}/releases to download manually)"
+  tag="$(printf '%s' "$release_json" | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"tag_name": *"//; s/"$//')"
+  [ -n "$tag" ] || err "no published release found"
+  base_url="https://github.com/${REPO}/releases/download/${tag}"
+  echo "==> downloading ${asset} (${tag})"
+  curl -fsSL -o "$asset" "${base_url}/${asset}" || err "download failed: ${asset}"
+  curl -fsSL -o checksums.txt "${base_url}/checksums.txt" || err "download failed: checksums.txt"
+fi
 
 # 校验和验证：从 checksums.txt 提取本产物单行单独比对
 # 规避 GNU --ignore-missing / busybox / macOS 三方行为差异（只算本产物则完全一致）

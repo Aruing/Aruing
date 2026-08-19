@@ -15,27 +15,44 @@ if ($arch -ne 'AMD64') {
     Write-Error "aruing install: unsupported architecture '$arch' (only windows amd64 is published)"
 }
 
-# 版本解析： 列表 API 第一个非 draft 项即最新（含 pre-release，与 install.sh 同策略）
-$releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=10"
-$release = $releases | Where-Object { -not $_.draft } | Select-Object -First 1
-if (-not $release) {
-    Write-Error 'aruing install: no published release found'
-}
-$tag = $release.tag_name
-
+# 版本解析双层策略（与 install.sh 同构，免限流优先）：
+# 1) stable 直链：releases/latest/download/<产物> 是 CDN 永久别名，始终指向最新正式版，
+#    完全不经过 api.github.com（匿名 API 按出口 IP 60 次/小时限流，直链结构性免疫）
+# 2) API 列表发现（回退）：仅首发前 rc 窗口 stable 不存在时走到；含 pre-release
+$stableBase = "https://github.com/$Repo/releases/latest/download"
 $assetName = 'aruing_windows_amd64.zip'
-$asset = $release.assets | Where-Object { $_.name -eq $assetName }
-if (-not $asset) {
-    Write-Error "aruing install: asset $assetName not found in release $tag"
-}
-
-Write-Host "==> downloading $assetName ($tag)"
 $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ([System.IO.Path]::GetRandomFileName()))
 $zipPath = Join-Path $tmp $assetName
 $sumPath = Join-Path $tmp 'checksums.txt'
-Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath
-$sumAsset = $release.assets | Where-Object { $_.name -eq 'checksums.txt' }
-Invoke-WebRequest -Uri $sumAsset.browser_download_url -OutFile $sumPath
+
+$stableReachable = $false
+try {
+    Invoke-WebRequest -Uri "$stableBase/$assetName" -Method Head -UseBasicParsing | Out-Null
+    $stableReachable = $true
+} catch {
+    $stableReachable = $false
+}
+
+if ($stableReachable) {
+    Write-Host "==> downloading $assetName (latest stable)"
+    Invoke-WebRequest -Uri "$stableBase/$assetName" -OutFile $zipPath
+    Invoke-WebRequest -Uri "$stableBase/checksums.txt" -OutFile $sumPath
+} else {
+    $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases?per_page=10"
+    $release = $releases | Where-Object { -not $_.draft } | Select-Object -First 1
+    if (-not $release) {
+        Write-Error 'aruing install: no published release found'
+    }
+    $tag = $release.tag_name
+    $asset = $release.assets | Where-Object { $_.name -eq $assetName }
+    if (-not $asset) {
+        Write-Error "aruing install: asset $assetName not found in release $tag"
+    }
+    Write-Host "==> downloading $assetName ($tag)"
+    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath
+    $sumAsset = $release.assets | Where-Object { $_.name -eq 'checksums.txt' }
+    Invoke-WebRequest -Uri $sumAsset.browser_download_url -OutFile $sumPath
+}
 
 # SHA256 校验： 从 checksums.txt 找到本产物的期望值（按规范名匹配，不得改名）
 $expected = (Get-Content $sumPath) |
