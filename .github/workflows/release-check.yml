@@ -79,6 +79,9 @@ jobs:
           go-version-file: go.mod
           cache: false
       - name: Build
+        env:
+          # 与发布产物同形态（cross-build / GoReleaser 均 CGO_ENABLED=0），冒烟验证的就是发布形态
+          CGO_ENABLED: "0"
         run: go build -o "bin/aruing${{ matrix.ext }}" ./cmd/aruing
       # 统一用 bash（Windows runner 自带 git bash），断言首行格式供脚本与自更新消费
       - name: Run version smoke
