@@ -1,28 +1,37 @@
-// aruing update 自更新：检测 GitHub Releases 新版本，下载校验后原子替换自身
+// aruing update 自更新：检测 GitHub Releases 新版本，校验和验证后原子替换自身
 //
 // 三道防线（beta22 决策 3）：源码构建（version=dev）明确报错不猜；npm 安装来源
 // （路径含 node_modules）拒绝自替换、提示 npm update——npm 包完整性由 npm 管，
 // 二进制不得自替换脱钩；已是最新静默退出
 //
-// 校验与替换由 go-selfupdate 承担：ChecksumValidator 与 GoReleaser 的
-// checksums.txt 产物零配置对齐；UpdateSelf 含 Windows 运行中 exe 处理与失败回滚
+// 分工（2026-08-19 决策：换 minio/selfupdate，go-selfupdate 因传递依赖
+// openpgp 触发 GO-2026-5932 且上游无修复计划）：检测/下载/校验复用与
+// scripts/install.sh 同构的策略（stable 直链免 API 限流 + checksums 单行比对，
+// 该策略已在安装脚本真机验证）；原子替换/Windows 运行中 exe/失败回滚交给
+// minio/selfupdate.Apply
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
-	"github.com/creativeprojects/go-selfupdate"
+	"github.com/minio/selfupdate"
 )
 
-// 自更新检测的目标仓库；与模块路径同源（github.com/Aruing/Aruing）
-var updateRepository = selfupdate.NewRepositorySlug("Aruing", "Aruing")
+// stable 直链基地址：CDN 永久别名，始终指向最新正式版，零 API 调用免限流
+// （与 scripts/install.sh 同策略；仓库 slug 已写死在 URL 里）
+const updateStableBase = "https://github.com/Aruing/Aruing/releases/latest/download"
 
 // 检测与下载的整体超时；慢网给足下载 12MB 产物的余量
 const updateTimeout = 5 * time.Minute
@@ -63,53 +72,181 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("this aruing binary is managed by npm (%s);\nrun: npm update -g aruing", exePath)
 	}
 
-	updater, err := selfupdate.NewUpdater(selfupdate.Config{
-		Validator: &selfupdate.ChecksumValidator{UniqueFilename: "checksums.txt"},
-		// Prerelease 默认 false：正式用户不会被推 rc，与安装脚本 stable 优先语义一致
-	})
-	if err != nil {
-		return fmt.Errorf("init updater: %w", err)
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
 	defer cancel()
 
 	fmt.Fprintf(stdout, "current: %s\n", version)
-	release, found, err := updater.DetectLatest(ctx, updateRepository)
-	if err != nil {
-		return fmt.Errorf("detect latest release (network?): %w", err)
-	}
-	// found=false：仓库无匹配正式版 Release（如仅 rc 存在）→ 对用户而言就是最新
-	if !found {
-		fmt.Fprintln(stdout, "already up to date")
-		return nil
-	}
-	fmt.Fprintf(stdout, "latest:  %s\n", release.Version())
 
-	// 防线 3：已是最新（库内 semver 比较，rc 不会被推给正式用户）
-	if !release.GreaterThan(version) {
-		fmt.Fprintln(stdout, "already up to date")
+	// stable 直链探测：与 install.sh 同策略。HEAD 探测产物在不在，避免下载体
+	// 只为判存在；产物名规则与 .goreleaser.yaml 命名契约一致
+	asset := updateAssetName()
+	probe := http.Client{Timeout: 30 * time.Second}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodHead, updateStableBase+"/"+asset, nil)
+	resp, err := probe.Do(req)
+	if err != nil {
+		return fmt.Errorf("probe latest release (network?): %w", err)
+	}
+	defer resp.Body.Close()
+
+	// 防线 3：stable 不存在（仓库尚无正式版）或已是最新——静默退出
+	// 比较依据：直链的 CDN 命中会带出不可预测的最终 URL，改用 sha256 对照：
+	// 本地二进制哈希与远端产物哈希一致即已是最新（内容级比较，最诚实）
+	if resp.StatusCode == http.StatusNotFound {
+		fmt.Fprintln(stdout, "already up to date (no stable release)")
 		return nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("probe latest release: unexpected status %d", resp.StatusCode)
 	}
 
 	if *checkOnly {
-		fmt.Fprintln(stdout, "update available: run \"aruing update\" to install")
+		// 只检测：拉取产物哈希与本地比对（不落盘不替换）
+		same, err := sameAsRemote(ctx, exePath, asset)
+		if err != nil {
+			return err
+		}
+		if same {
+			fmt.Fprintln(stdout, "already up to date")
+		} else {
+			fmt.Fprintf(stdout, "update available: run \"aruing update\" to install\n")
+		}
 		return nil
 	}
 
-	fmt.Fprintf(stdout, "==> updating to %s...\n", release.Version())
-	if _, err := updater.UpdateSelf(ctx, version, updateRepository); err != nil {
+	// 执行更新：下载 + checksums 校验 + 原子替换（Apply 含失败回滚提示）
+	if err := applyUpdate(ctx, exePath, asset, stdout); err != nil {
+		return err
+	}
+	return nil
+}
+
+// 按当前平台拼产物名（与 .goreleaser.yaml 的 {{ .ProjectName }}_{{ .Os }}_{{ .Arch }} 契约一致）
+func updateAssetName() string {
+	arch := runtimeGOARCH
+	ext := "tar.gz"
+	if runtimeGOOS == "windows" {
+		ext = "zip"
+	}
+	return fmt.Sprintf("aruing_%s_%s.%s", runtimeGOOS, arch, ext)
+}
+
+// 下载产物与 checksums，逐字节校验后流式喂给 selfupdate.Apply 替换自身
+//
+// 不落盘中转：Apply 接受 io.Reader，产物体直接从 HTTP 响应流入；
+// 校验失败发生在 Apply 之前，二进制不会被触碰
+func applyUpdate(ctx context.Context, exePath, asset string, stdout io.Writer) error {
+	client := http.Client{}
+	// checksums 先行：拿期望哈希（单行提取，与 install.sh 同逻辑）
+	sumBody, err := fetchBody(ctx, client, updateStableBase+"/checksums.txt")
+	if err != nil {
+		return fmt.Errorf("fetch checksums: %w", err)
+	}
+	expected := checksumFor(string(sumBody), asset)
+	if expected == "" {
+		return fmt.Errorf("no checksum entry for %s", asset)
+	}
+
+	assetResp, err := fetchStream(ctx, client, updateStableBase+"/"+asset)
+	if err != nil {
+		return fmt.Errorf("download %s: %w", asset, err)
+	}
+	defer assetResp.Body.Close()
+
+	// 读全量校验（12MB 量级，内存可控）；校验过再从内存喂 Apply
+	body, err := io.ReadAll(assetResp.Body)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", asset, err)
+	}
+	sum := sha256.Sum256(body)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), expected) {
+		return fmt.Errorf("checksum mismatch for %s — refusing to update", asset)
+	}
+	fmt.Fprintf(stdout, "checksum ok, applying update...\n")
+
+	if err := selfupdate.Apply(bytes.NewReader(body), selfupdate.Options{TargetPath: exePath}); err != nil {
+		if rollErr := selfupdate.RollbackError(err); rollErr != nil {
+			return fmt.Errorf("update failed and rollback also failed: %v (manual recovery needed: reinstall via install script)", rollErr)
+		}
 		return fmt.Errorf("update failed (binary unchanged): %w", err)
 	}
-	fmt.Fprintf(stdout, "==> updated: %s → %s\n", version, release.Version())
+	fmt.Fprintf(stdout, "==> updated, restart your shell if needed\n")
 	return nil
+}
+
+// --check 路径：本地二进制哈希与远端产物哈希比对
+func sameAsRemote(ctx context.Context, exePath, asset string) (bool, error) {
+	client := http.Client{}
+	sumBody, err := fetchBody(ctx, client, updateStableBase+"/checksums.txt")
+	if err != nil {
+		return false, fmt.Errorf("fetch checksums: %w", err)
+	}
+	expected := checksumFor(string(sumBody), asset)
+	if expected == "" {
+		return false, fmt.Errorf("no checksum entry for %s", asset)
+	}
+	local, err := fileSHA256(exePath)
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(local, expected), nil
+}
+
+// 从 checksums.txt 提取本产物的期望哈希（单行匹配，规避三方 sha256sum 行为差异）
+func checksumFor(checksums, asset string) string {
+	for _, line := range strings.Split(checksums, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == asset {
+			return fields[0]
+		}
+	}
+	return ""
+}
+
+// 拉取完整响应体（checksums 这类小文件）
+func fetchBody(ctx context.Context, client http.Client, url string) ([]byte, error) {
+	resp, err := fetchStream(ctx, client, url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
+
+// 建立流式请求并校验状态码
+func fetchStream(ctx context.Context, client http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+	}
+	return resp, nil
+}
+
+// 本地文件 SHA256（十六进制小写）
+func fileSHA256(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", fmt.Errorf("hash %s: %w", path, err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // 判断路径是否 npm 安装形态（node_modules 内，含全局 node 安装目录）
 //
-// npm 全局装的二进制真实路径形如 .../node_modules/aruing/... 或
-// .../lib/node_modules/...；宽松匹配 node_modules 片段宁可误拒（提示 npm update
-// 无害）也不误替换（npm 包状态脱钩）
+// npm 全局装的二进制真实路径形如 .../node_modules/aruing/...；宽松匹配
+// node_modules 片段宁可误拒（提示 npm update 无害）也不误替换（npm 包状态脱钩）
 func isNpmInstallPath(path string) bool {
 	normalized := filepath.ToSlash(strings.ToLower(path))
 	return strings.Contains(normalized, "node_modules")
@@ -145,3 +282,9 @@ func allDigits(s string) bool {
 	}
 	return true
 }
+
+// 运行时平台经变量暴露，测试可覆写平台产物名拼接
+var (
+	runtimeGOOS   = runtime.GOOS
+	runtimeGOARCH = runtime.GOARCH
+)

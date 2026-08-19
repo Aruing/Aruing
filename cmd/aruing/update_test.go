@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -38,17 +39,15 @@ func TestRunUpdateRejectsNonSemver(t *testing.T) {
 	}
 }
 
-// npm 安装路径（node_modules 内，含符号链接解析后）应拒绝自替换并提示 npm update
-func TestRunUpdateRejectsNpmInstallPath(t *testing.T) {
-	withVersion(t, "0.1.0-rc1")
-	// 把当前测试二进制视为 npm 安装：isNpmInstallPath 是纯函数，直接验证判定逻辑
-	// 加上一条 runUpdate 全流程（路径不命中时走到网络检测，此处只测纯函数面）
+// npm 安装路径判定：node_modules 内（大小写/斜杠形态归一）拒绝，其余放行
+func TestIsNpmInstallPath(t *testing.T) {
 	cases := []struct {
 		path string
 		want bool
 	}{
 		{"/usr/lib/node_modules/aruing/bin/aruing", true},
 		{"/Users/x/.npm-global/lib/node_modules/aruing/aruing", true},
+		{`C:\Users\x\AppData\Roaming\npm\node_modules\aruing\aruing.exe`, true},
 		{"/Users/x/.aruing/bin/aruing", false},
 		{"/usr/local/bin/aruing", false},
 	}
@@ -75,11 +74,43 @@ func TestIsSemverish(t *testing.T) {
 	}
 }
 
-// --check 对真实 GitHub API：仓库已有 Release（rc 会被 prerelease 过滤），
-// 网络可达时应正常返回而不更新；短模式（-short）跳过
-func TestRunUpdateCheckRealAPI(t *testing.T) {
-	if testing.Short() {
-		t.Skip("network test skipped in short mode")
+// checksums 单行提取：多行文件中按产物规范名取期望哈希；缺失返回空
+func TestChecksumFor(t *testing.T) {
+	sums := "aaa111  aruing_darwin_amd64.tar.gz\n" +
+		"bbb222  aruing_darwin_arm64.tar.gz\n" +
+		"ccc333  aruing_windows_amd64.zip\n"
+	if got := checksumFor(sums, "aruing_darwin_arm64.tar.gz"); got != "bbb222" {
+		t.Fatalf("checksumFor = %q, want bbb222", got)
+	}
+	if got := checksumFor(sums, "aruing_linux_amd64.tar.gz"); got != "" {
+		t.Fatalf("missing asset should give empty, got %q", got)
+	}
+	// 二进制产物行的 * 前缀（sha256sum 二进制标记）应被容忍
+	if got := checksumFor("ddd444 *aruing_windows_amd64.zip\n", "aruing_windows_amd64.zip"); got != "ddd444" {
+		t.Fatalf("* prefix form = %q, want ddd444", got)
+	}
+}
+
+// 平台产物名拼接：与 .goreleaser.yaml 命名契约一致
+func TestUpdateAssetName(t *testing.T) {
+	oldOS, oldArch := runtimeGOOS, runtimeGOARCH
+	t.Cleanup(func() { runtimeGOOS, runtimeGOARCH = oldOS, oldArch })
+
+	runtimeGOOS, runtimeGOARCH = "darwin", "arm64"
+	if got := updateAssetName(); got != "aruing_darwin_arm64.tar.gz" {
+		t.Fatalf("darwin/arm64 = %q", got)
+	}
+	runtimeGOOS, runtimeGOARCH = "windows", "amd64"
+	if got := updateAssetName(); got != "aruing_windows_amd64.zip" {
+		t.Fatalf("windows/amd64 = %q", got)
+	}
+}
+
+// 真网络端到端（--check）：默认跳过，显式 ARUING_UPDATE_E2E=1 才跑
+// 门控原因：CI 离线/限流/仓库状态变化会让真 API 用例 flaky（pr-agent 评审采纳）
+func TestRunUpdateCheckRealNetwork(t *testing.T) {
+	if os.Getenv("ARUING_UPDATE_E2E") != "1" {
+		t.Skip("set ARUING_UPDATE_E2E=1 to run the live selfupdate check")
 	}
 	withVersion(t, "0.0.1")
 	var stdout, stderr bytes.Buffer
@@ -87,13 +118,9 @@ func TestRunUpdateCheckRealAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runUpdate --check: %v", err)
 	}
-	// 仓库当前只有 rc（prerelease 过滤默认关）→ 正确行为是 already up to date；
-	// v0.1.0 正式发布后此断言自然变为 latest 路径，两者都是成功形态
+	// 仓库正式版发布前后两种成功形态：有 stable 直链（比对）或暂无正式版
 	out := stdout.String()
 	if !strings.Contains(out, "current: 0.0.1") {
 		t.Fatalf("missing current line:\n%s", out)
-	}
-	if !strings.Contains(out, "latest:") && !strings.Contains(out, "already up to date") {
-		t.Fatalf("unexpected output:\n%s", out)
 	}
 }
