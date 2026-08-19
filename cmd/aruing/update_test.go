@@ -220,3 +220,47 @@ func buildTestZip(t *testing.T, files map[string][]byte) []byte {
 	zw.Close()
 	return buf.Bytes()
 }
+
+// tagFromURL：releases/download 路径形态提取；无关路径返回空
+func TestTagFromURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/Aruing/Aruing/releases/download/v0.1.0/aruing_darwin_arm64.tar.gz", "v0.1.0"},
+		{"/releases/download/v10.20.30-rc1/x.zip", "v10.20.30-rc1"},
+		{"/some/other/path", ""},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		if got := tagFromURL(tc.in); got != tc.want {
+			t.Fatalf("tagFromURL(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// 版本方向判断（防降级核心）：
+// stable 远端 > 本地 stable → 更新；
+// 远端 == 本地三段号且本地是 rc → 更新（rc 升正式）；
+// 远端 < 本地（本地更新 rc 或更高 stable）→ 不更新；
+// 解析失败 → 不更新（宁可不动）
+func TestNewerVersion(t *testing.T) {
+	cases := []struct {
+		remote, local string
+		want          bool
+	}{
+		{"v0.1.0", "0.0.9", true},
+		{"v0.2.0", "0.1.9", true},
+		{"v1.0.0", "0.9.9", true},
+		{"v0.1.1", "0.1.0", true},
+		{"v0.1.0", "0.1.0", false},     // 相等 stable
+		{"v0.1.0", "0.1.0-rc1", true},  // rc 升同号正式
+		{"v0.1.0", "0.2.0-rc1", false}, // 本地更新的 rc，不得降级
+		{"v0.1.0", "0.2.0", false},     // 本地更高 stable
+		{"v0.1.0-rc1", "0.1.0", false}, // 远端是 rc 场景防御（stable 直链不应出现）
+		{"garbage", "0.1.0", false},    // 远端解析失败
+		{"v0.1.0", "garbage", false},   // 本地解析失败
+	}
+	for _, tc := range cases {
+		if got := newerVersion(tc.remote, tc.local); got != tc.want {
+			t.Fatalf("newerVersion(%q, %q) = %v, want %v", tc.remote, tc.local, got, tc.want)
+		}
+	}
+}

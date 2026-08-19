@@ -91,6 +91,9 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("probe latest release (network?): %w", err)
 	}
 	defer resp.Body.Close()
+	// HEAD 跟随后 resp.Request.URL 已是最终下载地址（含 tag）：
+	// releases/download/v0.1.0/...——从 URL 提取远端版本，零 API 调用
+	remoteVersion := tagFromURL(resp.Request.URL.Path)
 
 	// 防线 3：stable 不存在（仓库尚无正式版）或已是最新——静默退出
 	// 比较依据：直链的 CDN 命中会带出不可预测的最终 URL，改用 sha256 对照：
@@ -104,24 +107,89 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 	}
 
 	if *checkOnly {
-		// 只检测：拉取产物哈希与本地比对（不落盘不替换）
-		same, err := sameAsRemote(ctx, exePath, asset)
-		if err != nil {
-			return err
-		}
-		if same {
+		// 只检测：远端版本较新才提示；--check 不拉产物体（版本方向是判断主体）
+		if !newerVersion(remoteVersion, version) {
 			fmt.Fprintln(stdout, "already up to date")
-		} else {
-			fmt.Fprintf(stdout, "update available: run \"aruing update\" to install\n")
+			return nil
 		}
+		fmt.Fprintf(stdout, "latest:  %s\n", remoteVersion)
+		fmt.Fprintf(stdout, "update available: run \"aruing update\" to install\n")
 		return nil
 	}
 
-	// 执行更新：下载 + checksums 校验 + 原子替换（Apply 含失败回滚提示）
+	// 防线 4（版本方向）：远端 stable 不比本地新（本地是更新的 rc 等场景）绝不降级
+	if !newerVersion(remoteVersion, version) {
+		fmt.Fprintln(stdout, "already up to date")
+		return nil
+	}
+	fmt.Fprintf(stdout, "latest:  %s\n", remoteVersion)
+
+	// 执行更新：下载 + checksums 校验 + 解包 + 原子替换（Apply 含失败回滚提示）
 	if err := applyUpdate(ctx, exePath, asset, stdout); err != nil {
 		return err
 	}
+	fmt.Fprintf(stdout, "==> updated: %s → %s\n", version, remoteVersion)
 	return nil
+}
+
+// 从 releases/download/<tag>/<file> 路径提取 tag 段；无匹配返回空串
+func tagFromURL(urlPath string) string {
+	parts := strings.Split(strings.Trim(urlPath, "/"), "/")
+	for i, p := range parts {
+		if p == "download" && i+1 < len(parts) {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+// 语义化版本粗比较：远端（vX.Y.Z…）是否严格比本地（X.Y.Z…）新
+//
+// 只比主次补丁三段数字；pre 段（rc/beta）视为低于同号正式版（semver 约定），
+// 因此 stable 0.1.0 不会把本地 0.2.0-rc1 判为新（防止降级，pr-agent 评审修复）。
+// 解析失败的任一侧按"无法证明更新"处理，宁可不动也不降级
+func newerVersion(remoteTag, local string) bool {
+	rv, ok := parseSemver3(strings.TrimPrefix(remoteTag, "v"))
+	if !ok {
+		return false
+	}
+	lv, ok := parseSemver3(local)
+	if !ok {
+		return false
+	}
+	if rv[0] != lv[0] {
+		return rv[0] > lv[0]
+	}
+	if rv[1] != lv[1] {
+		return rv[1] > lv[1]
+	}
+	if rv[2] != lv[2] {
+		return rv[2] > lv[2]
+	}
+	// 三段全等：远端是 stable（无 pre 段），本地带 pre 段（rc/beta）才算新；
+	// 本地同为 stable 则相等不算新
+	return strings.Contains(local, "-")
+}
+
+// 解析 X.Y.Z 前缀三段；支持 -rc1 等后缀（后缀被忽略，是否带后缀由调用方判断）
+func parseSemver3(v string) ([3]int, bool) {
+	var out [3]int
+	head := strings.SplitN(v, "-", 2)[0]
+	parts := strings.Split(head, ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, p := range parts {
+		if p == "" || !allDigits(p) {
+			return out, false
+		}
+		n := 0
+		for _, r := range p {
+			n = n*10 + int(r-'0')
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 // 按当前平台拼产物名（与 .goreleaser.yaml 的 {{ .ProjectName }}_{{ .Os }}_{{ .Arch }} 契约一致）
@@ -184,38 +252,6 @@ func applyUpdate(ctx context.Context, exePath, asset string, stdout io.Writer) e
 	return nil
 }
 
-// --check 路径：本地二进制哈希与远端产物哈希比对
-func sameAsRemote(ctx context.Context, exePath, asset string) (bool, error) {
-	client := http.Client{}
-	sumBody, err := fetchBody(ctx, client, updateStableBase+"/checksums.txt")
-	if err != nil {
-		return false, fmt.Errorf("fetch checksums: %w", err)
-	}
-	expected := checksumFor(string(sumBody), asset)
-	if expected == "" {
-		return false, fmt.Errorf("no checksum entry for %s", asset)
-	}
-	// checksums 记录的是压缩包哈希；--check 的比较对象是解包后的远端二进制
-	// 与本地二进制（裸二进制 vs 压缩包哈希永远不等，会误报恒有更新）
-	archive, err := fetchBody(ctx, client, updateStableBase+"/"+asset)
-	if err != nil {
-		return false, fmt.Errorf("download %s: %w", asset, err)
-	}
-	sum := sha256.Sum256(archive)
-	if !strings.EqualFold(hex.EncodeToString(sum[:]), expected) {
-		return false, fmt.Errorf("checksum mismatch for %s", asset)
-	}
-	remote, err := extractBinary(archive)
-	if err != nil {
-		return false, err
-	}
-	local, err := fileSHA256(exePath)
-	if err != nil {
-		return false, err
-	}
-	return strings.EqualFold(hashBytes(remote), local), nil
-}
-
 // 从 tar.gz / zip 压缩包解出 aruing 可执行文件的裸字节（内存中完成，不落盘）
 //
 // 包内文件名与 .goreleaser.yaml 打包契约一致：aruing（或 windows 下 aruing.exe）
@@ -265,12 +301,6 @@ func extractBinary(archive []byte) ([]byte, error) {
 	return nil, fmt.Errorf("%s not found in release tar.gz", want)
 }
 
-// sha256 十六进制（比较用）
-func hashBytes(b []byte) string {
-	sum := sha256.Sum256(b)
-	return hex.EncodeToString(sum[:])
-}
-
 // 从 checksums.txt 提取本产物的期望哈希（单行匹配，规避三方 sha256sum 行为差异）
 func checksumFor(checksums, asset string) string {
 	for _, line := range strings.Split(checksums, "\n") {
@@ -307,20 +337,6 @@ func fetchStream(ctx context.Context, client http.Client, url string) (*http.Res
 		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
 	}
 	return resp, nil
-}
-
-// 本地文件 SHA256（十六进制小写）
-func fileSHA256(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open %s: %w", path, err)
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", fmt.Errorf("hash %s: %w", path, err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // 判断路径是否 npm 安装形态（node_modules 内，含全局 node 安装目录）
