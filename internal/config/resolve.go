@@ -195,17 +195,34 @@ func SaveLLM(path string, llmCfg LLM) error {
 		return fmt.Errorf("marshal config: %w", err)
 	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("create config dir %s: %w", dir, err)
+		mkdirErr := os.MkdirAll(dir, 0o755)
+		if mkdirErr != nil {
+			return fmt.Errorf("create config dir %s: %w", dir, mkdirErr)
 		}
 	}
-	// 权限收紧到 0600（含已存在文件的宽松权限场景，pr-agent 安全评审采纳）；
-	// O_CREATE|O_TRUNC 显式开文件后 chmod，避免 WriteFile 对已存在文件不触碰权限
-	if err := os.WriteFile(path, out, 0o600); err != nil {
-		return fmt.Errorf("write config %s: %w", path, err)
+	// 原子落盘：写同目录临时文件（0600，密钥不经过任何宽松权限窗口），
+	// 再 rename 覆盖目标——同时消除两个问题：旧文件 0644 时"先写后 chmod"
+	// 的暴露窗口；写一半崩溃毁掉旧配置（rename 前旧文件完好）
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".aruing-config-*")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod config %s: %w", path, err)
+	tmpName := tmp.Name()
+	// 失败路径清理临时文件（成功 rename 后 tmpName 已不存在，Remove 报错忽略）
+	defer func() { _ = os.Remove(tmpName) }()
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		tmp.Close()
+		return fmt.Errorf("chmod temp config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace config %s: %w", path, err)
 	}
 	return nil
 }
