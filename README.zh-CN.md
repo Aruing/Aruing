@@ -24,9 +24,9 @@
 
 ## 当前阶段
 
-**`0.1.0` —— 可用的诊断助手，发布供评估。** 真集群 + 真 LLM 端到端可用：交互式终端对话（行内 / 全屏双模式）、主题定制、证据导航（含时间窗切片）、歧义提问的澄清挂起与恢复。
+**`0.1.0` —— 可用的诊断助手。** 真集群 + 真 LLM 端到端可用：交互式终端对话（行内 / 全屏双模式）、主题定制、证据导航（含时间窗切片）、歧义提问的澄清挂起与恢复。分发经 GitHub Releases：一行安装（curl / irm）、`aruing connect` 首次配置大模型、`aruing update` 升级、`go install` 源码 tag 渠道。
 
-尚未构建（计划 0.2+）：磁盘持久化（会话进程内、退出即丢）、流式响应、带审批的写工具、多集群、Web UI。路线图见 [`docs/project-state.md`](docs/project-state.md)。
+尚未构建（计划 0.2+）：npm 分发、磁盘持久化（会话进程内、退出即丢）、流式响应、带审批的写工具、多集群、Web UI。路线图见 [`docs/project-state.md`](docs/project-state.md)。
 
 ⚠️ 当前仅支持简单试用 / 测试——未达生产可用。
 
@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.
 irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | iex
 ```
 
-`~/.aruing/bin` 不在 PATH 时安装器会打印需追加的那一行。从源码安装：`go install github.com/Aruing/Aruing/cmd/aruing@latest`（v0.1.0 tag 后生效）或 `make build`。
+`~/.aruing/bin` 不在 PATH 时安装器会打印需追加的那一行。从源码安装：`go install github.com/Aruing/Aruing/cmd/aruing@latest` 或 `make build`。
 
 后续升级用 `aruing update`（自 GitHub Releases 自更新，带校验和验证）。npm 安装的请用 `npm update -g aruing`。
 

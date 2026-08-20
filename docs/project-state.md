@@ -1,12 +1,12 @@
 # 项目当前状态
 
-> 最后更新：2026-08-18（**`0.1.0-beta21` 已归档**：#92 TUI 留白统一与称呼可配。**下一项 `0.1.0-beta22`**（发布管线与多渠道分发）；0.1.0 发布在 beta22 完成后执行）
+> 最后更新：2026-08-20（**`0.1.0` 已正式发布**（v0.1.0 tag，stable 直链/install/update 真机验收 7/7）；`0.1.0-beta22` 已完成并归档。**版本间窗口**：下一版本远景待维护者建立，近期候选见「下一步」）
 
 ## 当前阶段
 
-**版本 `0.1.0` / 可追问的诊断助手**（进行中）：版本远景见笔记 `arui-note/aruing/plan/version/0.1.0.md`。
+**`0.1.0` / 可追问的诊断助手：✅ 已发布**（2026-08-20，v0.1.0 tag）。版本文档已退役至笔记 `plan/archive/version/`。发布管线（beta22）首次实战闭环：production 分支模型 + tag 驱动 GoReleaser 发版 + 一行安装（curl/irm）+ `aruing connect` 配置向导 + `aruing update` 自更新 + `go install github.com/Aruing/Aruing/cmd/aruing@v0.1.0` 渠道。
 
-**`0.1.0-beta22` / 发布管线与多渠道分发** ⏳ 进行中（维护者 2026-08-18 定向）：分支模型（main → production，PR 触发全量发布检查）+ tag 驱动 release workflow（5 平台产物挂 GitHub Release：darwin amd64/arm64、linux amd64/arm64、windows amd64）+ npm 平台子包（主包 + 5 个 `aruing-<os>-<arch>`）+ `aruing update` 自更新 + README 一行安装命令。发布（打 `v0.1.0` tag + 版本收尾）在本里程碑完成后执行，发布即管线首次真实执行。plan 在笔记 `plan/0.1.0-beta22/`。
+**`0.1.0-beta22` / 发布管线与多渠道分发** ✅ 完成并归档（2026-08-20；#94–#106）：production 分支模型（merge-only + 11 项 status checks 分支保护）+ release-check（5 平台交叉编译 + 三系真机冒烟）+ GoReleaser tag 发版（draft → 人工 publish）+ install.sh/ps1（stable 直链免限流 + sha256 单行比对）+ aruing connect（向导/连通测试/原子写盘）+ aruing update（minio/selfupdate + 版本方向防降级 + npm 来源检测）。v0.1.0-rc1 演练 + v0.1.0 正式发布均全链验收。7 轮 pr-agent 评审（openpgp 换库 / 压缩包解包 / 降级路径 / 302 取 tag / TOCTOU 等）。npm 平台子包经维护者决策转发布后补做。plan 在 `plan/archive/0.1.0-beta22/`。
 
 **`0.1.0-beta21` / TUI 留白统一与称呼可配** ✅ 完成并归档（2026-08-18；#92）：块间距从 lipgloss 样式项剥离为 spacing 显式值（根治 Render 块级 margin 与手动空行双重叠加；显式 0 合法），默认视觉基线 = 输入与 spinner/回复间恰 1 空行、轮间分割线两侧各恰 1 空行；默认消息无「你 / aruing」前缀，主题 labels 开关（默认关）开启后称呼独立一行 + 换行 + 内容；TurnProgress 协调器修复 spinner 与编排进度行同屏踩踏（beta15 起遗留：进度行落屏前清 spinner、落后重画到最新行下方）。YAML 面 `styles.<role>.margin` 不变（beta20 主题文件兼容）；core / agent / session / config 零改。收尾 self-check：静态链全绿 + 四场景 smoke 全 ok（log-time-window / svc-wrong-selector 两场景 attention 为环境网络抖动与 expect 口径，非产品回归）。plan 在笔记 `plan/archive/0.1.0-beta21/`。
 
@@ -84,13 +84,14 @@
 | beta19 | 调查阶段挂起（investigate clarify） | ✅ | #80 `Plan.Clarify` + `InvestigateState` 种子化 + `Resume` 按 Stage 派发（保留进度续跑）；挂起快照携带侦察产物；session/Tower/CLI 零改 |
 | beta20 | 主题 YAML 完整化（TUI L3 收尾） | ✅ | #82 `tui.theme_file` 部分覆盖 + 全样式项 + 示例文件；根因修复 LoadFile 漏拷 TUI 段（beta8 起潜伏）；#20 全量兑现 |
 | beta21 | TUI 留白统一与称呼可配 | ✅ | #92 spacing 归一（margin 剥离样式项）+ labels 称呼开关（默认关）+ spinner 归入助手块；默认无称呼前缀；TurnProgress 修复 spinner 与进度行同屏踩踏 |
-| beta22 | 发布管线与多渠道分发 | ⏳ | 分支模型 main→production + tag 驱动 release workflow + npm 平台子包 + `aruing update`；完成后执行 0.1.0 发布 |
+| beta22 | 发布管线与多渠道分发 | ✅ | #94–#106；分支模型 + GoReleaser 发版 + 安装脚本 + connect + update；**v0.1.0 已发布**（7 项真机验收）；npm 子包遗留转 0.2.0 候选 1 |
 | beta22-1 | 版本注入（ldflags） | ✅ | `var version/commit/date`（源码默认 dev）+ Makefile LDFLAGS；`make version` 改为构建后跑；version 输出三行（版本/commit/构建时间） |
 | beta22-2 | 模块路径替换 | ✅ | `aruing` → `github.com/Aruing/Aruing`（go.mod + 70 文件 152 行 import，纯机械）；`go install` 渠道随 v0.1.0 tag 生效 |
 | beta22-3 | production 分支 + 发布检查 | ✅ | #96/#98 release-check（PR to production：5 平台交叉编译 + 三系真机冒烟，macOS SIGPIPE 修复）+ #97 首个同步 PR 15 项 checks 全绿合并；分支保护（ruleset merge-only + 11 项 status checks）已配 |
 | beta22-4 | GoReleaser + release workflow | ✅ | #99/#100 + **v0.1.0-rc1 全链真跑验收**（tag 校验→5 平台构建→draft Release→publish；实测：releases/latest 不含 pre-release、checksums 按规范名匹配） |
 | beta22-5 | 安装脚本 + README 安装段 | ✅ | #101；stable 直链优先（零 API 免限流）+ 单行校验和比对 + 双语 Install 段；macOS 真装验证 |
-| beta22-6 | aruing connect 配置向导 | ⏳ | 交互式 LLM 三件套向导 + 连通测试（失败不落盘）+ 非交互模式 + 已有配置确认覆盖仅 llm 段；错误信息指引 connect；远期多渠道演进空间在 schema 层 |
+| beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
+| beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
@@ -99,16 +100,17 @@
 
 ## 下一步
 
-**下一项**：**`0.1.0-beta22` 步骤 3 收尾：production 分支建立 + 保护规则配置**（release-check workflow 交付后，从 main 建 production 分支；维护者在 GitHub 配分支保护：require PR + 全绿 checks + 禁 squash/rebase）。后续步骤：GoReleaser + release workflow → 安装脚本 → npm 子包 → `aruing update`。plan 在笔记 `plan/0.1.0-beta22/`。完成后执行 0.1.0 发布（打 `v0.1.0` tag + 版本收尾，发布即管线首次真实执行）。
+**下一项**：未定——版本间窗口，0.2.0 远景待维护者建立（近期最顺手的一项：npm 平台子包，beta22 唯一遗留，见候选 1）。
 
-**0.1.0 候选**（发布后转入 0.2.0 远景排序）：
+**0.2.0 候选**（远景排序待维护者）：
 
-1. ~~**logs / events 时间游标**~~ ✅ beta17 已交付（#78）
-2. **磁盘持久化 / 超巨输出页式**（0.2+ 或重开远景；arc《TUI》缺口同批解）
+1. **npm 平台子包**（beta22 遗留，发布后补做；维护者需配 `NPM_TOKEN` secret + npm 账号登录；`npm i -g aruing` / `npx aruing` 渠道）
+2. **磁盘持久化 / 超巨输出页式**（arc《TUI》缺口同批解）
 3. **TUI 布局可配（L4）**（arc《TUI》Step 2；主题 YAML 已于 beta20 交付）
-4. **流式响应**（arc《流式响应》，0.2+；前端 streamingBuffer 已留位）
+4. **流式响应**（arc《流式响应》；前端 streamingBuffer 已留位）
 5. **`/` 运行时命令（/mode /theme 热切）**（延后项，版本未定）
-6. ~~后续阶段挂起~~ ✅ investigate 已交付（beta19，#80）；parse 阶段挂起维持不做（无场景驱动）
+
+**发布运维备忘**（0.1.0 起生效）：发布 = main 快照分支 → PR to production（15 项检查）→ merge commit 合并 → production 打 `v*` tag → draft Release 人工 publish；流程固化在 `CONTRIBUTING.md` Releasing 段。用户升级路径：`aruing update`（脚本安装）/ `npm update -g aruing`（npm 安装，待 npm 渠道上线）。
 
 **arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
 
