@@ -42,6 +42,7 @@ Commands:
   version          Print version information
   help             Print this help message
   connect          Interactive wizard: configure LLM (base URL / API key / model)
+  update           Self-update to the latest release (npm installs: npm update -g aruing)
   run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
 
@@ -59,6 +60,7 @@ LLM (required for run/chat; easiest: run "aruing connect"):
 Examples:
   aruing version
   aruing connect
+  aruing update --check
   aruing run --config playground/config.yaml why is demo-api unreachable
   aruing chat hello
   aruing chat --session sess_xxx what about the redis dependency
@@ -89,6 +91,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return nil
 	case "connect":
 		return runConnect(args[1:], os.Stdin, stdout, stderr)
+	case "update":
+		return runUpdate(args[1:], stdout, stderr)
 	case "run":
 		return runRun(args[1:], stdout, stderr)
 	case "chat":
