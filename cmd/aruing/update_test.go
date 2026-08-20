@@ -226,6 +226,8 @@ func TestTagFromURL(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"/Aruing/Aruing/releases/download/v0.1.0/aruing_darwin_arm64.tar.gz", "v0.1.0"},
 		{"/releases/download/v10.20.30-rc1/x.zip", "v10.20.30-rc1"},
+		{"https://github.com/Aruing/Aruing/releases/download/v0.1.0/aruing_darwin_arm64.tar.gz", "v0.1.0"},
+		{"https://release-assets.githubusercontent.com/github-production-release-asset/1286/ae75", ""},
 		{"/some/other/path", ""},
 		{"", ""},
 	}

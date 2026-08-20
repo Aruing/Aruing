@@ -81,19 +81,27 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 
 	fmt.Fprintf(stdout, "current: %s\n", version)
 
-	// stable 直链探测：与 install.sh 同策略。HEAD 探测产物在不在，避免下载体
-	// 只为判存在；产物名规则与 .goreleaser.yaml 命名契约一致
+	// stable 直链探测：与 install.sh 同策略。HEAD 不跟随重定向——
+	// latest/download 的第一跳 302 Location 就是 releases/download/<tag>/<file>
+	// （含 tag）；跟随到底会落在 release-assets.../<uuid>，tag 信息丢失
+	// （pr-agent 评审修复）。产物名规则与 .goreleaser.yaml 命名契约一致
 	asset := updateAssetName()
-	probe := http.Client{Timeout: 30 * time.Second}
+	probe := http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodHead, updateStableBase+"/"+asset, nil)
 	resp, err := probe.Do(req)
 	if err != nil {
 		return fmt.Errorf("probe latest release (network?): %w", err)
 	}
 	defer resp.Body.Close()
-	// HEAD 跟随后 resp.Request.URL 已是最终下载地址（含 tag）：
-	// releases/download/v0.1.0/...——从 URL 提取远端版本，零 API 调用
-	remoteVersion := tagFromURL(resp.Request.URL.Path)
+	remoteVersion := ""
+	if loc := resp.Header.Get("Location"); loc != "" {
+		remoteVersion = tagFromURL(loc)
+	}
 
 	// 防线 3：stable 不存在（仓库尚无正式版）或已是最新——静默退出
 	// 比较依据：直链的 CDN 命中会带出不可预测的最终 URL，改用 sha256 对照：
@@ -132,9 +140,16 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// 从 releases/download/<tag>/<file> 路径提取 tag 段；无匹配返回空串
-func tagFromURL(urlPath string) string {
-	parts := strings.Split(strings.Trim(urlPath, "/"), "/")
+// 从 releases/download/<tag>/<file> 形态（完整 URL 或纯路径）提取 tag；无匹配返回空串
+func tagFromURL(ref string) string {
+	// 完整 URL 先剥协议与主机
+	if i := strings.Index(ref, "://"); i >= 0 {
+		ref = ref[i+3:]
+		if j := strings.Index(ref, "/"); j >= 0 {
+			ref = ref[j:]
+		}
+	}
+	parts := strings.Split(strings.Trim(ref, "/"), "/")
 	for i, p := range parts {
 		if p == "download" && i+1 < len(parts) {
 			return parts[i+1]
