@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.
 irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | iex
 ```
 
-If `~/.aruing/bin` is not on your `PATH`, the installer prints the exact line to add. From source: `go install github.com/Aruing/Aruing/cmd/aruing@latest` or `make build`.
+If `~/.aruing/bin` is not on your `PATH`, the installer prints the exact line to add. From source: `go install github.com/Aruing/Aruing/cmd/aruing@latest` or `make build` (source builds report `version dev` and cannot self-update; prefer the install script for upgradable installs).
 
 Upgrade later with `aruing update` (self-update from GitHub Releases, checksum-verified). Binaries installed via npm should use `npm update -g aruing`.
 
