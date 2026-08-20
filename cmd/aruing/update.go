@@ -103,14 +103,16 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 		remoteVersion = tagFromURL(loc)
 	}
 
-	// 防线 3：stable 不存在（仓库尚无正式版）或已是最新——静默退出
-	// 比较依据：直链的 CDN 命中会带出不可预测的最终 URL，改用 sha256 对照：
-	// 本地二进制哈希与远端产物哈希一致即已是最新（内容级比较，最诚实）
+	// 探测语义（HEAD 不跟随重定向，状态码全集）：
+	//   404        → 仓库尚无正式版 stable（rc 窗口期），静默退出
+	//   302 + tag  → 正常：latest/download 重定向到 releases/download/<tag>/<file>
+	//   302 无 tag → Location 形态意外，按不可证明更新处理（不动作）
+	//   其他       → 网关/CDN 异常，明确报错
 	if resp.StatusCode == http.StatusNotFound {
 		fmt.Fprintln(stdout, "already up to date (no stable release)")
 		return nil
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusFound {
 		return fmt.Errorf("probe latest release: unexpected status %d", resp.StatusCode)
 	}
 

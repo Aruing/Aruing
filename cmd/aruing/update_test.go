@@ -266,3 +266,27 @@ func TestNewerVersion(t *testing.T) {
 		}
 	}
 }
+
+// 真实 stable 直链的 302 形态验证（借 cli/cli 仓库，与 latest/download 同构）：
+// HEAD 不跟随时状态码必须是 302、Location 含 releases/download/<tag>——
+// 这是 runUpdate 探测分支的契约（修复"只接受 200"的回归后再也不许漂移）
+func TestStableLinkRedirectShape(t *testing.T) {
+	if os.Getenv("ARUING_UPDATE_E2E") != "1" {
+		t.Skip("set ARUING_UPDATE_E2E=1 to run the live redirect shape test")
+	}
+	client := http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	req, _ := http.NewRequest("HEAD", "https://github.com/cli/cli/releases/latest/download/gh_2.0.0_macOS_arm64.zip", nil)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("want 302, got %d", resp.StatusCode)
+	}
+	if tagFromURL(resp.Header.Get("Location")) == "" {
+		t.Fatalf("Location should contain tag: %s", resp.Header.Get("Location"))
+	}
+}
