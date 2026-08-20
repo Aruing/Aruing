@@ -95,6 +95,10 @@ func TestChecksumFor(t *testing.T) {
 	if got := checksumFor("ddd444 *aruing_windows_amd64.zip\n", "aruing_windows_amd64.zip"); got != "ddd444" {
 		t.Fatalf("* prefix form = %q, want ddd444", got)
 	}
+	// 三字段形态（hash 2-space file）也应命中：按最后一个空白分隔字段匹配
+	if got := checksumFor("eee555  aruing_linux_amd64.tar.gz\n", "aruing_linux_amd64.tar.gz"); got != "eee555" {
+		t.Fatalf("double-space form = %q, want eee555", got)
+	}
 }
 
 // 平台产物名拼接：与 .goreleaser.yaml 命名契约一致
