@@ -88,7 +88,9 @@
 | beta22-1 | 版本注入（ldflags） | ✅ | `var version/commit/date`（源码默认 dev）+ Makefile LDFLAGS；`make version` 改为构建后跑；version 输出三行（版本/commit/构建时间） |
 | beta22-2 | 模块路径替换 | ✅ | `aruing` → `github.com/Aruing/Aruing`（go.mod + 70 文件 152 行 import，纯机械）；`go install` 渠道随 v0.1.0 tag 生效 |
 | beta22-3 | production 分支 + 发布检查 | ✅ | #96/#98 release-check（PR to production：5 平台交叉编译 + 三系真机冒烟，macOS SIGPIPE 修复）+ #97 首个同步 PR 15 项 checks 全绿合并；分支保护（ruleset merge-only + 11 项 status checks）已配 |
-| beta22-4 | GoReleaser + release workflow | ⏳ | `.goreleaser.yaml`（5 平台 + checksums + draft release）+ `release.yml`（tag 校验在 production 上 → 构建 → 附件）；rc1 端到端验证待做 |
+| beta22-4 | GoReleaser + release workflow | ✅ | #99/#100 + **v0.1.0-rc1 全链真跑验收**（tag 校验→5 平台构建→draft Release→publish；实测：releases/latest 不含 pre-release、checksums 按规范名匹配） |
+| beta22-5 | 安装脚本 + README 安装段 | ✅ | #101；stable 直链优先（零 API 免限流）+ 单行校验和比对 + 双语 Install 段；macOS 真装验证 |
+| beta22-6 | aruing connect 配置向导 | ⏳ | 交互式 LLM 三件套向导 + 连通测试（失败不落盘）+ 非交互模式 + 已有配置确认覆盖仅 llm 段；错误信息指引 connect；远期多渠道演进空间在 schema 层 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。

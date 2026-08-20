@@ -53,6 +53,30 @@ Run → Query → Target → Hypothesis → Task → Evidence → Verdict → Re
 | LLM (OpenAI-compatible) | any base URL + model; required by `run` / `chat` |
 | Docker + kind | optional — only for the reproducible fault scenarios |
 
+## Install
+
+One-liners (installs the latest release to `~/.aruing/bin`, checksum-verified):
+
+```bash
+# macOS / Linux
+curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell) — experimental: core commands verified; interactive `chat` TUI not yet validated on real Windows terminals
+irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | iex
+```
+
+If `~/.aruing/bin` is not on your `PATH`, the installer prints the exact line to add. From source: `go install github.com/Aruing/Aruing/cmd/aruing@latest` (once v0.1.0 is tagged) or `make build`.
+
+Upgrade later with `aruing update` (self-update from GitHub Releases, checksum-verified). Binaries installed via npm should use `npm update -g aruing`.
+
+First run? Configure your LLM with the interactive wizard (writes the user-level config file, connectivity-tested before saving):
+
+```bash
+aruing connect
+```
+
 ## Quick start
 
 ```bash

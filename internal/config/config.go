@@ -175,7 +175,7 @@ func ValidateLLM(cfg Config) error {
 	if cfg.LLM.Model == "" {
 		missing = append(missing, "llm.model / ARUING_LLM_MODEL")
 	}
-	return fmt.Errorf("LLM configuration incomplete: missing %s (config file, ARUING_CONFIG, or env; see aruing.example.yaml)", strings.Join(missing, ", "))
+	return fmt.Errorf("LLM configuration incomplete: missing %s — run \"aruing connect\" to configure interactively, or set config file / ARUING_CONFIG / env (see aruing.example.yaml)", strings.Join(missing, ", "))
 }
 
 // 解析布尔环境变量；空或非布尔值返回否，避免误开执行这类高自由度动作
