@@ -157,3 +157,23 @@ func TestSaveLLMTightensPermissions(t *testing.T) {
 		t.Fatalf("want 0600 after save, got %o", fi.Mode().Perm())
 	}
 }
+
+// 原子写验证：保存后旧内容被完整替换、无临时文件残留（rename 方案的直接可观测面）
+func TestSaveLLMAtomicNoTempResidue(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := SaveLLM(path, LLM{BaseURL: "u", APIKey: "k", Model: "m"}); err != nil {
+		t.Fatalf("SaveLLM: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "config.yaml" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("temp residue or missing target: %v", names)
+	}
+}

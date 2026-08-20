@@ -106,7 +106,8 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 	// 探测语义（HEAD 不跟随重定向，状态码全集）：
 	//   404        → 仓库尚无正式版 stable（rc 窗口期），静默退出
 	//   302 + tag  → 正常：latest/download 重定向到 releases/download/<tag>/<file>
-	//   302 无 tag → Location 形态意外，按不可证明更新处理（不动作）
+	//   302 无 tag → Location 形态意外，明确报错而非静默"已最新"
+	//                （畸形重定向应暴露，不该被"already up to date"掩盖）
 	//   其他       → 网关/CDN 异常，明确报错
 	if resp.StatusCode == http.StatusNotFound {
 		fmt.Fprintln(stdout, "already up to date (no stable release)")
@@ -114,6 +115,9 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 	}
 	if resp.StatusCode != http.StatusFound {
 		return fmt.Errorf("probe latest release: unexpected status %d", resp.StatusCode)
+	}
+	if remoteVersion == "" {
+		return fmt.Errorf("latest release redirected without a recognizable tag (location: %s)", resp.Header.Get("Location"))
 	}
 
 	if *checkOnly {
@@ -322,7 +326,7 @@ func extractBinary(archive []byte) ([]byte, error) {
 func checksumFor(checksums, asset string) string {
 	for _, line := range strings.Split(checksums, "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == asset {
+		if len(fields) >= 2 && strings.TrimPrefix(fields[len(fields)-1], "*") == asset {
 			return fields[0]
 		}
 	}
