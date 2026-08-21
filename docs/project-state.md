@@ -1,8 +1,10 @@
 # 项目当前状态
 
-> 最后更新：2026-08-20（**`0.1.0` 已正式发布**（v0.1.0 tag，stable 直链/install/update 真机验收 7/7）；`0.1.0-beta22` 已完成并归档。**版本间窗口**：下一版本远景待维护者建立，近期候选见「下一步」）
+> 最后更新：2026-08-21（**0.2.0 版本远景已定稿**（笔记 `plan/version/0.2.0.md`）：完备不脆弱的证据型诊断助手；节奏改小版本递增 0.1.x，持久化最先。`0.1.0` 已发布（v0.1.0 tag，2026-08-20））
 
 ## 当前阶段
+
+**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 远景已定稿**（2026-08-21，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）。三大支柱：持久化（地基）、记忆管理（信任分层记忆 + 按需回灌）、工具 I/O（预算约束下的代表性投影）。**版本节奏**：废止 beta 里程碑，0.1.1 / 0.1.2 … 每个小版本 = 一个可用正式实现（完成即打 tag 发布），0.2.0 收口含全部增量；里程碑归档三层（`archive/0.2.0/0.1.x/`）。首个里程碑 `0.1.1`（持久化 + 超巨输出页式留存）设计待起草。
 
 **`0.1.0` / 可追问的诊断助手：✅ 已发布**（2026-08-20，v0.1.0 tag）。版本文档已退役至笔记 `plan/archive/0.1.0/0.1.0.md`（版本归档总览）。发布管线（beta22）首次实战闭环：production 分支模型 + tag 驱动 GoReleaser 发版 + 一行安装（curl/irm）+ `aruing connect` 配置向导 + `aruing update` 自更新 + `go install github.com/Aruing/Aruing/cmd/aruing@v0.1.0` 渠道。
 
@@ -100,24 +102,25 @@
 
 ## 下一步
 
-**下一项**：未定——版本间窗口，0.2.0 远景待维护者建立（近期最顺手的一项：npm 平台子包，beta22 唯一遗留，见候选 1）。
+**下一项**：起草 `0.1.1`（持久化）里程碑设计——Session / Message / RunLedger / Evidence / 挂起 Run 落盘，重启全量恢复；同批解超巨输出页式留存（超 `MaxStdoutBytes` 落盘分页，arc《工具输出导航》遗留缺口）。动 Store / 持久化时对照 architecture #15–#17 与 2026-7-22 §4。
 
-**0.2.0 候选**（远景排序待维护者）：
+**0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
 
-1. **npm 平台子包**（beta22 遗留，发布后补做；维护者需配 `NPM_TOKEN` secret + npm 账号登录；`npm i -g aruing` / `npx aruing` 渠道）
-2. **磁盘持久化 / 超巨输出页式**（arc《TUI》缺口同批解）
-3. **TUI 布局可配（L4）**（arc《TUI》Step 2；主题 YAML 已于 beta20 交付）
-4. **流式响应**（arc《流式响应》；前端 streamingBuffer 已留位）
-5. **`/` 运行时命令（/mode /theme 热切）**（延后项，版本未定）
+1. **记忆管理**：信任分层记忆 + 按需回灌（beta7 回灌雏形升格），长会话跨压缩追问不失忆
+2. **工具 I/O**：预算约束代表性投影 + map-reduce 全覆盖扫描（arc Step 4）
+3. **benchmark 升格**：kind 场景 harness → 可复现评测基准
+4. **产品完备（延后）**：流式响应 / TUI L4 / npm 子包 / `/` 运行时命令
+
+**版本节奏**（0.2.0 起）：废止 beta 里程碑；0.1.1 / 0.1.2 … 每个小版本 = 一个可用正式实现，完成即打 tag 发布；0.2.0 收口（含全部增量）；里程碑归档三层（`archive/0.2.0/0.1.x/`）。
 
 **发布运维备忘**（0.1.0 起生效）：发布 = main 快照分支 → PR to production（15 项检查）→ merge commit 合并 → production 打 `v*` tag → draft Release 人工 publish；流程固化在 `CONTRIBUTING.md` Releasing 段。用户升级路径：`aruing update`（脚本安装）/ `npm update -g aruing`（npm 安装，待 npm 渠道上线）。
 
 **arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
 
 - Step **3a** 大表中段可读 → **`0.1.0-beta12`（done，#66）**
-- Step **3b** 证据导航 / 巨输出载波 → **`0.1.0-beta13`（done 主段，#67+#68）**；非表格输出的页式内存变体（行级兜底）→ **`0.1.0-beta16`（done，#77）**；logs 时间游标 → **`0.1.0-beta17`（done，#78）**；落盘页式（超 `MaxStdoutBytes` 留存）仍 0.2+
+- Step **3b** 证据导航 / 巨输出载波 → **`0.1.0-beta13`（done 主段，#67+#68）**；非表格输出的页式内存变体（行级兜底）→ **`0.1.0-beta16`（done，#77）**；logs 时间游标 → **`0.1.0-beta17`（done，#78）**；落盘页式（超 `MaxStdoutBytes` 留存）→ `0.1.1`（随持久化里程碑）
 - Step 4 map-reduce（0.2+）
-- Step 5 子 agent 分治（0.2+，#15/#17）
+- Step 5 子 agent 分治（0.2+，看余量再定，#15/#17）
 
 **已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）、场景 harness（beta10）、结构化工具输出 L0–L2（beta11）、L3 腿 A 大表中段可读（beta12）、L3 腿 B 普适证据导航（beta13）、非表格行级分页（beta16）、logs 时间游标（beta17）。
 
