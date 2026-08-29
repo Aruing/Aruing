@@ -95,6 +95,7 @@
 | beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
+| 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ⏳ | `eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ⏳ | `internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
 
@@ -104,7 +105,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.1` 步骤 3（bench + 主实验）——`make bench` 场景 × 方法 × 重复遍历 + CSV 汇总 + 出图脚本（Python + matplotlib）；C4 LLM 重排对照臂（k8s 可选注入 reranker，默认 nil 不装配）；「贪心 vs 随机选择」「PCA/T² vs 简单统计量」两对照变体；创新点二主实验数据落盘（主对比 + 消融 + 位置 × 命中率图，机械判分零 LLM 成本为主）。步骤 2（评测基建 A，见工作单元 0.1.1-2）已交付待合并；排序依据见笔记 `plan/version/0.2.0.md`。
+**下一项**：`0.1.1` 步骤 4（map-reduce 两遍分片）——Pass 1 全局列频次扫描 → 分片独立投影（片内异常判定用全局基准）→ Reduce 归并；时间紧可裁决后移 0.1.4。其后收口：C4 / 下游诊断 LLM 端到端矩阵（维护者环境或授权跑，`run --eval-json` × 方法 × 3 重复）→ 完成标志全绿 → tag `v0.1.1` → 归档 `plan/archive/0.2.0/0.1.1/`。机械主实验数据已随步骤 3 产出（2400 单元 CSV + 位置 × 命中率图 + 消融表）。排序依据见笔记 `plan/version/0.2.0.md`。
 
 **0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
 

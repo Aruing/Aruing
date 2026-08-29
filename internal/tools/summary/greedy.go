@@ -36,6 +36,9 @@ type GreedyOptions struct {
 	AnomalyOff bool
 	// 覆盖项置 0（只异常对照）
 	CoverageOff bool
+	// 简单统计量消融臂（bench 注入，不进 config）：异常分不用 PCA/T²，
+	// 用行长 |z| + 非常规取值计数（见 SimpleStatScores）；证明多元统计必要性的对照
+	SimpleStat bool
 }
 
 // GreedyPickResult 贪心投影的选中结果；索引均对齐输入 rows
@@ -234,20 +237,24 @@ func (s *greedySolver) solveLazy(cands []int) (order []int, gains []float64, run
 	return order, gains, runes
 }
 
-// solveNaive 朴素贪心：每轮全扫候选取真实收益最大（并列取行号最小）
+// solveNaive 朴素贪心：每轮全扫候选取真实键值最大（并列取行号最小）
+// 键值与 lazy 同口径：基数臂按收益、knapsack 臂按收益/行长（heapKey），否则两驱动选择规则不一致，
+// 等价性测试会数据依赖地闪挂
 // O(N·k)，只作 lazy 等价性测试的基准，产品路径不调用
 func (s *greedySolver) solveNaive(cands []int) (order []int, gains []float64, runes int) {
 	remaining := append([]int(nil), cands...)
 	sort.Ints(remaining)
 	for len(order) < s.limit && len(remaining) > 0 {
 		best := -1
-		var bestG float64
+		var bestKey float64
+		var bestGain float64
 		for _, i := range remaining {
-			if g := s.marginal(i); best < 0 || g > bestG {
-				best, bestG = i, g
+			g := s.marginal(i)
+			if key := s.heapKey(i, g); best < 0 || key > bestKey {
+				best, bestKey, bestGain = i, key, g
 			}
 		}
-		if bestG <= 0 {
+		if bestKey <= 0 {
 			break
 		}
 		remaining = removeInt(remaining, best)
@@ -256,7 +263,7 @@ func (s *greedySolver) solveNaive(cands []int) (order []int, gains []float64, ru
 			continue
 		}
 		order = append(order, best)
-		gains = append(gains, bestG)
+		gains = append(gains, bestGain)
 		runes += s.cost[best]
 		s.take(best)
 	}
@@ -338,7 +345,14 @@ func GreedyPick(rows [][]string, hists []map[string]int, opts GreedyOptions) Gre
 	}
 	var anom []float64
 	if !opts.AnomalyOff {
-		if scores := AnomalyScores(rows, sigCols, hists); scores != nil {
+		// 异常行分：默认 PCA T²（平方口径）；消融臂换简单统计量（不进 config，bench 注入）
+		var scores []float64
+		if opts.SimpleStat {
+			scores = SimpleStatScores(rows, sigCols, hists)
+		} else {
+			scores = AnomalyScores(rows, sigCols, hists)
+		}
+		if scores != nil {
 			var sum float64
 			for _, v := range scores {
 				sum += v
@@ -388,4 +402,49 @@ func GreedyPick(rows [][]string, hists []map[string]int, opts GreedyOptions) Gre
 	sort.Ints(res.Selected)
 	res.TotalRunes = anchorRunes + runes
 	return res
+}
+
+// simpleStatRareFrac 非常规取值的频次阈值：列内出现频次低于行数的该比例视为非常规
+const simpleStatRareFrac = 0.05
+
+// SimpleStatScores 简单统计量异常行分（消融对照臂）：行长 |z| + 非常规取值计数
+// 行长按渲染口径的总体标准差标准化；某单元格取值在其显著列的频次低于 5% 行数记一次非常规。
+// 与 PCA/T² 对照：只用一元边际统计，看不见多列组合异常——证明多元统计必要性的基线
+// 纯机械、确定性、无 PCA 依赖（小表也可算）；空表返回 nil
+func SimpleStatScores(rows [][]string, sigCols []int, hists []map[string]int) []float64 {
+	n := len(rows)
+	if n == 0 {
+		return nil
+	}
+	costs := make([]float64, n)
+	var sum float64
+	for i, r := range rows {
+		costs[i] = float64(renderedRowRunes(r))
+		sum += costs[i]
+	}
+	mean := sum / float64(n)
+	var ss float64
+	for _, c := range costs {
+		d := c - mean
+		ss += d * d
+	}
+	sd := math.Sqrt(ss / float64(n)) // 总体口径，与 T² 的方差口径一致
+	scores := make([]float64, n)
+	for i, r := range rows {
+		z := 0.0
+		if sd > 0 {
+			z = math.Abs(costs[i]-mean) / sd
+		}
+		rare := 0
+		for _, c := range sigCols {
+			if c >= len(r) || c >= len(hists) {
+				continue
+			}
+			if float64(hists[c][r[c]]) < simpleStatRareFrac*float64(n) {
+				rare++
+			}
+		}
+		scores[i] = z + float64(rare)
+	}
+	return scores
 }
