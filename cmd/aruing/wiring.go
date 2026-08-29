@@ -55,9 +55,10 @@ type tooling struct {
 }
 
 // 组装工具注册表与调度器；集群命令可用时注册集群工具与 evidence.read
-func buildTooling(toolsCfg config.Tools) (tooling, error) {
+// llmClient 可为 nil；仅 tools.projection.method=llm-rerank 时必需（构造 C4 重排器，实验专用）
+func buildTooling(toolsCfg config.Tools, llmClient llm.Client) (tooling, error) {
 	registry := tools.NewRegistry()
-	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg)
+	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg, llmClient)
 	if err != nil {
 		return tooling{}, err
 	}
@@ -86,7 +87,9 @@ func buildTooling(toolsCfg config.Tools) (tooling, error) {
 // 当集群命令可用时注册后端级集群工具；不可用则跳过
 // 路径优先使用显式配置，否则在系统路径中查找默认集群命令
 // MaxStdoutBytes 零值时由 k8s 包默认（1MiB）
-func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, error) {
+// method=llm-rerank 时必须提供 llm 客户端构造重排器（C4 对照臂）：
+// 启动期明确报错，不静默回退机械方法（#18 精神）
+func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient llm.Client) (bool, error) {
 	path := toolsCfg.KubectlPath
 	if path == "" {
 		looked, err := exec.LookPath("kubectl")
@@ -100,17 +103,24 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, er
 	if err != nil {
 		return false, fmt.Errorf("tools.projection.method: %w", err)
 	}
+	projOpts := summary.RenderOptions{
+		Method:        projMethod,
+		BudgetRunes:   toolsCfg.Projection.Budget,
+		Lambda:        toolsCfg.Projection.Lambda,
+		UniformWeight: toolsCfg.Projection.UniformWeight,
+	}
+	if projMethod == summary.MethodLLMRerank {
+		if llmClient == nil {
+			return false, fmt.Errorf("tools.projection.method: llm-rerank requires LLM (configure llm.* or ARUING_LLM_*); or pick a mechanical method")
+		}
+		projOpts.Rerank = k8s.NewReranker(llmClient)
+	}
 	tool, err := k8s.New(k8s.Config{
 		KubectlPath:    path,
 		DefaultTimeout: 30 * time.Second,
 		MaxTimeout:     2 * time.Minute,
 		MaxStdoutBytes: toolsCfg.MaxStdoutBytes,
-		Projection: summary.RenderOptions{
-			Method:        projMethod,
-			BudgetRunes:   toolsCfg.Projection.Budget,
-			Lambda:        toolsCfg.Projection.Lambda,
-			UniformWeight: toolsCfg.Projection.UniformWeight,
-		},
+		Projection:     projOpts,
 	})
 	if err != nil {
 		return false, nil
@@ -131,15 +141,15 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 		return nil, nil, err
 	}
 
-	toolsGraph, err := buildTooling(cfg.Tools)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	client, err := llm.NewClient(cfg.LLM.ToClientConfig())
 	if err != nil {
 		return nil, nil, fmt.Errorf("build llm client: %w", err)
 	}
+	toolsGraph, err := buildTooling(cfg.Tools, client)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	roles, err := buildLLMRoles(client, factory, toolsGraph.registry.Specs())
 	if err != nil {
 		return nil, nil, err
@@ -170,15 +180,15 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 		return nil, fmt.Errorf("session stack requires a factory")
 	}
 
-	toolsGraph, err := buildTooling(cfg.Tools)
-	if err != nil {
-		return nil, err
-	}
-
 	client, err := llm.NewClient(cfg.LLM.ToClientConfig())
 	if err != nil {
 		return nil, fmt.Errorf("build llm client: %w", err)
 	}
+	toolsGraph, err := buildTooling(cfg.Tools, client)
+	if err != nil {
+		return nil, err
+	}
+
 	roles, err := buildLLMRoles(client, factory, toolsGraph.registry.Specs())
 	if err != nil {
 		return nil, err
