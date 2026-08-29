@@ -3,3 +3,9 @@ kind_cluster_name: aruing-sc-log-time-window
 namespace: demo
 # 给人看的坏态提示；脚本不解析本文件
 notes: "busybox 每 tick 打一行日志后 exit 1 → CrashLoopBackOff 反复重启；日志随重启累积且各重启周期时间戳不同，供 evidence.read since/until 时间窗切片验收"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
+ground_truth:
+  resource_type: deployment
+  resource_name: demo-api
+  namespace: demo
+  fault_type: crashloop

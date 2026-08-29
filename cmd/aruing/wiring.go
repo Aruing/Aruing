@@ -122,26 +122,27 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, er
 }
 
 // 组装编排器：必须大模型齐全，无假实现回退
-func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, error) {
+// 第二返回值为可选的用量跟踪器（llm.UsageTracker）；适配器未实现时为 nil，评测记录里 token 段为空
+func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, llm.UsageTracker, error) {
 	if factory == nil {
-		return nil, fmt.Errorf("orchestrator requires a factory")
+		return nil, nil, fmt.Errorf("orchestrator requires a factory")
 	}
 	if err := config.ValidateLLM(cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	toolsGraph, err := buildTooling(cfg.Tools)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	client, err := llm.NewClient(cfg.LLM.ToClientConfig())
 	if err != nil {
-		return nil, fmt.Errorf("build llm client: %w", err)
+		return nil, nil, fmt.Errorf("build llm client: %w", err)
 	}
 	roles, err := buildLLMRoles(client, factory, toolsGraph.registry.Specs())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	orch := agent.NewOrchestrator(
@@ -154,7 +155,9 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 		factory,
 	)
 	configureOrchestrator(orch, toolsGraph.reconEnabled, progress)
-	return orch, nil
+	// 具体客户端实现用量记账；按可选接口断言，适配器未实现时安静降级
+	tracker, _ := client.(llm.UsageTracker)
+	return orch, tracker, nil
 }
 
 // 组装多轮对话会话栈：内存存储、诊断账本与基线塔
@@ -194,7 +197,7 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 
 	ledger := store.NewMemoryRunLedger()
 	tower, err := agent.NewTowerResponder(
-		client,
+		llm.NewLabelingClient(client, "tower"),
 		factory,
 		orch,
 		ledger,
@@ -213,24 +216,25 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 }
 
 // 用大模型客户端组装五角色；工具规格与调度器同源
+// 每个角色注入带自己标签的客户端包装（token 按角色聚合，见 llm.LabelingClient）；角色自身不感知
 func buildLLMRoles(client llm.Client, factory *core.Factory, specs []tools.ToolSpec) (orchestratorRoles, error) {
-	parser, err := agent.NewLLMParser(client, factory)
+	parser, err := agent.NewLLMParser(llm.NewLabelingClient(client, "parser"), factory)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm parser: %w", err)
 	}
-	resolver, err := agent.NewLLMResolver(client, specs)
+	resolver, err := agent.NewLLMResolver(llm.NewLabelingClient(client, "resolver"), specs)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm resolver: %w", err)
 	}
-	planner, err := agent.NewLLMPlanner(client, factory, specs)
+	planner, err := agent.NewLLMPlanner(llm.NewLabelingClient(client, "planner"), factory, specs)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm planner: %w", err)
 	}
-	verifier, err := agent.NewLLMVerifier(client, factory)
+	verifier, err := agent.NewLLMVerifier(llm.NewLabelingClient(client, "verifier"), factory)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm verifier: %w", err)
 	}
-	reporter, err := agent.NewLLMReporter(client, factory)
+	reporter, err := agent.NewLLMReporter(llm.NewLabelingClient(client, "reporter"), factory)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm reporter: %w", err)
 	}
