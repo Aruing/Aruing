@@ -23,7 +23,6 @@ func TestLoadFrom(t *testing.T) {
 		"IGNORED":                      "x",
 	}
 	cfg := LoadFrom(func(k string) string { return env[k] })
-
 	if cfg.LLM.BaseURL != "https://example.com/v1" {
 		t.Errorf("BaseURL = %q", cfg.LLM.BaseURL)
 	}
@@ -44,6 +43,32 @@ func TestLoadFrom(t *testing.T) {
 	}
 	if !cfg.LLM.Ready() {
 		t.Error("Ready = false, want true")
+	}
+}
+
+// 投影方法与预算的环境变量解析：方法去空白、预算/λ 数值解析、非法值归零交默认兼底
+func TestLoadFromProjectionEnv(t *testing.T) {
+	env := map[string]string{
+		"ARUING_TOOLS_PROJECTION_METHOD":         " greedy ",
+		"ARUING_TOOLS_PROJECTION_BUDGET":         "2048",
+		"ARUING_TOOLS_PROJECTION_LAMBDA":         "2",
+		"ARUING_TOOLS_PROJECTION_UNIFORM_WEIGHT": "true",
+	}
+	cfg := LoadFrom(func(k string) string { return env[k] })
+	p := cfg.Tools.Projection
+	if p.Method != "greedy" || p.Budget != 2048 || p.Lambda != 2 || !p.UniformWeight {
+		t.Fatalf("投影配置解析错误：%+v", p)
+	}
+
+	// 非法数值归零：方法名校验留给装配层，数值静默回退默认
+	bad := LoadFrom(func(k string) string {
+		if k == "ARUING_TOOLS_PROJECTION_BUDGET" {
+			return "not-a-number"
+		}
+		return ""
+	})
+	if bad.Tools.Projection.Budget != 0 {
+		t.Fatalf("非法预算应归零，got %d", bad.Tools.Projection.Budget)
 	}
 }
 

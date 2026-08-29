@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/Aruing/Aruing/internal/tools/summary"
 )
 
 // 把字符串右补空格到指定列宽，构造列对齐的表格行，模拟 kubectl 默认表格输出
@@ -118,7 +120,7 @@ func TestProjectSummary(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := projectSummary(tt.argv, tt.stdout, tt.stderr, tt.exitCode)
+			got := projectSummary(tt.argv, tt.stdout, tt.stderr, tt.exitCode, summary.RenderOptions{})
 			for _, want := range tt.wantHas {
 				if !strings.Contains(got, want) {
 					t.Errorf("summary missing %q\ngot:\n%s", want, got)
