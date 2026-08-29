@@ -42,10 +42,10 @@ func TestWorkedExampleSvcWrongSelector(t *testing.T) {
 	} {
 		got, gerr := EIG(b, c.act)
 		if gerr != nil {
-			t.Fatalf("EIG(%s): %v", c.act.Name, gerr)
+			t.Fatalf("EIG(%s): %v", c.act.Name(), gerr)
 		}
 		if math.Abs(got-c.want) > 1e-2 {
-			t.Fatalf("EIG(%s) 应 ≈%.2f bit，got %.4f", c.act.Name, c.want, got)
+			t.Fatalf("EIG(%s) 应 ≈%.2f bit，got %.4f", c.act.Name(), c.want, got)
 		}
 	}
 
@@ -344,12 +344,23 @@ func TestNewActionValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tol: %v", err)
 	}
-	if a.D[0][0] != 0.8 || a.D[0][1] != 0.2 {
-		t.Fatalf("行应按和归一，got %v", a.D[0])
+	if m := a.Matrix(); m[0][0] != 0.8 || m[0][1] != 0.2 {
+		t.Fatalf("行应按和归一，got %v", m[0])
 	}
 	// 零成本归一为 1（评分除法防护）
-	if a.Cost != 1 {
-		t.Fatalf("零成本应归一为 1，got %f", a.Cost)
+	if a.Cost() != 1 {
+		t.Fatalf("零成本应归一为 1，got %f", a.Cost())
+	}
+	// NaN / ±Inf 成本归一为 1（NaN > 0 为 false，经非正分支一并归一）
+	for _, c := range []float64{math.NaN(), math.Inf(1), math.Inf(-1), 0, -2} {
+		a, err := NewAction("c", []string{"x"}, [][]float64{{1}}, c)
+		if err != nil || a.Cost() != 1 {
+			t.Fatalf("非法成本 %v 应归一为 1，got %f err=%v", c, a.Cost(), err)
+		}
+	}
+	// 结果名重复：更新会静默错位到首个同名列，构造期拒绝
+	if _, err := NewAction("dup", []string{"x", "x"}, [][]float64{{.5, .5}}, 1); err == nil {
+		t.Fatalf("重复结果名应报错")
 	}
 }
 
@@ -408,26 +419,47 @@ func TestSelectMaxEIGVersusBest(t *testing.T) {
 	}
 }
 
-// 直接构造的 Action 可绕过 NewAction：零/非有限成本在 Select 内归一为 1，
-// 得分不得变 Inf/NaN 导致首动作锁死
-func TestSelectCostGuard(t *testing.T) {
+// 封闭不变量：零值 Action（唯一可能的绕过形态）在全部消费点安全报错，不 panic
+func TestZeroValueActionRejected(t *testing.T) {
 	b, _ := NewUniformBelief(3)
 	good := mustAction(t, "good", []string{"x", "y"}, [][]float64{{.99, .01}, {.01, .99}, {.5, .5}}, 1)
-	// 零值成本 + NaN 成本（直接构造，不经 NewAction）
-	zeroCost := Action{Name: "zero-cost", Outcomes: []string{"x", "y"},
-		D: [][]float64{{.6, .4}, {.4, .6}, {.5, .5}}}
-	nanCost := zeroCost
-	nanCost.Name = "nan-cost"
-	nanCost.Cost = math.NaN()
-	sel, err := Select(b, []Action{zeroCost, nanCost, good})
-	if err != nil {
-		t.Fatalf("select: %v", err)
+	var zero Action
+	if _, err := EIG(b, zero); err == nil {
+		t.Fatalf("零值动作 EIG 应报对齐错误")
 	}
-	if sel.BestScore <= 0 || math.IsInf(sel.BestScore, 0) || math.IsNaN(sel.BestScore) {
-		t.Fatalf("得分应为有限正值，got %+v", sel)
+	if _, _, err := (Options{}).UpdateOutcome(b, zero, "x"); err == nil {
+		t.Fatalf("零值动作更新应报错")
 	}
-	if sel.MaxEIG < 0.5 {
-		t.Fatalf("MaxEIG 应取 good 的高 EIG，got %+v", sel)
+	if _, err := Select(b, []Action{good, zero}); err == nil {
+		t.Fatalf("含零值动作的 Select 应报错")
+	}
+	// 合法集合得分恒为有限正值（成本经构造器归一，无 Inf/NaN 得分路径）
+	sel, err := Select(b, []Action{good})
+	if err != nil || sel.BestScore <= 0 || math.IsInf(sel.BestScore, 0) || math.IsNaN(sel.BestScore) {
+		t.Fatalf("合法集选择得分应为有限正值，got %+v err=%v", sel, err)
+	}
+}
+
+// 强度证据值域校验：方向越界 / 强度非有限明确报错（自扫发现，clamp01 曾放行 NaN）
+func TestStrengthValidation(t *testing.T) {
+	b, _ := NewUniformBelief(2)
+	if _, _, err := (Options{}).UpdateStrength(b, StrengthEvidence{D: []int{2, 0}, S: []float64{1, 0}}); err == nil {
+		t.Fatalf("方向越界（d=2）应报错")
+	}
+	if _, _, err := (Options{}).UpdateStrength(b, StrengthEvidence{D: []int{1, 0}, S: []float64{math.NaN(), 0}}); err == nil {
+		t.Fatalf("NaN 强度应报错")
+	}
+	if _, _, err := (Options{}).UpdateStrength(b, StrengthEvidence{D: []int{1, 0}, S: []float64{math.Inf(1), 0}}); err == nil {
+		t.Fatalf("Inf 强度应报错")
+	}
+	// 有限越界强度照旧钳位：s=1.5 与 s=1 等效
+	a, _, _ := (Options{}).UpdateStrength(b, StrengthEvidence{D: []int{1, 0}, S: []float64{1.5, 0}})
+	c, _, _ := (Options{}).UpdateStrength(b, StrengthEvidence{D: []int{1, 0}, S: []float64{1, 0}})
+	pa, pc := a.Posterior(), c.Posterior()
+	for i := range pa {
+		if math.Abs(pa[i]-pc[i]) > 1e-12 {
+			t.Fatalf("有限越界强度应钳位等效：%v vs %v", pa, pc)
+		}
 	}
 }
 

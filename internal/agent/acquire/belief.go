@@ -18,6 +18,10 @@ var ErrImpossibleOutcome = errors.New("acquire: observed outcome has zero probab
 // （NewAction 不感知假设数，对齐校验在信念相关的操作处做）
 var ErrMisaligned = errors.New("acquire: matrix rows must align with belief hypotheses")
 
+// ErrBadStrength 强度证据值域非法：方向越出 {−1,0,+1} 或强度非有限
+// （越界方向会静默放大更新强度；NaN 经 clamp01 穿透会污染整个后验）
+var ErrBadStrength = errors.New("acquire: strength evidence direction must be -1/0/+1 and strength finite")
+
 // Belief 假设空间上的信念状态（值类型，更新返回新值不改旧值）
 //
 // 对数域存储（自然对数）+ log-sum-exp 归一，长证据链不下溢；
@@ -92,7 +96,7 @@ func (b Belief) EntropyBits() float64 {
 // P(hᵢ|o) ∝ D(o|hᵢ)·P(hᵢ)。第二返回值为全局意外标志（maxᵢ D(o|hᵢ) < δ，
 // 供编排触发 abduction，本函数仍完成归一更新——旧假设保留、后验按证据重排）
 func (o Options) UpdateOutcome(b Belief, act Action, outcome string) (Belief, bool, error) {
-	if len(act.D) != b.Len() {
+	if len(act.d) != b.Len() {
 		return Belief{}, false, ErrMisaligned
 	}
 	j := act.outcomeIndex(outcome)
@@ -101,10 +105,10 @@ func (o Options) UpdateOutcome(b Belief, act Action, outcome string) (Belief, bo
 	}
 	logD := make([]float64, b.Len())
 	maxD := 0.0
-	for i := 0; i < b.Len() && i < len(act.D); i++ {
-		logD[i] = math.Log(act.D[i][j])
-		if act.D[i][j] > maxD {
-			maxD = act.D[i][j]
+	for i := range logD {
+		logD[i] = math.Log(act.d[i][j])
+		if act.d[i][j] > maxD {
+			maxD = act.d[i][j]
 		}
 	}
 	logJoint := make([]float64, b.Len())
@@ -127,6 +131,16 @@ func (o Options) UpdateOutcome(b Belief, act Action, outcome string) (Belief, bo
 func (o Options) UpdateStrength(b Belief, e StrengthEvidence) (Belief, bool, error) {
 	if len(e.D) != b.Len() || len(e.S) != b.Len() {
 		return Belief{}, false, ErrMisaligned
+	}
+	// 值域校验：方向只允许 {−1,0,+1}（越界会静默放大更新强度）；强度须有限
+	// （clamp01 对 NaN 两比较皆 false 会放行，2^(α·NaN) 会污染整个后验——自扫发现）
+	for i, dd := range e.D {
+		if dd < -1 || dd > 1 {
+			return Belief{}, false, ErrBadStrength
+		}
+		if math.IsNaN(e.S[i]) || math.IsInf(e.S[i], 0) {
+			return Belief{}, false, ErrBadStrength
+		}
 	}
 	d := o.withDefaults()
 	logL := make([]float64, b.Len())
