@@ -407,3 +407,49 @@ func TestSelectMaxEIGVersusBest(t *testing.T) {
 		t.Fatalf("存在高 EIG 候选不应误报信息平台，got %+v", stop)
 	}
 }
+
+// 直接构造的 Action 可绕过 NewAction：零/非有限成本在 Select 内归一为 1，
+// 得分不得变 Inf/NaN 导致首动作锁死
+func TestSelectCostGuard(t *testing.T) {
+	b, _ := NewUniformBelief(3)
+	good := mustAction(t, "good", []string{"x", "y"}, [][]float64{{.99, .01}, {.01, .99}, {.5, .5}}, 1)
+	// 零值成本 + NaN 成本（直接构造，不经 NewAction）
+	zeroCost := Action{Name: "zero-cost", Outcomes: []string{"x", "y"},
+		D: [][]float64{{.6, .4}, {.4, .6}, {.5, .5}}}
+	nanCost := zeroCost
+	nanCost.Name = "nan-cost"
+	nanCost.Cost = math.NaN()
+	sel, err := Select(b, []Action{zeroCost, nanCost, good})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if sel.BestScore <= 0 || math.IsInf(sel.BestScore, 0) || math.IsNaN(sel.BestScore) {
+		t.Fatalf("得分应为有限正值，got %+v", sel)
+	}
+	if sel.MaxEIG < 0.5 {
+		t.Fatalf("MaxEIG 应取 good 的高 EIG，got %+v", sel)
+	}
+}
+
+// 部分零行不高估（pr-agent 三轮）：只区分子集假设的动作信息增益按不可达质量诚实折半
+func TestEIGPartialZeroRowNotOverranked(t *testing.T) {
+	b, _ := NewBelief([]float64{0.5, 0.5})
+	// partial：h₁ 完全区分（观测必为 x），h₂ 行全零（一半质量无更新）→ 诚实值 0.5 bit
+	partial := mustAction(t, "partial", []string{"x", "y"}, [][]float64{{1, 0}, {0, 0}}, 1)
+	g, err := EIG(b, partial)
+	if err != nil {
+		t.Fatalf("eig: %v", err)
+	}
+	if math.Abs(g-0.5) > 1e-9 {
+		t.Fatalf("部分零行动作 EIG 应 ≈0.5 bit（一半质量无更新），got %f", g)
+	}
+	// 对照：完全区分动作 1 bit——部分零行不得与之并列（条件化口径下两者都是 1）
+	full := mustAction(t, "full", []string{"x", "y"}, [][]float64{{1, 0}, {0, 1}}, 1)
+	gf, _ := EIG(b, full)
+	if math.Abs(gf-1) > 1e-9 {
+		t.Fatalf("完全区分动作 EIG 应 =1 bit，got %f", gf)
+	}
+	if g >= gf {
+		t.Fatalf("部分零行动作不得排在完全区分动作之前")
+	}
+}

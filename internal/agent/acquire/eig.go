@@ -81,9 +81,10 @@ func (a Action) outcomeIndex(outcome string) int {
 
 // EIG 动作在当前信念下的期望信息增益（bit）
 // 矩阵行数与信念假设数不符返回 ErrMisaligned（缺行会被当作概率 1 预测，必须显式拒绝）。
-// 边缘概率为零的结果不产生更新期望（跳过，不除零）；可达结果的总边缘质量为零
-// （所有假设对所有结果概率为零，动作无预测）时返回 0——无信息动作，argmax 自然不选。
-// 个别假设行全零时总质量缺损，期望按可达结果的质量归一（良好矩阵下总量为 1，不变）
+// 边缘概率为零的结果不产生更新期望（跳过，不除零）。
+// 部分假设行全零时（矩阵质量缺损），缺损质量按「观测无结果 = 信念不更新 = 保留全熵」
+// 计入期望（pr-agent 三轮修正：按可达质量条件化会高估「只区分子集假设」的动作）；
+// 全零矩阵因此自然返回 0——无信息动作，argmax 自然不选
 func EIG(b Belief, act Action) (float64, error) {
 	if len(act.D) != b.Len() {
 		return 0, ErrMisaligned
@@ -105,10 +106,10 @@ func EIG(b Belief, act Action) (float64, error) {
 		post := Belief{logp: normalizeLog(logJoint)}
 		expected += m * post.EntropyBits()
 	}
-	if totalMass <= 0 {
-		return 0, nil
-	}
-	return h0 - expected/totalMass, nil
+	// 不可达质量（1 − totalMass）不产生信念更新：按保留全熵计入期望，
+	// 缺损动作的信息增益被诚实折半而不是条件化高估
+	expected += (1 - totalMass) * h0
+	return h0 - expected, nil
 }
 
 // Selection 一次评估的结果：成本归一最优 + 全候选最大 EIG
@@ -138,7 +139,13 @@ func Select(b Belief, acts []Action) (Selection, error) {
 		if g > sel.MaxEIG {
 			sel.MaxEIG = g
 		}
-		if score := g / a.Cost; sel.Best < 0 || score > sel.BestScore {
+		// 成本防护（pr-agent 三轮）：Action 可被直接构造绕过 NewAction 的成本归一，
+		// 零/非有限成本会让 g/cost 变 Inf/NaN 且 NaN 得分永不可被替换——此处与 NewAction 同口径归一为 1
+		cost := a.Cost
+		if cost <= 0 || math.IsNaN(cost) || math.IsInf(cost, 0) {
+			cost = 1
+		}
+		if score := g / cost; sel.Best < 0 || score > sel.BestScore {
 			sel.Best, sel.BestScore = i, score
 		}
 	}
