@@ -199,7 +199,7 @@ func TestWriteStartupBannerKubectlMissing(t *testing.T) {
 // 组装编排器在无大模型配置时应硬失败，无假实现回退
 func TestNewOrchestratorRequiresLLM(t *testing.T) {
 	cfg := config.Config{}
-	_, err := newOrchestrator(core.NewFactory(), cfg, &bytes.Buffer{})
+	_, _, err := newOrchestrator(core.NewFactory(), cfg, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("want error without LLM")
 	}

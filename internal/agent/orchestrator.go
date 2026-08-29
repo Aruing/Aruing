@@ -182,8 +182,19 @@ type Orchestrator struct {
 	// 运行过程进度输出；默认丢弃，命令行接标准错误让用户实时看到诊断流程
 	progress io.Writer
 	// 挂起运行索引（runID → 快照）；澄清 Resume 用
-	mu        sync.Mutex
+	mu sync.Mutex
+	// 最近一次调查循环的只读统计（轮数）；LastRunStats 读取
+	// 只作评测观测，不参与任何编排决策
+	lastStats RunStats
 	suspended map[string]*suspendedRun
+}
+
+// RunStats 一次运行的观测统计（只读快照，不参与编排决策）
+// 供评测记录（--eval-json）消费；字段按需增加，不回写
+// 轮数按「已开始的调查轮」计：进入循环体即计一轮，轮内失败也算
+type RunStats struct {
+	// 调查循环已开始的轮数（挂起后 Resume 续跑会覆盖为本段循环的轮数）
+	InvestigateRounds int
 }
 
 // 绑定完整闭环所需依赖并创建编排器
@@ -207,6 +218,18 @@ func NewOrchestrator(
 		factory:  factory,
 		progress: io.Discard,
 	}
+}
+
+// LastRunStats 返回最近一次调查循环的观测统计（只读副本）
+// 仅供评测与测试消费；未执行过调查时返回零值
+// 不改变 Execute / Resume 契约，不进 core
+func (o *Orchestrator) LastRunStats() RunStats {
+	if o == nil {
+		return RunStats{}
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.lastStats
 }
 
 // 覆盖定位阶段工具调用预算，轮数小于等于零时恢复默认值
@@ -560,6 +583,13 @@ func (o *Orchestrator) investigateLoop(
 	}
 
 	state := seed
+	// 只读统计：本段循环已开始的轮数，任何返回路径都落进 lastStats（评测观测用）
+	started := seed.Round
+	defer func() {
+		o.mu.Lock()
+		o.lastStats.InvestigateRounds = started - seed.Round
+		o.mu.Unlock()
+	}()
 	hypotheses := slices.Clone(seed.Hypotheses)
 	tasks := slices.Clone(seed.Tasks)
 	evidence = slices.Clone(seed.Evidence)
@@ -569,6 +599,7 @@ func (o *Orchestrator) investigateLoop(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, nil, nil, InvestigateState{}, fmt.Errorf("investigate: %w", ctxErr)
 		}
+		started = round + 1
 
 		o.progressf("调查第 %d 轮…", round+1)
 		plan, planErr := o.planner.Plan(ctx, PlanState{
