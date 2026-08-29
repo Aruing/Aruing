@@ -24,7 +24,7 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-**`0.1.0` — usable diagnostic assistant.** Runs end-to-end against a real cluster with a real LLM: interactive terminal chat (inline or fullscreen), theme customization, evidence navigation with time-window slicing, and clarify-suspend/resume on ambiguous asks. Distributed via GitHub Releases: one-line install (curl / irm), `aruing connect` for first-run LLM setup, `aruing update` for upgrades, `go install` from source tags.
+**`0.1.1` — representative projection + evaluation infra.** Large tool outputs are projected under a token budget by a weighted-greedy representative selection (coverage + anomaly objectives, with head-tail / uniform / full baselines switchable via config in one binary), and the repo ships its evaluation stack: scenario ground truth, per-run eval records (`aruing run --eval-json`), a mechanical judge CLI, and `make bench` for reproducible projection benchmarks. Everything from 0.1.0 still applies: real-cluster + real-LLM diagnosis, interactive terminal chat, evidence navigation, clarify-suspend/resume, one-line install and self-update.
 
 Not yet built (planned 0.2+): npm distribution, disk persistence (sessions are in-memory and lost on exit), streaming responses, write tools with approval, multi-cluster, Web UI. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
