@@ -331,6 +331,14 @@ func TestNewActionValidation(t *testing.T) {
 	if _, err := NewAction("bad", []string{"x", "y"}, [][]float64{{0.5, -0.1}}, 1); err == nil {
 		t.Fatalf("负概率应报错")
 	}
+	// +Inf 入口：归一会变 NaN 静默污染下游，构造期必须拒绝
+	if _, err := NewAction("inf", []string{"x", "y"}, [][]float64{{math.Inf(1), 0}}, 1); err == nil {
+		t.Fatalf("+Inf 概率应报错")
+	}
+	// 有限但求和溢出：finite/Inf 会把行静默清零，同样拒绝
+	if _, err := NewAction("oflow", []string{"x", "y"}, [][]float64{{1e308, 1e308}}, 1); err == nil {
+		t.Fatalf("行和溢出应报错")
+	}
 	// 行和 0.9（LLM 输出容差）→ 构造时归一，D 用作似然不偏置
 	a, err := NewAction("tol", []string{"x", "y"}, [][]float64{{0.72, 0.18}}, 1)
 	if err != nil {

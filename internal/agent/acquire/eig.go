@@ -49,11 +49,16 @@ func NewAction(name string, outcomes []string, d [][]float64, cost float64) (Act
 		a.D[i] = make([]float64, len(row))
 		var sum float64
 		for j, v := range row {
-			if v < 0 || math.IsNaN(v) {
+			// 非有限值一律拒绝：+Inf 会在行归一时变 Inf/Inf=NaN 静默污染下游（pr-agent #119 二轮）
+			if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 				return Action{}, ErrBadAction
 			}
 			a.D[i][j] = v
 			sum += v
+		}
+		// 有限元素求和溢出同样拒绝：finite/Inf=0 会把整行静默清零
+		if math.IsInf(sum, 0) {
+			return Action{}, ErrBadAction
 		}
 		if sum > 0 {
 			for j := range a.D[i] {
