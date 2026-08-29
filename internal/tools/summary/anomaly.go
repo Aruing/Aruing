@@ -12,8 +12,6 @@
 package summary
 
 import (
-	"math"
-
 	"gonum.org/v1/gonum/mat"
 	"gonum.org/v1/gonum/stat"
 )
@@ -26,11 +24,18 @@ const MaxPCADims = 8
 
 // AnomalyScores 返回与 rows 等长的切片；元素越大该行越异常
 // 失败（行数不足、方差为零、协方差奇异）时返回 nil，调用方走纯分层抽样兜底
+// 行数下限是产品口径的稳定性约束；小样本数学验证走 t2Scores（无下限）
 func AnomalyScores(rows [][]string, sigCols []int, hists []map[string]int) []float64 {
 	if len(rows) < MinRowsForAnomaly || len(sigCols) == 0 {
 		return nil
 	}
+	return t2Scores(rows, sigCols, hists)
+}
 
+// t2Scores 计算每行 Hotelling T²（平方口径，无行数下限）
+// 方差用总体口径（除 n）：gonum VarsTo 返回样本方差（除 n−1），除数乘回 (n−1)/n 还原；
+// 排序与口径无关，数值口径供回归断言与文档对照
+func t2Scores(rows [][]string, sigCols []int, hists []map[string]int) []float64 {
 	X := EncodeOneHot(rows, sigCols, hists)
 	if X == nil {
 		return nil
@@ -76,6 +81,8 @@ func AnomalyScores(rows [][]string, sigCols []int, hists []map[string]int) []flo
 	proj.Mul(X, V)
 
 	// 主成分空间下协方差对角化，方差就是 vars[:k]；T² = Σ_j (proj_ij - mean_j)² / var_j
+	// var 用总体口径（除 n）：gonum 返回样本方差（除 n−1），乘 (n−1)/n 还原，
+	// 不开方——T² 即主成分空间马氏距离平方（Hotelling 1947）
 	means := make([]float64, k)
 	for j := 0; j < k; j++ {
 		var sum float64
@@ -89,9 +96,9 @@ func AnomalyScores(rows [][]string, sigCols []int, hists []map[string]int) []flo
 		var t2 float64
 		for j := 0; j < k; j++ {
 			diff := proj.At(i, j) - means[j]
-			t2 += diff * diff / vars[j]
+			t2 += diff * diff / (vars[j] * float64(n-1) / float64(n))
 		}
-		scores[i] = math.Sqrt(t2)
+		scores[i] = t2
 	}
 	return scores
 }

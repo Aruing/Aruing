@@ -24,9 +24,9 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-**`0.1.0` — usable diagnostic assistant, released for evaluation.** Runs end-to-end against a real cluster with a real LLM: interactive terminal chat (inline or fullscreen), theme customization, evidence navigation with time-window slicing, and clarify-suspend/resume on ambiguous asks.
+**`0.1.0` — usable diagnostic assistant.** Runs end-to-end against a real cluster with a real LLM: interactive terminal chat (inline or fullscreen), theme customization, evidence navigation with time-window slicing, and clarify-suspend/resume on ambiguous asks. Distributed via GitHub Releases: one-line install (curl / irm), `aruing connect` for first-run LLM setup, `aruing update` for upgrades, `go install` from source tags.
 
-Not yet built (planned 0.2+): disk persistence (sessions are in-memory and lost on exit), streaming responses, write tools with approval, multi-cluster, Web UI. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
+Not yet built (planned 0.2+): npm distribution, disk persistence (sessions are in-memory and lost on exit), streaming responses, write tools with approval, multi-cluster, Web UI. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
 ⚠️ Only simple trials / testing are supported right now — not production-ready.
 
@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.
 irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | iex
 ```
 
-If `~/.aruing/bin` is not on your `PATH`, the installer prints the exact line to add. From source: `go install github.com/Aruing/Aruing/cmd/aruing@latest` (once v0.1.0 is tagged) or `make build`.
+If `~/.aruing/bin` is not on your `PATH`, the installer prints the exact line to add. From source: `go install github.com/Aruing/Aruing/cmd/aruing@latest` or `make build` (source builds report `version dev` and cannot self-update; prefer the install script for upgradable installs).
 
 Upgrade later with `aruing update` (self-update from GitHub Releases, checksum-verified). Binaries installed via npm should use `npm update -g aruing`.
 

@@ -27,29 +27,136 @@ const (
 	CoverShowBudget   = 12
 )
 
-// Render 渲染表格投影为紧凑多行文本：标签 · 行数 · 列名，其后每行两空格缩进
-// 小表全行写出；大表进入「列频次 + 头/稀有/尾抽样」模式，全量仍在 Raw（#18）
-// 不按列名（如 STATUS/READY）改变逻辑，不解释取值含义，纯机械统计（#16/#19）
+// Render 渲染表格投影（fast 默认路径）；零值选项，保持既有调用方与测试零改
 func Render(label string, columns []string, rows [][]string, hasMore bool) string {
+	return RenderWithOptions(label, columns, rows, hasMore, RenderOptions{})
+}
+
+// RenderStats 投影的机械观测量：bench / 实验记录消费（判分与预算分析同源，不重算口径）
+type RenderStats struct {
+	// 进入投影的实例行数（fast 为三段去重后的合计；greedy 含头尾锚；llm-rerank 为装入预算的行）
+	RowsIncluded int
+	// 实例行按 WriteRows 口径的渲染 rune 总量（fast 的 T² 标注不计入）
+	InstanceRunes int
+}
+
+// RenderWithOptions 按方法分发渲染；零值选项 = fast（小表全行，大表三段式）
+// full / head-tail / uniform 不受大表阈值影响：实验基线按配置直达，保证方法间口径一致
+func RenderWithOptions(label string, columns []string, rows [][]string, hasMore bool, opts RenderOptions) string {
+	text, _ := RenderWithStats(label, columns, rows, hasMore, opts)
+	return text
+}
+
+// RenderWithStats 渲染并返回机械观测量：实验侧（bench CSV）与渲染共用同一次计算
+func RenderWithStats(label string, columns []string, rows [][]string, hasMore bool, opts RenderOptions) (string, RenderStats) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s · %d 行 · 列: %s\n", label, len(rows), strings.Join(columns, " "))
-
-	if len(rows) > LargeTableThreshold {
-		RenderLarge(&b, columns, rows)
-	} else {
+	var stats RenderStats
+	switch opts.Method {
+	case MethodFull:
 		WriteRows(&b, rows)
+		stats = statsForIdxs(rows, nil)
+	case MethodHeadTail:
+		stats = renderHeadTail(&b, rows, opts.budget())
+	case MethodUniform:
+		stats = renderUniform(&b, rows, opts.budget())
+	case MethodLLMRerank:
+		stats = renderLLMRerank(&b, columns, rows, opts)
+	case MethodGreedy, MethodGreedyKnapsack:
+		stats = renderGreedy(&b, columns, rows, opts)
+	default:
+		// fast：小表全行，大表三段式（历史行为）
+		if len(rows) > LargeTableThreshold {
+			stats = renderLarge(&b, columns, rows)
+		} else {
+			WriteRows(&b, rows)
+			stats = statsForIdxs(rows, nil)
+		}
 	}
-
 	if hasMore {
 		b.WriteString("  （输出含更多段落，见 raw）\n")
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(b.String(), "\n"), stats
+}
+
+// statsForIdxs 若干行的观测量；idxs 为 nil 表示全部行（越界行不计入）
+func statsForIdxs(rows [][]string, idxs []int) RenderStats {
+	if idxs == nil {
+		idxs = make([]int, len(rows))
+		for i := range rows {
+			idxs[i] = i
+		}
+	}
+	runes := 0
+	included := 0
+	for _, i := range idxs {
+		if i < 0 || i >= len(rows) {
+			continue
+		}
+		runes += renderedRowRunes(rows[i])
+		included++
+	}
+	return RenderStats{RowsIncluded: included, InstanceRunes: runes}
+}
+
+// renderLLMRerank C4 对照臂：Rerank 回调选行，渲染层机械过滤（越界/去重/表序）并按预算装入
+// 防御性报错不静默回退（#18 精神）：nil 回调与回调失败都在投影内明确标注；
+// Raw 不受影响，模型仍可经 evidence.read drill——对照臂的失败可见、可追溯
+func renderLLMRerank(b *strings.Builder, columns []string, rows [][]string, opts RenderOptions) RenderStats {
+	b.WriteString("  （大表：LLM 重排代表性投影——C4 对照臂；全量在 raw；可用 --field-selector / -o jsonpath / evidence.read 收窄）\n")
+	if opts.Rerank == nil {
+		b.WriteString("  （配置错误：method=llm-rerank 未装配重排器；请配置 LLM 后重启，或换用机械方法）\n")
+		return RenderStats{}
+	}
+	idxs, err := opts.Rerank(columns, rows, opts.budget())
+	if err != nil {
+		fmt.Fprintf(b, "  （LLM 重排失败：%v；全量在 raw，可用 evidence.read 翻页读取）\n", err)
+		return RenderStats{}
+	}
+	seen := make(map[int]struct{}, len(idxs))
+	valid := make([]int, 0, len(idxs))
+	for _, i := range idxs {
+		if i < 0 || i >= len(rows) {
+			continue
+		}
+		if _, ok := seen[i]; ok {
+			continue
+		}
+		seen[i] = struct{}{}
+		valid = append(valid, i)
+	}
+	sort.Ints(valid)
+	budget := opts.budget()
+	used := 0
+	sel := make([]int, 0, len(valid))
+	for _, i := range valid {
+		c := renderedRowRunes(rows[i])
+		if len(sel) > 0 && used+c > budget {
+			continue
+		}
+		sel = append(sel, i)
+		used += c
+	}
+	if len(sel) == 0 {
+		b.WriteString("  （重排未选中任何装得下的行；全量在 raw）\n")
+		return RenderStats{}
+	}
+	WriteRows(b, RowsByIndex(rows, sel))
+	if omitted := len(rows) - len(sel); omitted > 0 {
+		fmt.Fprintf(b, "  （已省略 %d 行；全量在 raw，可用 evidence.read 翻页读取）\n", omitted)
+	}
+	return RenderStats{RowsIncluded: len(sel), InstanceRunes: used}
 }
 
 // RenderLarge 渲染大表投影：列频次段给整体分布、异常段按 Hotelling T² 高低给出最偏离的代表行、覆盖段按分层抽样保中段可见
 // 异常段用 PCA + T²（见 anomaly.go）抓单列及多列组合异常；覆盖段保证每个非主流取值至少有 1 行代表 + 中段均匀步长补全
 // 同一物理行不重复出现在三段；T² 失败（数据不足、协方差奇异）时异常段为空，全靠覆盖段兜底
 func RenderLarge(b *strings.Builder, columns []string, rows [][]string) {
+	renderLarge(b, columns, rows)
+}
+
+// renderLarge 渲染大表投影并返回观测量（三段行数合计；同一物理行不重复出现）
+func renderLarge(b *strings.Builder, columns []string, rows [][]string) RenderStats {
 	b.WriteString("  （大表：PCA 异常排序 + 取值覆盖抽样；全量在 raw；可用 --field-selector / -o jsonpath 收窄）\n")
 
 	hists := ColumnHistograms(columns, rows)
@@ -74,9 +181,115 @@ func RenderLarge(b *strings.Builder, columns []string, rows [][]string) {
 	b.WriteString("  …\n")
 	fmt.Fprintf(b, "  尾 %d 行：\n", LargeTableTail)
 	WriteRows(b, RowsByIndex(rows, picks.Tail))
+	return statsForIdxs(rows, append(append(append(append([]int(nil), picks.Head...), picks.Anomaly...), picks.Cover...), picks.Tail...))
 }
 
-// WriteAnomalyRows 渲染异常段：每行单元格后标 T² 量化分（让模型一眼看到「这行偏离多少 σ」）
+// 加权贪心渲染：列频次段（全貌统计）+ 代表性子集（行号升序）+ 省略标注
+// 频次段本身是「还有多少没展示」的全貌信息；子集按表序排列，模型可据此定位与 drill（#19 双结构）
+func RenderGreedy(b *strings.Builder, columns []string, rows [][]string, opts RenderOptions) {
+	renderGreedy(b, columns, rows, opts)
+}
+
+// renderGreedy 渲染加权贪心投影并返回观测量（含锚；与 GreedyPick 结果同源）
+func renderGreedy(b *strings.Builder, columns []string, rows [][]string, opts RenderOptions) RenderStats {
+	b.WriteString("  （大表：加权贪心代表性投影——覆盖 + T² 异常 + 头尾锚；全量在 raw；可用 --field-selector / -o jsonpath / evidence.read 收窄）\n")
+
+	hists := ColumnHistograms(columns, rows)
+	for i, col := range columns {
+		if line := RenderColumnFreq(col, hists[i]); line != "" {
+			b.WriteString("  ")
+			b.WriteString(line)
+			b.WriteByte('\n')
+		}
+	}
+
+	picks := GreedyPick(rows, hists, GreedyOptions{
+		BudgetRunes:   opts.BudgetRunes,
+		Lambda:        opts.Lambda,
+		UniformWeight: opts.UniformWeight,
+		Knapsack:      opts.Method == MethodGreedyKnapsack,
+		SimpleStat:    opts.SimpleStat,
+	})
+	fmt.Fprintf(b, "  代表性子集 %d 行（头尾锚 + 加权贪心，行号升序）：\n", len(picks.Selected))
+	WriteRows(b, RowsByIndex(rows, picks.Selected))
+	if omitted := len(rows) - len(picks.Selected); omitted > 0 {
+		fmt.Fprintf(b, "  （已省略 %d 行；全量在 raw，可用 evidence.read 翻页读取）\n", omitted)
+	}
+	return RenderStats{RowsIncluded: len(picks.Selected), InstanceRunes: picks.TotalRunes}
+}
+
+// renderHeadTail C2 头尾截断基线：预算对半分头尾，按行序装入，至少各保 1 行（预算允许时）
+// 中段省略即业界默认形态的失真所在——位置偏差实验的对照源
+func renderHeadTail(b *strings.Builder, rows [][]string, budget int) RenderStats {
+	n := len(rows)
+	half := budget / 2
+	headIdx := make([]int, 0, 8)
+	used := 0
+	for i := 0; i < n; i++ {
+		c := renderedRowRunes(rows[i])
+		if len(headIdx) > 0 && used+c > half {
+			break
+		}
+		headIdx = append(headIdx, i)
+		used += c
+	}
+	tailIdx := make([]int, 0, 8)
+	for i := n - 1; i >= 0; i-- {
+		// 头是前缀，尾倒序扫描与之相遇即全表装下
+		if len(headIdx) > 0 && i == headIdx[len(headIdx)-1] {
+			break
+		}
+		c := renderedRowRunes(rows[i])
+		if len(tailIdx) > 0 && used+c > budget {
+			break
+		}
+		tailIdx = append(tailIdx, i)
+		used += c
+	}
+	WriteRows(b, RowsByIndex(rows, headIdx))
+	if omitted := n - len(headIdx) - len(tailIdx); omitted > 0 {
+		fmt.Fprintf(b, "  …（已省略 %d 行，见 raw）\n", omitted)
+	}
+	WriteRows(b, RowsByIndex(rows, reverseInts(tailIdx)))
+	return statsForIdxs(rows, append(append([]int(nil), headIdx...), tailIdx...))
+}
+
+// renderUniform C3 均匀采样基线：中位行长折算目标行数，等步长抽行，预算硬顶
+// 确定性步长采样（非随机）：可复现是 #19 的卖点；实验靠根因位置变化而非采样种子制造方差
+func renderUniform(b *strings.Builder, rows [][]string, budget int) RenderStats {
+	n := len(rows)
+	target := 1
+	if med := MedianRowRunes(rows); med > 0 {
+		target = budget / med
+	}
+	if target < 1 {
+		target = 1
+	}
+	if target > n {
+		target = n
+	}
+	stride := n / target
+	if stride < 1 {
+		stride = 1
+	}
+	idxs := make([]int, 0, target)
+	used := 0
+	for i := 0; i < n && len(idxs) < target; i += stride {
+		c := renderedRowRunes(rows[i])
+		if len(idxs) > 0 && used+c > budget {
+			break
+		}
+		idxs = append(idxs, i)
+		used += c
+	}
+	WriteRows(b, RowsByIndex(rows, idxs))
+	if omitted := n - len(idxs); omitted > 0 {
+		fmt.Fprintf(b, "  （均匀采样 %d 行，已省略 %d 行，见 raw）\n", len(idxs), omitted)
+	}
+	return statsForIdxs(rows, idxs)
+}
+
+// WriteAnomalyRows 渲染异常段：每行单元格后标 T² 量化分（平方口径，越大越离群）
 // scores 为与 rows 等长的全表 T² 数组，按 idx 查；缺失时退化成无标注
 func WriteAnomalyRows(b *strings.Builder, rows [][]string, idxs []int, scores []float64) {
 	for _, i := range idxs {

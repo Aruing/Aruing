@@ -20,6 +20,17 @@ tools:
   # Max kubectl stdout bytes kept in evidence/raw before truncate; 0 = k8s default 1MiB.
   # Env: ARUING_K8S_MAX_STDOUT_BYTES
   max_stdout_bytes: 0
+  # Table projection method for method-comparison experiments; empty = fast (default
+  # three-segment path). Values: fast | greedy | greedy-knapsack | full | head-tail |
+  # uniform. Unknown values fail at startup. Env: ARUING_TOOLS_PROJECTION_METHOD
+  projection:
+    method: ""
+    # Row budget in runes for greedy/head-tail/uniform; 0 = default 4096
+    budget: 0
+    # Lambda weight of the anomaly term (greedy only); 0 = default 1
+    lambda: 0
+    # Uniform coverage weights (ablation); default rarity-weighted (log2)
+    uniform_weight: false
 
 # Terminal UI for `aruing chat`: theme dark | light | auto (auto detects terminal
 # background), mode inline | app (inline = scrollback-style chat, app = fullscreen).

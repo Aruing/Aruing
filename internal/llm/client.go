@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -44,7 +45,34 @@ func NewClient(cfg Config) (Client, error) {
 		api:        openai.NewClientWithConfig(ocfg),
 		model:      normalized.Model,
 		maxRetries: normalized.MaxRetries,
+		usage:      make(map[string]UsageTotals),
 	}, nil
+}
+
+// 按调用方标签把一次成功请求的用量计入聚合表
+// 空标签归入 unknown；网关未返回用量时计零值（仍计一次调用）
+func (c *client) recordUsage(label string, u openai.Usage) {
+	if label == "" {
+		label = "unknown"
+	}
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	t := c.usage[label]
+	t.PromptTokens += int64(u.PromptTokens)
+	t.CompletionTokens += int64(u.CompletionTokens)
+	t.Calls++
+	c.usage[label] = t
+}
+
+// UsageSnapshot 返回按标签聚合的用量快照（副本）；实现 UsageTracker 可选接口
+func (c *client) UsageSnapshot() map[string]UsageTotals {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	out := make(map[string]UsageTotals, len(c.usage))
+	for k, v := range c.usage {
+		out[k] = v
+	}
+	return out
 }
 
 // 在对话补全请求体缺省流式时写入假，避免兼容网关默认开流式
@@ -110,6 +138,9 @@ type client struct {
 	model string
 	// 可恢复错误的最大重试次数
 	maxRetries int
+	// 按调用方标签聚合的 token 用量；仅成功请求计入（含重试成功前的失败尝试不计）
+	usageMu sync.Mutex
+	usage   map[string]UsageTotals
 }
 
 // 请求一次纯文本生成，直接返回模型正文
@@ -200,6 +231,8 @@ func (c *client) do(ctx context.Context, req Request, jsonMode bool) (string, er
 				}
 				return "", ErrEmptyResponse
 			}
+			// 成功请求才计入用量：按调用方标签聚合，供评测记录消费
+			c.recordUsage(req.Label, resp.Usage)
 			return content, nil
 		}
 

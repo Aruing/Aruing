@@ -70,6 +70,8 @@ type Config struct {
 	MaxStdoutBytes int
 	// 标准错误写入证据前的最大字节数，零值表示二百五十六千字节
 	MaxStderrBytes int
+	// 表格投影选项（方法与预算）；零值 = 默认 fast 路径，方法名校验在装配层
+	Projection summary.RenderOptions
 }
 
 // 后端级集群工具，通过无命令行外壳的参数列表调用集群命令
@@ -268,7 +270,7 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 		return nil, fmt.Errorf("marshal evidence raw: %w", err)
 	}
 
-	summary := projectSummary(invoke.Argv, stdout.String(), stderr.String(), exitCode)
+	summary := projectSummary(invoke.Argv, stdout.String(), stderr.String(), exitCode, t.config.Projection)
 	if stdout.truncated || stderr.truncated {
 		// 输出超出保留上限被截断：原带不全，追加明确提示，区别于按行数的大表截断
 		summary += "\n（原始输出已超过保留上限被截断，请缩小查询范围；残缺原文见 raw）"

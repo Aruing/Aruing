@@ -33,6 +33,9 @@ type Request struct {
 	System string
 	// 用户输入或待模型处理的数据
 	User string
+	// 调用方标签（如角色名），仅用于客户端侧按调用方聚合 token 用量；空时归入 unknown
+	// 由 LabelingClient 装饰器在装配层填充，角色自身不感知
+	Label string
 }
 
 // 一次纯文本生成的结果
@@ -53,6 +56,24 @@ type Client interface {
 	// 请求一次结构化生成，把模型输出反序列化进输出参数
 	// 输出参数必须是可写指针；模型输出不符合约定结构时返回解析错误
 	GenerateJSON(ctx context.Context, req Request, out any) error
+}
+
+// 一个调用方标签的累计 token 用量
+// 由客户端在成功请求处聚合；评测记录按角色快照消费
+type UsageTotals struct {
+	// 提示词侧 token 累计
+	PromptTokens int64
+	// 补全侧 token 累计
+	CompletionTokens int64
+	// 成功请求次数
+	Calls int
+}
+
+// 用量快照的可选接口；具体客户端实现，装配层按需断言取用
+// 不并入 Client 接口：避免测试假实现与第三方适配器被迫实现记账
+type UsageTracker interface {
+	// 返回按调用方标签聚合的用量快照（副本），并发安全
+	UsageSnapshot() map[string]UsageTotals
 }
 
 // 构造客户端所需的配置

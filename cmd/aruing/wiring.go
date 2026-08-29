@@ -21,6 +21,7 @@ import (
 	"github.com/Aruing/Aruing/internal/store"
 	"github.com/Aruing/Aruing/internal/tools"
 	"github.com/Aruing/Aruing/internal/tools/k8s"
+	"github.com/Aruing/Aruing/internal/tools/summary"
 )
 
 // 生产环境调查阶段规划轮数上限
@@ -54,9 +55,10 @@ type tooling struct {
 }
 
 // 组装工具注册表与调度器；集群命令可用时注册集群工具与 evidence.read
-func buildTooling(toolsCfg config.Tools) (tooling, error) {
+// llmClient 可为 nil；仅 tools.projection.method=llm-rerank 时必需（构造 C4 重排器，实验专用）
+func buildTooling(toolsCfg config.Tools, llmClient llm.Client) (tooling, error) {
 	registry := tools.NewRegistry()
-	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg)
+	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg, llmClient)
 	if err != nil {
 		return tooling{}, err
 	}
@@ -85,7 +87,9 @@ func buildTooling(toolsCfg config.Tools) (tooling, error) {
 // 当集群命令可用时注册后端级集群工具；不可用则跳过
 // 路径优先使用显式配置，否则在系统路径中查找默认集群命令
 // MaxStdoutBytes 零值时由 k8s 包默认（1MiB）
-func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, error) {
+// method=llm-rerank 时必须提供 llm 客户端构造重排器（C4 对照臂）：
+// 启动期明确报错，不静默回退机械方法（#18 精神）
+func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient llm.Client) (bool, error) {
 	path := toolsCfg.KubectlPath
 	if path == "" {
 		looked, err := exec.LookPath("kubectl")
@@ -94,11 +98,29 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, er
 		}
 		path = looked
 	}
+	// 投影方法在装配期解析并校验：未知值启动即失败，不静默回落
+	projMethod, err := summary.ParseMethod(toolsCfg.Projection.Method)
+	if err != nil {
+		return false, fmt.Errorf("tools.projection.method: %w", err)
+	}
+	projOpts := summary.RenderOptions{
+		Method:        projMethod,
+		BudgetRunes:   toolsCfg.Projection.Budget,
+		Lambda:        toolsCfg.Projection.Lambda,
+		UniformWeight: toolsCfg.Projection.UniformWeight,
+	}
+	if projMethod == summary.MethodLLMRerank {
+		if llmClient == nil {
+			return false, fmt.Errorf("tools.projection.method: llm-rerank requires LLM (configure llm.* or ARUING_LLM_*); or pick a mechanical method")
+		}
+		projOpts.Rerank = k8s.NewReranker(llmClient)
+	}
 	tool, err := k8s.New(k8s.Config{
 		KubectlPath:    path,
 		DefaultTimeout: 30 * time.Second,
 		MaxTimeout:     2 * time.Minute,
 		MaxStdoutBytes: toolsCfg.MaxStdoutBytes,
+		Projection:     projOpts,
 	})
 	if err != nil {
 		return false, nil
@@ -110,26 +132,27 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, er
 }
 
 // 组装编排器：必须大模型齐全，无假实现回退
-func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, error) {
+// 第二返回值为可选的用量跟踪器（llm.UsageTracker）；适配器未实现时为 nil，评测记录里 token 段为空
+func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, llm.UsageTracker, error) {
 	if factory == nil {
-		return nil, fmt.Errorf("orchestrator requires a factory")
+		return nil, nil, fmt.Errorf("orchestrator requires a factory")
 	}
 	if err := config.ValidateLLM(cfg); err != nil {
-		return nil, err
-	}
-
-	toolsGraph, err := buildTooling(cfg.Tools)
-	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	client, err := llm.NewClient(cfg.LLM.ToClientConfig())
 	if err != nil {
-		return nil, fmt.Errorf("build llm client: %w", err)
+		return nil, nil, fmt.Errorf("build llm client: %w", err)
 	}
+	toolsGraph, err := buildTooling(cfg.Tools, client)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	roles, err := buildLLMRoles(client, factory, toolsGraph.registry.Specs())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	orch := agent.NewOrchestrator(
@@ -142,7 +165,9 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 		factory,
 	)
 	configureOrchestrator(orch, toolsGraph.reconEnabled, progress)
-	return orch, nil
+	// 具体客户端实现用量记账；按可选接口断言，适配器未实现时安静降级
+	tracker, _ := client.(llm.UsageTracker)
+	return orch, tracker, nil
 }
 
 // 组装多轮对话会话栈：内存存储、诊断账本与基线塔
@@ -155,15 +180,15 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 		return nil, fmt.Errorf("session stack requires a factory")
 	}
 
-	toolsGraph, err := buildTooling(cfg.Tools)
-	if err != nil {
-		return nil, err
-	}
-
 	client, err := llm.NewClient(cfg.LLM.ToClientConfig())
 	if err != nil {
 		return nil, fmt.Errorf("build llm client: %w", err)
 	}
+	toolsGraph, err := buildTooling(cfg.Tools, client)
+	if err != nil {
+		return nil, err
+	}
+
 	roles, err := buildLLMRoles(client, factory, toolsGraph.registry.Specs())
 	if err != nil {
 		return nil, err
@@ -182,7 +207,7 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 
 	ledger := store.NewMemoryRunLedger()
 	tower, err := agent.NewTowerResponder(
-		client,
+		llm.NewLabelingClient(client, "tower"),
 		factory,
 		orch,
 		ledger,
@@ -201,24 +226,25 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 }
 
 // 用大模型客户端组装五角色；工具规格与调度器同源
+// 每个角色注入带自己标签的客户端包装（token 按角色聚合，见 llm.LabelingClient）；角色自身不感知
 func buildLLMRoles(client llm.Client, factory *core.Factory, specs []tools.ToolSpec) (orchestratorRoles, error) {
-	parser, err := agent.NewLLMParser(client, factory)
+	parser, err := agent.NewLLMParser(llm.NewLabelingClient(client, "parser"), factory)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm parser: %w", err)
 	}
-	resolver, err := agent.NewLLMResolver(client, specs)
+	resolver, err := agent.NewLLMResolver(llm.NewLabelingClient(client, "resolver"), specs)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm resolver: %w", err)
 	}
-	planner, err := agent.NewLLMPlanner(client, factory, specs)
+	planner, err := agent.NewLLMPlanner(llm.NewLabelingClient(client, "planner"), factory, specs)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm planner: %w", err)
 	}
-	verifier, err := agent.NewLLMVerifier(client, factory)
+	verifier, err := agent.NewLLMVerifier(llm.NewLabelingClient(client, "verifier"), factory)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm verifier: %w", err)
 	}
-	reporter, err := agent.NewLLMReporter(client, factory)
+	reporter, err := agent.NewLLMReporter(llm.NewLabelingClient(client, "reporter"), factory)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm reporter: %w", err)
 	}

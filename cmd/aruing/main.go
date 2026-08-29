@@ -15,9 +15,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Aruing/Aruing/internal/config"
 	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/eval"
+	"github.com/Aruing/Aruing/internal/llm"
 	"github.com/Aruing/Aruing/internal/session"
 	"github.com/Aruing/Aruing/internal/tui"
 
@@ -45,6 +48,8 @@ Commands:
   update           Self-update to the latest release (npm installs: npm update -g aruing)
   run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
+  judge            Score eval records against scenario ground truth
+  bench            Run the mechanical projection benchmark (no LLM, no cluster)
 
 Configuration (file then env, env wins):
   --config PATH            config YAML (or ARUING_CONFIG)
@@ -97,6 +102,10 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runRun(args[1:], stdout, stderr)
 	case "chat":
 		return runChat(args[1:], stdout, stderr)
+	case "judge":
+		return runJudge(args[1:], stdout, stderr)
+	case "bench":
+		return runBench(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
@@ -128,6 +137,7 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	format := fs.String("format", "markdown", "output format: markdown|json")
 	configPath := fs.String("config", "", "path to config YAML (or ARUING_CONFIG / search paths)")
 	verbose := fs.Bool("verbose", false, "print orchestrator progress to stderr (same as ARUING_DEBUG=1)")
+	evalJSON := fs.String("eval-json", "", "write an evaluation record (JSON) to this path; suspended and failed runs are recorded too")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: aruing run [flags] <question>")
 		fmt.Fprintln(stderr, "")
@@ -177,16 +187,38 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		UpdatedAt: now,
 	}
 
-	orchestrator, err := newOrchestrator(factory, cfg, stderr)
+	orchestrator, tracker, err := newOrchestrator(factory, cfg, stderr)
 	if err != nil {
 		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
 	}
+	start := time.Now()
+	// 评测记录三路径全落盘（成功 / 挂起 / 失败）：失败 run 全量报告是统计纪律
+	emitEval := func(completed bool, errMsg string, report *core.Report, evidence []core.Evidence) {
+		if *evalJSON == "" {
+			return
+		}
+		var tokens map[string]llm.UsageTotals
+		if tracker != nil {
+			tokens = tracker.UsageSnapshot()
+		}
+		rec := eval.BuildRunRecord(
+			run.ID, question, cfg.LLM.Model, cfg.Tools.Projection.Method,
+			completed, errMsg, report, evidence,
+			tokens, orchestrator.LastRunStats().InvestigateRounds, time.Since(start),
+		)
+		if werr := writeEvalRecord(*evalJSON, rec); werr != nil {
+			fmt.Fprintf(stderr, "写评测记录失败 %s：%v\n", *evalJSON, werr)
+		}
+	}
+
 	outcome, err := orchestrator.Execute(context.Background(), run)
 	if err != nil {
+		emitEval(false, err.Error(), nil, nil)
 		return formatRunError(fmt.Errorf("execute diagnosis: %w", err))
 	}
 	if outcome.Suspension != nil {
 		// 单次 run 无会话环：澄清挂起时把问题打印到标准错误并退出非零
+		emitEval(false, "suspended waiting for user clarification", nil, outcome.Evidence)
 		fmt.Fprintf(stderr, "需要澄清才能继续（run %s）：\n%s\n", outcome.Suspension.RunID, outcome.Suspension.Question)
 		if len(outcome.Suspension.Options) > 0 {
 			for _, opt := range outcome.Suspension.Options {
@@ -197,9 +229,26 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("diagnosis suspended waiting for user clarification")
 	}
 	if outcome.Report == nil {
+		emitEval(false, "empty outcome", nil, outcome.Evidence)
 		return formatRunError(fmt.Errorf("execute diagnosis: empty outcome"))
 	}
+	emitEval(true, "", outcome.Report, outcome.Evidence)
 	return writeReport(stdout, *format, *outcome.Report, outcome.Evidence)
+}
+
+// writeEvalRecord 把评测记录以 JSON 落盘；父目录不存在时创建
+// 落盘失败只警告不中断主流程：评测记录是旁路产物，不能反噬诊断本身
+func writeEvalRecord(path string, rec eval.RunRecord) error {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create eval dir: %w", err)
+		}
+	}
+	raw, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal eval record: %w", err)
+	}
+	return os.WriteFile(path, append(raw, '\n'), 0o644)
 }
 
 // 多轮入口：会话轮次加基线塔；无位置参数进入交互式 TUI

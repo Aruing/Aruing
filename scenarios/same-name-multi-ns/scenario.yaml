@@ -2,3 +2,9 @@ name: same-name-multi-ns
 kind_cluster_name: aruing-sc-same-name-multi-ns
 namespace: ""
 notes: "两个 ns 各有同名 demo-api：team-a 正常、team-b 坏镜像；提示词不带 ns 制造歧义"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；根因是 team-b 的坏镜像副本
+ground_truth:
+  resource_type: deployment
+  resource_name: demo-api
+  namespace: team-b
+  fault_type: bad-image-crashloop
