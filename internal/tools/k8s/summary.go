@@ -34,7 +34,8 @@ type tableProjection struct {
 // 计算一次集群调用的紧凑摘要
 // 解析顺序：非零退出码先走错误摘要；再尝试 JSON Table；再尝试文本表；都不匹配走非表格 fallback
 // 入参为已截断到保留上限的 stdout/stderr；输出缓冲截断的提示由调用方在末尾追加，与本函数无关
-func projectSummary(argv []string, stdout, stderr string, exitCode int) string {
+// proj 透传投影方法与预算（实验对比开关）；零值 = 默认 fast 路径
+func projectSummary(argv []string, stdout, stderr string, exitCode int, proj summary.RenderOptions) string {
 	if exitCode != 0 {
 		return errorSummary(exitCode, stderr)
 	}
@@ -43,10 +44,10 @@ func projectSummary(argv []string, stdout, stderr string, exitCode int) string {
 	}
 	label := tableLabel(argv)
 	if p, ok := parseJSONTable(stdout); ok {
-		return summary.Render(label, p.columns, p.rows, false)
+		return summary.RenderWithOptions(label, p.columns, p.rows, false, proj)
 	}
 	if p, ok := parseTextTable(stdout); ok {
-		return summary.Render(label, p.columns, p.rows, p.hasMore)
+		return summary.RenderWithOptions(label, p.columns, p.rows, p.hasMore, proj)
 	}
 	return fallbackSummary(stdout)
 }

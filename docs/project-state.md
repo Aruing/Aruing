@@ -95,6 +95,7 @@
 | beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
+| 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ⏳ | `summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -102,7 +103,7 @@
 
 ## 下一步
 
-**下一项**：起草 `0.1.1`（代表性投影升级 + 评测基建）里程碑设计——`internal/tools/summary` 代表性选择升级为加权贪心（子模目标：加权集合覆盖 + 异常 + 边界；lazy greedy/CELF 带近似保证），现有三段式（beta12）保留作快路径对照；config 开关切换对比方法（全量 / 头尾截断 / 均匀采样 / LLM 重排 / 加权贪心 / 三段式快路径，同一二进制）；评测基建：场景 manifest `ground_truth`、独立判分 CLI、`--eval-json` 输出（根因命中 / tool_calls / tokens / evidence_cited / rounds / wall_time）、`make bench`（场景 × 方法 × 重复 + CSV 汇总）。动 summary 包对照 #19（投影纯机械，不做业务判断）；排序调整（评测基建与投影算法优先，持久化后移）依据见笔记 `plan/version/0.2.0.md`。
+**下一项**：`0.1.1` 步骤 2（评测基建 A）——场景 manifest `ground_truth` 四元组 + 大表场景；`--eval-json` 输出（llm 客户端层 usage 记账，角色接口零改）；独立判分 CLI 第 1/2 层（根因命中 0/1 全自动 + 引用合法机械查）。步骤 1（加权贪心 + 方法开关，见工作单元 0.1.1-1）已交付待合并；排序依据见笔记 `plan/version/0.2.0.md`。动 summary/config 对照 #19（投影纯机械，不做业务判断）。
 
 **0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
 

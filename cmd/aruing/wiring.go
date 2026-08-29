@@ -21,6 +21,7 @@ import (
 	"github.com/Aruing/Aruing/internal/store"
 	"github.com/Aruing/Aruing/internal/tools"
 	"github.com/Aruing/Aruing/internal/tools/k8s"
+	"github.com/Aruing/Aruing/internal/tools/summary"
 )
 
 // 生产环境调查阶段规划轮数上限
@@ -94,11 +95,22 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools) (bool, er
 		}
 		path = looked
 	}
+	// 投影方法在装配期解析并校验：未知值启动即失败，不静默回落
+	projMethod, err := summary.ParseMethod(toolsCfg.Projection.Method)
+	if err != nil {
+		return false, fmt.Errorf("tools.projection.method: %w", err)
+	}
 	tool, err := k8s.New(k8s.Config{
 		KubectlPath:    path,
 		DefaultTimeout: 30 * time.Second,
 		MaxTimeout:     2 * time.Minute,
 		MaxStdoutBytes: toolsCfg.MaxStdoutBytes,
+		Projection: summary.RenderOptions{
+			Method:        projMethod,
+			BudgetRunes:   toolsCfg.Projection.Budget,
+			Lambda:        toolsCfg.Projection.Lambda,
+			UniformWeight: toolsCfg.Projection.UniformWeight,
+		},
 	})
 	if err != nil {
 		return false, nil

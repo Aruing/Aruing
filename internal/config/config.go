@@ -54,6 +54,24 @@ type Tools struct {
 	// 集群工具标准输出写入证据前的最大字节数；零表示使用 k8s 包默认（1MiB）
 	// 对应环境变量 ARUING_K8S_MAX_STDOUT_BYTES
 	MaxStdoutBytes int `yaml:"max_stdout_bytes"`
+	// 表格投影方法与预算（同一二进制切换对比方法，实验用）；零值 = 默认 fast
+	// 对应环境变量 ARUING_TOOLS_PROJECTION_*
+	Projection Projection `yaml:"projection"`
+}
+
+// 表格投影配置：方法开关与预算口径，透传给投影层
+//
+// 产品默认 fast（三段式快路径）；greedy 系与各基线方法供对比实验切换
+// 方法名解析与校验在装配层（启动明确失败，不静默回落）
+type Projection struct {
+	// fast | greedy | greedy-knapsack | full | head-tail | uniform；空 = fast
+	Method string `yaml:"method"`
+	// 投影实例行 rune 预算；0 = 投影层默认（4096）
+	Budget int `yaml:"budget"`
+	// 贪心 f_anom 权重 λ；0 = 默认 1
+	Lambda float64 `yaml:"lambda"`
+	// 覆盖权重均匀化（对照开关）；默认 log2 稀有度加权
+	UniformWeight bool `yaml:"uniform_weight"`
 }
 
 // 终端交互层配置
@@ -99,6 +117,12 @@ func LoadFrom(getenv func(string) string) Config {
 			KubectlPath:         strings.TrimSpace(getenv("ARUING_KUBECTL_PATH")),
 			AllowDiagnosticExec: parseBoolEnv(getenv("ARUING_ALLOW_DIAGNOSTIC_EXEC")),
 			MaxStdoutBytes:      parseIntEnv(getenv("ARUING_K8S_MAX_STDOUT_BYTES")),
+			Projection: Projection{
+				Method:        strings.TrimSpace(getenv("ARUING_TOOLS_PROJECTION_METHOD")),
+				Budget:        parseIntEnv(getenv("ARUING_TOOLS_PROJECTION_BUDGET")),
+				Lambda:        parseFloatEnv(getenv("ARUING_TOOLS_PROJECTION_LAMBDA")),
+				UniformWeight: parseBoolEnv(getenv("ARUING_TOOLS_PROJECTION_UNIFORM_WEIGHT")),
+			},
 		},
 		TUI: TUI{
 			Theme: strings.TrimSpace(getenv("ARUING_TUI_THEME")),
@@ -144,6 +168,24 @@ func MergeEnvLookup(base Config, lookup func(string) (string, bool)) Config {
 			out.Tools.MaxStdoutBytes = n
 		}
 	}
+	if v, ok := lookup("ARUING_TOOLS_PROJECTION_METHOD"); ok {
+		if t := strings.TrimSpace(v); t != "" {
+			out.Tools.Projection.Method = t
+		}
+	}
+	if v, ok := lookup("ARUING_TOOLS_PROJECTION_BUDGET"); ok {
+		if n := parseIntEnv(v); n > 0 {
+			out.Tools.Projection.Budget = n
+		}
+	}
+	if v, ok := lookup("ARUING_TOOLS_PROJECTION_LAMBDA"); ok {
+		if f := parseFloatEnv(v); f > 0 {
+			out.Tools.Projection.Lambda = f
+		}
+	}
+	if v, ok := lookup("ARUING_TOOLS_PROJECTION_UNIFORM_WEIGHT"); ok {
+		out.Tools.Projection.UniformWeight = parseBoolEnv(v)
+	}
 	if v, ok := lookup("ARUING_TUI_THEME"); ok {
 		if t := strings.TrimSpace(v); t != "" {
 			out.TUI.Theme = t
@@ -182,6 +224,20 @@ func ValidateLLM(cfg Config) error {
 func parseBoolEnv(v string) bool {
 	b, err := strconv.ParseBool(strings.TrimSpace(v))
 	return err == nil && b
+}
+
+// 解析正浮点环境变量；空、非数字或非正返回 0
+// 与整型同口径静默归零：非法值的效果等同未设置，交给后续默认值兼底
+func parseFloatEnv(v string) float64 {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || f <= 0 {
+		return 0
+	}
+	return f
 }
 
 // 解析正整型环境变量；空、非数字或非正返回 0

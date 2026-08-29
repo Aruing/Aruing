@@ -173,3 +173,58 @@ func mapFor(vals ...string) map[string]int {
 	}
 	return m
 }
+
+// 方法开关矩阵：零值选项 = fast 与 Render 输出一致；各方法各自口径成立
+func TestRenderWithOptionsMethods(t *testing.T) {
+	cols, rows := buildLargeTableRareMid(100, 50, "Running", "Error")
+
+	if got := RenderWithOptions("pods", cols, rows, false, RenderOptions{}); got != Render("pods", cols, rows, false) {
+		t.Fatal("零值选项必须与 fast Render 输出一致（既有调用方零改）")
+	}
+
+	full := RenderWithOptions("pods", cols, rows, false, RenderOptions{Method: MethodFull})
+	if got := strings.Count(full, "p-0"); got != 100 {
+		t.Fatalf("full 应包含全部 100 行，got %d", got)
+	}
+
+	ht := RenderWithOptions("pods", cols, rows, false, RenderOptions{Method: MethodHeadTail, BudgetRunes: 400})
+	if !strings.Contains(ht, "已省略") || strings.Contains(ht, "p-050") {
+		t.Fatalf("紧预算头尾截断必须省略中段行\ngot:\n%s", ht)
+	}
+	if !strings.Contains(ht, "p-000") || !strings.Contains(ht, "p-099") {
+		t.Fatalf("头尾截断必须保留边界行\ngot:\n%s", ht)
+	}
+
+	uni := RenderWithOptions("pods", cols, rows, false, RenderOptions{Method: MethodUniform, BudgetRunes: 300})
+	if !strings.Contains(uni, "均匀采样") {
+		t.Fatalf("uniform 渲染缺标记\ngot:\n%s", uni)
+	}
+	if got := strings.Count(uni, "p-0"); got >= 100 {
+		t.Fatalf("紧预算均匀采样应只抽子集，got %d 行", got)
+	}
+
+	gr := RenderWithOptions("pods", cols, rows, false, RenderOptions{Method: MethodGreedy, BudgetRunes: 600})
+	for _, want := range []string{"STATUS: Running×99 / Error×1", "代表性子集", "p-050  Error", "已省略"} {
+		if !strings.Contains(gr, want) {
+			t.Fatalf("greedy 渲染缺 %q\ngot:\n%s", want, gr)
+		}
+	}
+
+	kn := RenderWithOptions("pods", cols, rows, false, RenderOptions{Method: MethodGreedyKnapsack, BudgetRunes: 600})
+	if !strings.Contains(kn, "代表性子集") || !strings.Contains(kn, "p-050  Error") {
+		t.Fatalf("greedy-knapsack 渲染缺子集或稀有行\ngot:\n%s", kn)
+	}
+}
+
+// ParseMethod：空串 = fast；未知值明确报错（启动失败口径，不静默回落）
+func TestParseMethod(t *testing.T) {
+	if m, err := ParseMethod(""); err != nil || m != MethodFast {
+		t.Fatalf("空串应解析为 fast，got %v err=%v", m, err)
+	}
+	if m, err := ParseMethod("greedy"); err != nil || m != MethodGreedy {
+		t.Fatalf("greedy 解析失败：%v %v", m, err)
+	}
+	if _, err := ParseMethod("bogus"); err == nil {
+		t.Fatal("未知方法应报错")
+	}
+}
