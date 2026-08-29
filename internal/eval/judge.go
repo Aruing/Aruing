@@ -150,18 +150,25 @@ func SampleRubric(rec RunRecord, n int, seed int64) []RubricRow {
 
 // RenderRubricMarkdown 把抽样表渲染成人读 markdown（评分作业界面）
 // 表中 verdict 列留空；评完回填后可另算一致率（本期不自动算）
+// 单元格统一净化：竖杠转义 + 换行折叠防空行打穿表格；摘要按码点截断防切新多字节字符
 func RenderRubricMarkdown(rows []RubricRow) string {
 	var b strings.Builder
 	b.WriteString("| 结论# | 理由 | 证据 | 证据摘要 | verdict |\n")
 	b.WriteString("| - | --- | --- | --- | --- |\n")
 	for _, r := range rows {
-		reason := strings.ReplaceAll(r.Reason, "|", "\\|")
-		summary := strings.ReplaceAll(r.Summary, "|", "\\|")
-		summary = strings.ReplaceAll(summary, "\n", " ")
-		if len(summary) > 160 {
-			summary = summary[:160] + "…"
+		reason := sanitizeTableCell(r.Reason)
+		summary := sanitizeTableCell(r.Summary)
+		if rs := []rune(summary); len(rs) > 160 {
+			summary = string(rs[:160]) + "…"
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s | %s | %s |\n", r.ConclusionIdx, reason, r.EvidenceID, summary, r.Verdict)
 	}
 	return b.String()
+}
+
+// sanitizeTableCell 把单元格文本安全化：竖杠转义（防破列）+ 换行折叠为空格（防打穿表格行）
+func sanitizeTableCell(s string) string {
+	s = strings.ReplaceAll(s, "|", "\\|")
+	s = strings.ReplaceAll(s, "\n", " ")
+	return s
 }

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func writeTemp(t *testing.T, name, content string) string {
@@ -132,5 +133,35 @@ func TestSampleRubric(t *testing.T) {
 	md := RenderRubricMarkdown(a)
 	if !strings.Contains(md, "| 结论# |") || !strings.Contains(md, "ev_1") {
 		t.Fatalf("rubric 渲染缺内容：\n%s", md)
+	}
+}
+
+// 表格单元净化：中文长摘要按码点截断（仍是合法 UTF-8）；理由含换行/竖杠不打穿表格行
+func TestRenderRubricMarkdownSanitize(t *testing.T) {
+	rows := []RubricRow{
+		{
+			ConclusionIdx: 0,
+			Reason:        "多行结论\n第二行 | 带竖杠",
+			EvidenceID:    "ev_1",
+			Summary:       strings.Repeat("这是一段中文摘要", 30), // 210 字符 > 160
+		},
+	}
+	md := RenderRubricMarkdown(rows)
+
+	// 行数恰为表头 2 行 + 数据 1 行：换行折叠后无内嵌 \n 打穿
+	if got := strings.Count(md, "\n"); got != 3 {
+		t.Fatalf("表格行数错误：\n%s", md)
+	}
+	// 竖杠被转义为 \|，剔除后给构分隔符恰 6 个（1 开 + 4 内 + 1 闭），不产生额外列
+	dataLine := strings.Split(md, "\n")[2]
+	if got := strings.Count(strings.ReplaceAll(dataLine, "\\|", ""), "|"); got != 6 {
+		t.Fatalf("数据行列数错误（竖杠未转义？）：%s", dataLine)
+	}
+	// 中文截断按码点：产物仍是合法 UTF-8 且以省略号结尾
+	if !strings.HasSuffix(strings.TrimRight(dataLine, "| \t"), "…") {
+		t.Fatalf("截断应保留省略号：%s", dataLine)
+	}
+	if !utf8.ValidString(md) {
+		t.Fatal("渲染产物应是合法 UTF-8（截断不得切断多字节字符）")
 	}
 }
