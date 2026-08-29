@@ -34,8 +34,9 @@ type Stop struct {
 	Gap string
 }
 
-// CheckStop 检查停止准则（思考文档 §5）。maxEIG 是当前候选动作集的最大 EIG（bit），
-// 由调用方先算 BestAction 后传入；budgetLeft <= 0 表示预算耗尽。
+// CheckStop 检查停止准则（思考文档 §5）。maxEIG 是当前候选动作集的最大原始 EIG（bit），
+// 由调用方经 Select 取得（注意不是选中动作的 EIG——见 Selection.MaxEIG 口径说明）；
+// budgetLeft <= 0 表示预算耗尽。
 // 出口判定次序：supported → refuted → insufficient
 func CheckStop(b Belief, maxEIG float64, budgetLeft int, o Options) Stop {
 	d := o.withDefaults()

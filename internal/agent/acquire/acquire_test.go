@@ -40,15 +40,22 @@ func TestWorkedExampleSvcWrongSelector(t *testing.T) {
 	}{
 		{a1, 0.71}, {a2, 0.10}, {a3, 0.35},
 	} {
-		if got := EIG(b, c.act); math.Abs(got-c.want) > 1e-2 {
+		got, gerr := EIG(b, c.act)
+		if gerr != nil {
+			t.Fatalf("EIG(%s): %v", c.act.Name, gerr)
+		}
+		if math.Abs(got-c.want) > 1e-2 {
 			t.Fatalf("EIG(%s) 应 ≈%.2f bit，got %.4f", c.act.Name, c.want, got)
 		}
 	}
 
-	// 成本归一选择：a₁ 的 EIG/c 最高
-	idx, maxEIG := BestAction(b, []Action{a2, a3, a1})
-	if idx != 2 || maxEIG < 0.6 {
-		t.Fatalf("应选 a₁（索引 2），got idx=%d maxEIG=%.3f", idx, maxEIG)
+	// 成本归一选择：a₁ 的 EIG/c 最高；MaxEIG 同为 a₁（此例一致）
+	sel, err := Select(b, []Action{a2, a3, a1})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if sel.Best != 2 || sel.MaxEIG < 0.6 {
+		t.Fatalf("应选 a₁（索引 2），got %+v", sel)
 	}
 
 	// 观测 CrashLoop → 后验 (0.049, 0.902, 0.049)，无意外标志
@@ -76,8 +83,9 @@ func TestWorkedExampleSvcWrongSelector(t *testing.T) {
 		{.95, .05},
 		{.05, .95},
 	}, 1)
-	if g := EIG(b2, a4); g < 0.1 {
-		t.Fatalf("确证动作 EIG 应显著（文档「仍高」），got %.3f", g)
+	g4, gerr4 := EIG(b2, a4)
+	if gerr4 != nil || g4 < 0.1 {
+		t.Fatalf("确证动作 EIG 应显著（文档「仍高」），got %.3f err=%v", g4, gerr4)
 	}
 	b3, _, err := opts.UpdateOutcome(b2, a4, "ImagePull")
 	if err != nil {
@@ -162,8 +170,8 @@ func TestBeliefEdges(t *testing.T) {
 func TestSingleHypothesis(t *testing.T) {
 	b, _ := NewUniformBelief(1)
 	a := mustAction(t, "a", []string{"x", "y"}, [][]float64{{.9, .1}}, 1)
-	if g := EIG(b, a); g != 0 {
-		t.Fatalf("单假设 EIG 应为 0，got %f", g)
+	if g, err := EIG(b, a); err != nil || g != 0 {
+		t.Fatalf("单假设 EIG 应为 0，got %f err=%v", g, err)
 	}
 	stop := CheckStop(b, 0, 1, Options{})
 	if !stop.Stop || stop.Kind != VerdictSupported || stop.Winner != 0 {
@@ -175,18 +183,18 @@ func TestSingleHypothesis(t *testing.T) {
 func TestZeroMatrixAction(t *testing.T) {
 	b, _ := NewUniformBelief(3)
 	zero := mustAction(t, "zero", []string{"x", "y"}, [][]float64{{0, 0}, {0, 0}, {0, 0}}, 1)
-	if g := EIG(b, zero); g != 0 {
-		t.Fatalf("全零矩阵 EIG 应为 0，got %f", g)
+	if g, err := EIG(b, zero); err != nil || g != 0 {
+		t.Fatalf("全零矩阵 EIG 应为 0，got %f err=%v", g, err)
 	}
 	good := mustAction(t, "good", []string{"x", "y"}, [][]float64{{.9, .1}, {.1, .9}, {.5, .5}}, 1)
-	if idx, _ := BestAction(b, []Action{zero, good}); idx != 1 {
-		t.Fatalf("应选有信息动作，got %d", idx)
+	if sel, err := Select(b, []Action{zero, good}); err != nil || sel.Best != 1 {
+		t.Fatalf("应选有信息动作，got %+v err=%v", sel, err)
 	}
-	idx, maxEIG := BestAction(b, []Action{zero, zero})
-	if idx != 0 || maxEIG != 0 {
-		t.Fatalf("全零集合应返回首动作且 EIG=0，got idx=%d eig=%f", idx, maxEIG)
+	sel, _ := Select(b, []Action{zero, zero})
+	if sel.Best != 0 || sel.MaxEIG != 0 {
+		t.Fatalf("全零集合应返回首动作且 EIG=0，got %+v", sel)
 	}
-	stop := CheckStop(b, maxEIG, 3, Options{})
+	stop := CheckStop(b, sel.MaxEIG, 3, Options{})
 	if !stop.Stop || stop.Kind != VerdictInsufficient {
 		t.Fatalf("max EIG=0 应信息平台 insufficient，got %+v", stop)
 	}
@@ -352,4 +360,42 @@ func mustAction(t *testing.T, name string, outcomes []string, d [][]float64, cos
 		t.Fatalf("action %s: %v", name, err)
 	}
 	return a
+}
+
+// 矩阵与信念不对齐：更新与评估都必须明确报错（缺行不得当作概率 1 预测）
+func TestMisalignedMatrix(t *testing.T) {
+	b, _ := NewUniformBelief(3)
+	short := mustAction(t, "short", []string{"x", "y"}, [][]float64{{.9, .1}, {.1, .9}}, 1)
+	if _, _, err := (Options{}).UpdateOutcome(b, short, "x"); err == nil {
+		t.Fatalf("行数不足的更新应报错")
+	}
+	if _, err := EIG(b, short); err == nil {
+		t.Fatalf("行数不足的 EIG 应报错")
+	}
+	if _, err := Select(b, []Action{short}); err == nil {
+		t.Fatalf("含不对齐动作的 Select 应报错")
+	}
+}
+
+// 选择与平台检测口径分离（pr-agent #119 评审修正）：低成本低 EIG 动作可被成本归一选中，
+// 但只要存在高 EIG 候选，平台检测不算 insufficient
+func TestSelectMaxEIGVersusBest(t *testing.T) {
+	b, _ := NewUniformBelief(3)
+	// cheap：弱区分（EIG ≈0.02）但成本极低；expensive：h₁ 与其余劈裂（EIG ≈0.61）
+	cheap := mustAction(t, "cheap", []string{"x", "y"}, [][]float64{{.6, .4}, {.4, .6}, {.5, .5}}, 0.001)
+	expensive := mustAction(t, "expensive", []string{"x", "y"}, [][]float64{{.99, .01}, {.01, .99}, {.5, .5}}, 1)
+	sel, err := Select(b, []Action{cheap, expensive})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if sel.Best != 0 {
+		t.Fatalf("成本归一应选 cheap，got %+v", sel)
+	}
+	if sel.MaxEIG < 0.5 {
+		t.Fatalf("MaxEIG 应取 expensive 的高 EIG，got %+v", sel)
+	}
+	// 平台检测用 MaxEIG：τ=0.1 下选中动作自身 EIG（≈0.02）会误报平台，全候选最大 EIG 不报
+	if stop := CheckStop(b, sel.MaxEIG, 3, Options{Tau: 0.1}); stop.Stop && stop.Kind == VerdictInsufficient {
+		t.Fatalf("存在高 EIG 候选不应误报信息平台，got %+v", stop)
+	}
 }

@@ -75,15 +75,19 @@ func (a Action) outcomeIndex(outcome string) int {
 }
 
 // EIG 动作在当前信念下的期望信息增益（bit）
+// 矩阵行数与信念假设数不符返回 ErrMisaligned（缺行会被当作概率 1 预测，必须显式拒绝）。
 // 边缘概率为零的结果不产生更新期望（跳过，不除零）；可达结果的总边缘质量为零
 // （所有假设对所有结果概率为零，动作无预测）时返回 0——无信息动作，argmax 自然不选。
 // 个别假设行全零时总质量缺损，期望按可达结果的质量归一（良好矩阵下总量为 1，不变）
-func EIG(b Belief, act Action) float64 {
+func EIG(b Belief, act Action) (float64, error) {
+	if len(act.D) != b.Len() {
+		return 0, ErrMisaligned
+	}
 	h0 := b.EntropyBits()
 	var expected, totalMass float64
 	for j := range act.Outcomes {
 		logJoint := make([]float64, b.Len())
-		for i := 0; i < b.Len() && i < len(act.D); i++ {
+		for i := range logJoint {
 			logJoint[i] = math.Log(act.D[i][j]) + b.logp[i]
 		}
 		logM := logSumExp(logJoint)
@@ -97,26 +101,41 @@ func EIG(b Belief, act Action) float64 {
 		expected += m * post.EntropyBits()
 	}
 	if totalMass <= 0 {
-		return 0
+		return 0, nil
 	}
-	return h0 - expected/totalMass
+	return h0 - expected/totalMass, nil
 }
 
-// BestAction 成本归一选择：argmax EIG(a)/c(a)，并列取索引小者（确定性）
-// 返回选中索引与其 EIG（bit）——max EIG 供停止准则做信息平台检测；
-// 空动作集返回 (-1, 0)
-func BestAction(b Belief, acts []Action) (int, float64) {
-	best := -1
-	var bestScore, bestEIG float64
+// Selection 一次评估的结果：成本归一最优 + 全候选最大 EIG
+//
+// 两个口径刻意分开（pr-agent #119 评审修正）：选择按 EIG/c（便宜优先），
+// 信息平台检测按全候选最大原始 EIG——不等成本下最优动作的 EIG 可以很小，
+// 但只要存在任一高 EIG 候选就不算「区分不动」
+type Selection struct {
+	// 成本归一最优动作索引；空集为 -1
+	Best int
+	// 最优动作的 EIG/c 得分
+	BestScore float64
+	// 全候选最大原始 EIG（bit）——CheckStop 平台检测的口径
+	MaxEIG float64
+}
+
+// Select 评估候选动作集：argmax EIG(a)/c(a)（并列取索引小者，确定性），
+// 同时返回全候选最大 EIG。任一动作矩阵与信念不对齐返回 ErrMisaligned（整集拒绝，
+// 不静默跳过——不对齐是调用方 bug，须暴露）
+func Select(b Belief, acts []Action) (Selection, error) {
+	sel := Selection{Best: -1}
 	for i, a := range acts {
-		g := EIG(b, a)
-		score := g / a.Cost
-		if best < 0 || score > bestScore {
-			best, bestScore, bestEIG = i, score, g
+		g, err := EIG(b, a)
+		if err != nil {
+			return Selection{}, err
+		}
+		if g > sel.MaxEIG {
+			sel.MaxEIG = g
+		}
+		if score := g / a.Cost; sel.Best < 0 || score > sel.BestScore {
+			sel.Best, sel.BestScore = i, score
 		}
 	}
-	if best < 0 {
-		return -1, 0
-	}
-	return best, bestEIG
+	return sel, nil
 }

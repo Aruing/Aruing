@@ -14,6 +14,10 @@ var ErrBadBelief = errors.New("acquire: belief requires at least one hypothesis 
 // 接线层可将其映射为全局意外 → abduction 重规划，而非崩溃
 var ErrImpossibleOutcome = errors.New("acquire: observed outcome has zero probability under every hypothesis")
 
+// ErrMisaligned 矩阵行数与假设数不符：静默截断会把缺行当作概率 1 预测，必须明确报错
+// （NewAction 不感知假设数，对齐校验在信念相关的操作处做）
+var ErrMisaligned = errors.New("acquire: matrix rows must align with belief hypotheses")
+
 // Belief 假设空间上的信念状态（值类型，更新返回新值不改旧值）
 //
 // 对数域存储（自然对数）+ log-sum-exp 归一，长证据链不下溢；
@@ -88,6 +92,9 @@ func (b Belief) EntropyBits() float64 {
 // P(hᵢ|o) ∝ D(o|hᵢ)·P(hᵢ)。第二返回值为全局意外标志（maxᵢ D(o|hᵢ) < δ，
 // 供编排触发 abduction，本函数仍完成归一更新——旧假设保留、后验按证据重排）
 func (o Options) UpdateOutcome(b Belief, act Action, outcome string) (Belief, bool, error) {
+	if len(act.D) != b.Len() {
+		return Belief{}, false, ErrMisaligned
+	}
 	j := act.outcomeIndex(outcome)
 	if j < 0 {
 		return Belief{}, false, errors.New("acquire: unknown outcome " + outcome)
@@ -119,7 +126,7 @@ func (o Options) UpdateOutcome(b Belief, act Action, outcome string) (Belief, bo
 // P(hᵢ|E) ∝ ℓᵢ·P(hᵢ)。第二返回值为全局意外标志（max ℓᵢ < δ：单条证据强烈反驳全部假设）
 func (o Options) UpdateStrength(b Belief, e StrengthEvidence) (Belief, bool, error) {
 	if len(e.D) != b.Len() || len(e.S) != b.Len() {
-		return Belief{}, false, errors.New("acquire: strength evidence must align with hypotheses")
+		return Belief{}, false, ErrMisaligned
 	}
 	d := o.withDefaults()
 	logL := make([]float64, b.Len())
