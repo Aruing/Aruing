@@ -3,7 +3,8 @@
 // 所有方法都是机械投影（#19）：不按资源类型映射、不下健康判断
 // fast 是产品默认（beta12 三段式）；greedy 系是加权贪心；
 // full / head-tail / uniform 是实验基线（C1 / C2 / C3）——同一二进制经配置切换，
-// 排除实现差异对对比实验的干扰；C4（LLM 重排）不在此层，由实验框架注入
+// 排除实现差异对对比实验的干扰；C4（LLM 重排）的方法分发在此层，
+// 重排器回调由实验框架在装配层注入（默认不装配，产品路径纯机械不变）
 
 package summary
 
@@ -34,6 +35,9 @@ const (
 	MethodHeadTail
 	// C3 均匀采样基线：等步长抽行装满预算（无结构参照）
 	MethodUniform
+	// C4 LLM 重排对照臂：经 Rerank 回调让模型选行（实验专用，须显式配置且装配重排器）
+	// 选行后的装入与标注仍是机械的；选行本身是模型行为，不进产品默认路径（#19）
+	MethodLLMRerank
 )
 
 // methodNames 配置字符串到方法的映射；名字一经使用不再改动（config / env / bench 依赖）
@@ -44,6 +48,7 @@ var methodNames = map[string]Method{
 	"full":            MethodFull,
 	"head-tail":       MethodHeadTail,
 	"uniform":         MethodUniform,
+	"llm-rerank":      MethodLLMRerank,
 }
 
 // ParseMethod 解析配置字符串为方法
@@ -54,7 +59,7 @@ func ParseMethod(s string) (Method, error) {
 	}
 	m, ok := methodNames[s]
 	if !ok {
-		return MethodFast, fmt.Errorf("unknown projection method %q (want one of fast, greedy, greedy-knapsack, full, head-tail, uniform)", s)
+		return MethodFast, fmt.Errorf("unknown projection method %q (want one of fast, greedy, greedy-knapsack, full, head-tail, uniform, llm-rerank)", s)
 	}
 	return m, nil
 }
@@ -69,7 +74,18 @@ type RenderOptions struct {
 	Lambda float64
 	// 覆盖权重均匀化（对照实验）；默认 log2 稀有度加权
 	UniformWeight bool
+	// 简单统计量消融臂（bench 注入）：异常分不用 PCA/T²，用行长 |z| + 非常规取值计数
+	// 不进 config 与方法名——消融臂不是产品开关，配置面零暴露
+	SimpleStat bool
+	// C4 LLM 重排回调；method=llm-rerank 时必非 nil（装配层校验，渲染层防御性报错）
+	Rerank RerankFunc
 }
+
+// RerankFunc C4 LLM 重排回调：输入全表列、行与实例行 rune 预算，返回选中的 0 基行号
+// 由实验框架在装配层注入（k8s reranker 用 llm 客户端构造）；summary 不感知模型。
+// 回调无须排序去重：渲染层机械过滤越界/重复后按表序装入预算。
+// 无 ctx：回调方自行负责超时（llm 客户端自带整体超时），实验专用臂不污染渲染签名
+type RerankFunc func(columns []string, rows [][]string, budgetRunes int) ([]int, error)
 
 // budget 返回生效预算（零值归一到默认）
 func (o RenderOptions) budget() int {
@@ -79,21 +95,24 @@ func (o RenderOptions) budget() int {
 	return o.BudgetRunes
 }
 
-// renderedRowRunes 一行按 WriteRows 口径渲染的 rune 长度（两空格缩进 + 两空格连单元格）
-// 预算记账必须与渲染口径一致，否则「装得下」的判断失真
-func renderedRowRunes(row []string) int {
+// RowRunes 一行按 WriteRows 口径渲染的 rune 长度（两空格缩进 + 两空格连单元格）
+// 预算记账必须与渲染口径一致；导出供实验侧（bench 随机臂）统一记账口径
+func RowRunes(row []string) int {
 	return 2 + utf8.RuneCountInString(strings.Join(row, "  "))
 }
 
-// medianRowRunes 给定行集的中位渲染行长；贪心基数折算与均匀采样折算目标行数用
-// 空行集返回 0，由调用方兜底
-func medianRowRunes(rows [][]string) int {
+// renderedRowRunes 同口径的包内旧名；保留避免大画幅改动
+func renderedRowRunes(row []string) int { return RowRunes(row) }
+
+// MedianRowRunes 给定行集的中位渲染行长；贪心基数折算与均匀采样折算目标行数用
+// 空行集返回 0，由调用方兜底；导出供 bench 随机臂按同一口径折算基数
+func MedianRowRunes(rows [][]string) int {
 	if len(rows) == 0 {
 		return 0
 	}
 	costs := make([]int, len(rows))
 	for i, r := range rows {
-		costs[i] = renderedRowRunes(r)
+		costs[i] = RowRunes(r)
 	}
 	return medianInt(costs)
 }

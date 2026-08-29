@@ -245,3 +245,36 @@ func equalInts(a, b []int) bool {
 	}
 	return true
 }
+
+// 简单统计量消融臂：根因行（长行 + 非常规取值）得分高于常行；无 PCA 行数下限依赖
+func TestSimpleStatScores(t *testing.T) {
+	cols, rows := buildLargeTableComboAnomaly(40, 20, "1/1", "Running", "0/1", "CrashLoopBackOff")
+	hists := ColumnHistograms(cols, rows)
+	sig := SignificantColumns(hists)
+	scores := SimpleStatScores(rows, sig, hists)
+	if len(scores) != len(rows) {
+		t.Fatalf("得分应与行数等长，got %d", len(scores))
+	}
+	if scores[20] <= scores[0] {
+		t.Fatalf("根因行（两列非常规 + 长行）得分应严格高于常行，got %f vs %f", scores[20], scores[0])
+	}
+	// 与 PCA 路径的口径差异：小于 MinRowsForAnomaly 时 AnomalyScores 退化为 nil，simplestat 仍可用
+	sCols, sRows := buildLargeTableRareMid(10, 5, "Running", "Error")
+	sHists := ColumnHistograms(sCols, sRows)
+	if got := AnomalyScores(sRows, SignificantColumns(sHists), sHists); got != nil {
+		t.Fatalf("小表 PCA 应返回 nil")
+	}
+	if got := SimpleStatScores(sRows, SignificantColumns(sHists), sHists); got == nil || got[5] <= got[0] {
+		t.Fatalf("小表 simplestat 应可用且根因行得分更高，got %v", got)
+	}
+}
+
+// 消融臂经 GreedyPick 生效：SimpleStat 开关下中段异常行仍被贪心选中
+func TestGreedyPickSimpleStatArm(t *testing.T) {
+	cols, rows := buildLargeTableRareMid(100, 50, "Running", "Error")
+	hists := ColumnHistograms(cols, rows)
+	res := GreedyPick(rows, hists, GreedyOptions{BudgetRunes: 1024, SimpleStat: true})
+	if !containsInt(res.Selected, 50) {
+		t.Fatalf("SimpleStat 臂应选中中段异常行：%v", res.Selected)
+	}
+}

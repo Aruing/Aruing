@@ -116,6 +116,17 @@ vuln:
 
 check: tidy-check build test-ci fmt-check vet lint vuln
 
+# 机械判分 bench：生成器 × 方法 × 预算 × 位置 × 种子遍历 → CSV + 矩阵快照到 bench/results/
+# 零 LLM 零集群；出图用 scripts/bench-plot.py（本地 venv，不进 CI）
+# 例: make bench / make bench MATRIX=bench/my-matrix.yaml OUT=/tmp/b.csv
+MATRIX ?=
+OUT ?=
+
+.PHONY: bench
+
+bench:
+	$(GO) run $(CMD) bench $(if $(MATRIX),--matrix $(MATRIX),) $(if $(OUT),--out $(OUT),)
+
 # 全量真集群 smoke（全部场景，严格校验）：up → chat → down，单场景失败不中断，末尾汇总。
 # 依赖 Docker/kind/kubectl + bin/aruing + LLM 配置（playground/config.yaml 或 ARUING_CONFIG）。
 smoke-all:

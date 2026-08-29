@@ -46,3 +46,4 @@ go.work.sum
 
 # macOS noise
 .DS_Store
+.benchvenv/

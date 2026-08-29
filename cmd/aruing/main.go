@@ -49,6 +49,7 @@ Commands:
   run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
   judge            Score eval records against scenario ground truth
+  bench            Run the mechanical projection benchmark (no LLM, no cluster)
 
 Configuration (file then env, env wins):
   --config PATH            config YAML (or ARUING_CONFIG)
@@ -103,6 +104,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runChat(args[1:], stdout, stderr)
 	case "judge":
 		return runJudge(args[1:], stdout, stderr)
+	case "bench":
+		return runBench(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
