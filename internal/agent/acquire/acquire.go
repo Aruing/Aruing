@@ -31,26 +31,23 @@ type Options struct {
 	MassFloor float64
 }
 
-// withDefaults 填充零值字段的默认参数，返回有效副本
+// withDefaults 归一非法字段并填充默认参数，返回有效副本
+// 非法 = 非正或非有限：NaN 与 x<=0 比较为 false 会穿透旧判断，+Inf 同样穿透——
+// NaN 经算术污染后验（Inf−Inf），Inf 语义级污染（Tau=Inf 恒报平台、MassFloor=Inf 恒报
+// refuted、A=Inf 关闭 Λ 出口），全部静默错（pr-agent 四轮）
 func (o Options) withDefaults() Options {
-	if o.Alpha <= 0 {
-		o.Alpha = 3
+	sanitize := func(v, def float64) float64 {
+		if !(v > 0) || math.IsInf(v, 0) { // !(v>0) 同时覆盖 NaN 与零/负
+			return def
+		}
+		return v
 	}
-	if o.PStar <= 0 {
-		o.PStar = 0.9
-	}
-	if o.A <= 0 {
-		o.A = 19
-	}
-	if o.Tau <= 0 {
-		o.Tau = 0.01
-	}
-	if o.Delta <= 0 {
-		o.Delta = 0.05
-	}
-	if o.MassFloor <= 0 {
-		o.MassFloor = 0.05
-	}
+	o.Alpha = sanitize(o.Alpha, 3)
+	o.PStar = sanitize(o.PStar, 0.9)
+	o.A = sanitize(o.A, 19)
+	o.Tau = sanitize(o.Tau, 0.01)
+	o.Delta = sanitize(o.Delta, 0.05)
+	o.MassFloor = sanitize(o.MassFloor, 0.05)
 	return o
 }
 

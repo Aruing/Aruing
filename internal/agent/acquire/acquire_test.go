@@ -485,3 +485,37 @@ func TestEIGPartialZeroRowNotOverranked(t *testing.T) {
 		t.Fatalf("部分零行动作不得排在完全区分动作之前")
 	}
 }
+
+// Options 非法字段（NaN / ±Inf / 非正）归默认：不得经算术产生 NaN 后验，
+// 也不得语义级污染停止准则（Tau=Inf 恒报平台 / MassFloor=Inf 恒报 refuted / A=Inf 关 Λ）
+func TestOptionsNonFiniteSanitized(t *testing.T) {
+	b, _ := NewUniformBelief(2)
+
+	// Alpha=+Inf / NaN：强度更新结果应与默认 Alpha 逐位一致（曾 Inf−Inf=NaN 污染后验）
+	want, _, _ := Options{}.UpdateStrength(b, StrengthEvidence{D: []int{1, 0}, S: []float64{1, 0}})
+	for _, bad := range []float64{math.Inf(1), math.Inf(-1), math.NaN(), 0, -3} {
+		got, _, err := Options{Alpha: bad}.UpdateStrength(b, StrengthEvidence{D: []int{1, 0}, S: []float64{1, 0}})
+		if err != nil {
+			t.Fatalf("Alpha=%v: %v", bad, err)
+		}
+		for i, p := range got.Posterior() {
+			if math.IsNaN(p) || math.Abs(p-want.Posterior()[i]) > 1e-15 {
+				t.Fatalf("Alpha=%v 应归默认，got %v want %v", bad, got.Posterior(), want.Posterior())
+			}
+		}
+	}
+
+	// Tau=Inf 不得恒报信息平台；MassFloor=Inf 不得恒报 refuted
+	if stop := CheckStop(b, 0.5, 3, Options{Tau: math.Inf(1)}); stop.Stop && stop.Kind == VerdictInsufficient {
+		t.Fatalf("Tau=Inf 应归默认，不得恒报平台")
+	}
+	if stop := CheckStop(b, 0.5, 3, Options{MassFloor: math.Inf(1)}); stop.Stop && stop.Kind == VerdictRefuted {
+		t.Fatalf("MassFloor=Inf 应归默认，不得恒报 refuted")
+	}
+
+	// A=NaN 不得关闭 Λ 出口：0.83/4×0.0425 的优势比判据照常触发
+	five, _ := NewBelief([]float64{0.83, 0.0425, 0.0425, 0.0425, 0.0425})
+	if stop := CheckStop(five, 0.5, 3, Options{A: math.NaN()}); !stop.Stop || stop.Kind != VerdictSupported {
+		t.Fatalf("A=NaN 应归默认，Λ 出口照常，got %+v", stop)
+	}
+}
