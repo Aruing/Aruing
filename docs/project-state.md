@@ -95,6 +95,7 @@
 | beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
+| 0.1.2-1 | acquire 决策计算内核 | ⏳ | `internal/agent/acquire` 纯函数包（零接线零依赖）：对数域贝叶斯更新 + EIG（bit）+ argmax EIG/c + MSPRT 三出口 + 强度更新 ℓ = 2^(α·d·s)（对数线性，思考文档 §3.4 随走查修正）+ §7 数值算例复算单测（EIG=0.71 bit / 后验 0.902/0.988 / 两次动作收敛）；core/编排零改 |
 | 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ✅ | #116；`eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化）；`internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
