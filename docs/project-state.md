@@ -95,7 +95,7 @@
 | beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
-| 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ⏳ | `internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
+| 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化） | `internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
@@ -104,7 +104,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.1` 步骤 3（bench + 主实验）——`make bench` 场景 × 方法 × 重复遍历 + CSV 汇总 + 出图脚本（Python + matplotlib）；C4 LLM 重排对照臂（k8s 可选注入 reranker，默认 nil 不装配）；「贪心 vs 随机选择」「PCA/T² vs 简单统计量」两对照变体；创新点二主实验数据落盘（主对比 + 消融 + 位置 × 命中率图，机械判分零 LLM 成本为主）。步骤 2（评测基建 A，见工作单元 0.1.1-2）已交付待合并；排序依据见笔记 `plan/version/0.2.0.md`。
+**下一项**：`0.1.1` 步骤 3（bench + 主实验）——`make bench` 场景 × 方法 × 重复遍历 + CSV 汇总 + 出图脚本（Python + matplotlib）；C4 LLM 重排对照臂（k8s 可选注入 reranker，默认 nil 不装配）；「贪心 vs 随机选择」「PCA/T² vs 简单统计量」两对照变体；创新点二主实验数据落盘（主对比 + 消融 + 位置 × 命中率图，机械判分零 LLM 成本为主）。步骤 2（#114）已合并；排序依据见笔记 `plan/version/0.2.0.md`。
 
 **0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
 
