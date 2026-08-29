@@ -108,10 +108,12 @@ func BuildRunRecord(
 
 	if report != nil {
 		for _, c := range report.Conclusions {
+			// 空引用归一为空切片：nil 序列化成 null 会破坏 schema「数组」契约
+			ids := append([]string{}, c.EvidenceIDs...)
 			rec.RootCauses = append(rec.RootCauses, RootCauseEntry{
 				Result:      string(c.Result),
 				Reason:      c.Reason,
-				EvidenceIDs: append([]string(nil), c.EvidenceIDs...),
+				EvidenceIDs: ids,
 			})
 			for _, id := range c.EvidenceIDs {
 				if !containsString(rec.EvidenceCited, id) {

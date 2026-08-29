@@ -61,3 +61,16 @@ func TestBuildRunRecordFailure(t *testing.T) {
 		t.Fatal("切片字段应初始化为空切片而非 nil（JSON 落盘为数组）")
 	}
 }
+
+// 无引用结论的 evidence_ids 归一为空切片：JSON 必须是 [] 不是 null（schema 数组契约）
+func TestBuildRunRecordNilEvidenceIDsNormalize(t *testing.T) {
+	report := &core.Report{
+		Conclusions: []core.Conclusion{
+			{HypothesisID: "h1", Result: core.VerdictSupported, Reason: "无引用结论"},
+		},
+	}
+	rec := BuildRunRecord("run_x", "q", "m", "fast", true, "", report, nil, nil, 0, 0)
+	if rec.RootCauses[0].EvidenceIDs == nil {
+		t.Fatal("无引用结论的 evidence_ids 应归一为空切片")
+	}
+}
