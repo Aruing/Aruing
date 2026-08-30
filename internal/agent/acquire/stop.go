@@ -6,6 +6,8 @@
 //	insufficient 信息平台（max EIG < τ：现有假设区分不动）或预算尽；带缺口说明
 package acquire
 
+import "math"
+
 // VerdictKind 停止出口的种类；未停止为零值
 type VerdictKind int
 
@@ -56,8 +58,10 @@ func CheckStop(b Belief, maxEIG float64, budgetLeft int, o Options) Stop {
 		return Stop{Stop: true, Kind: VerdictSupported, Winner: winner, Confidence: best}
 	}
 
-	// refuted：假设空间累计保留质量坍缩（预测序列整体失败）
-	if b.Mass() < d.MassFloor {
+	// refuted：假设空间累计保留质量坍缩（预测序列整体失败）。
+	// 对数域比较：Mass()=exp(logMass) 在极强确证链下会溢出 +Inf，
+	// 线性域比较恒 false 会静默禁用本出口（pr-agent 六轮走查证实）
+	if b.logMass < math.Log(d.MassFloor) {
 		return Stop{Stop: true, Kind: VerdictRefuted, Winner: -1}
 	}
 

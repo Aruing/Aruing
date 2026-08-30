@@ -149,7 +149,8 @@ func EIG(b Belief, act Action) (float64, error) {
 type Selection struct {
 	// 成本归一最优动作索引；空集为 -1
 	Best int
-	// 最优动作的 EIG/c 得分
+	// 最优动作的 EIG/c 得分；近零成本动作为 +Inf（成本归一的设计语义：
+	// 近零成本即近乎免费，理应支配全部有成本候选）；恒不为 NaN
 	BestScore float64
 	// 全候选最大原始 EIG（bit）——CheckStop 平台检测的口径
 	MaxEIG float64

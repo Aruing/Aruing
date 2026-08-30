@@ -543,3 +543,57 @@ func TestOptionsSemanticRange(t *testing.T) {
 		t.Fatalf("MassFloor 越域应归默认，不得恒报 refuted，got %+v", stop)
 	}
 }
+
+// 极端 Alpha 强度链（pr-agent 六轮验证）：后验在对数域实现下恒合法（声称的 NaN 路径
+// 不存在），但 Mass() 会溢出 +Inf——判停必须走对数域比较，refuted 出口不得被静默禁用
+func TestExtremeAlphaMassOverflow(t *testing.T) {
+	b, _ := NewBelief([]float64{0.4, 0.4, 0.2})
+	for _, alpha := range []float64{1024, 2000, 1e6, 1e300, math.MaxFloat64} {
+		got, _, err := Options{Alpha: alpha}.UpdateStrength(b, StrengthEvidence{
+			D: []int{+1, -1, 0}, S: []float64{1, 1, 0},
+		})
+		if err != nil {
+			t.Fatalf("alpha=%v: %v", alpha, err)
+		}
+		p := got.Posterior()
+		sum := 0.0
+		for _, q := range p {
+			if math.IsNaN(q) || math.IsInf(q, 0) {
+				t.Fatalf("alpha=%v 后验非法 %v", alpha, p)
+			}
+			sum += q
+		}
+		if math.Abs(sum-1) > 1e-9 || p[0] <= p[1] {
+			t.Fatalf("alpha=%v 后验应归一且支持方向胜出 %v", alpha, p)
+		}
+		// 溢出的 Mass 不得禁用 refuted 出口：极强确证后照常检查（不误报 refuted）
+		if stop := CheckStop(got, 0.5, 3, Options{}); stop.Stop && stop.Kind == VerdictRefuted {
+			t.Fatalf("alpha=%v 极强确证链不得误报 refuted", alpha)
+		}
+	}
+	// 对照：质量坍缩路径的 refuted 出口照常工作（对数域比较未破坏原语义）
+	cur, _ := NewUniformBelief(3)
+	for i := 0; i < 5; i++ {
+		cur, _, _ = Options{}.UpdateStrength(cur, StrengthEvidence{D: []int{-1, -1, -1}, S: []float64{1, 1, 1}})
+	}
+	if stop := CheckStop(cur, 0.5, 3, Options{}); !stop.Stop || stop.Kind != VerdictRefuted {
+		t.Fatalf("质量坍缩 refuted 出口应照常触发，got %+v", stop)
+	}
+}
+
+// 亚正常成本（pr-agent 六轮验证）：近零成本按成本归一语义支配全部候选、
+// 并列时确定性取先者、得分恒不为 NaN——设计行为钉板
+func TestSubnormalCostSemantics(t *testing.T) {
+	b, _ := NewBelief([]float64{0.4, 0.4, 0.2})
+	good := mustAction(t, "good", []string{"x", "y"}, [][]float64{{.99, .01}, {.01, .99}, {.5, .5}}, 1)
+	tiny := mustAction(t, "tiny", []string{"x", "y"}, [][]float64{{.6, .4}, {.4, .6}, {.5, .5}}, math.SmallestNonzeroFloat64)
+	tiny2 := mustAction(t, "tiny2", []string{"x", "y"}, [][]float64{{.7, .3}, {.3, .7}, {.5, .5}}, math.SmallestNonzeroFloat64)
+	sel, err := Select(b, []Action{good, tiny})
+	if err != nil || sel.Best != 1 || math.IsNaN(sel.BestScore) {
+		t.Fatalf("近零成本应支配，got %+v err=%v", sel, err)
+	}
+	sel2, _ := Select(b, []Action{tiny, tiny2, good})
+	if sel2.Best != 0 || math.IsNaN(sel2.BestScore) {
+		t.Fatalf("并列近零成本应确定性取先者，got %+v", sel2)
+	}
+}

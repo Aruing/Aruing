@@ -77,7 +77,9 @@ func (b Belief) Posterior() []float64 {
 	return p
 }
 
-// Mass 假设空间累计保留质量（线性域）：观测序列在假设空间下的边缘似然
+// Mass 假设空间累计保留质量（线性域）：观测序列在假设空间下的边缘似然。
+// 展示用途：极强确证链（如超大 α 强度更新）下可溢出 +Inf——判停等比较走对数域
+// （logMass），勿用本返回值做阈值比较
 func (b Belief) Mass() float64 { return math.Exp(b.logMass) }
 
 // EntropyBits 信念熵 H(P) = −Σ p log₂ p（bit）；信息量的统一量纲
