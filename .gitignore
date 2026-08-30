@@ -50,3 +50,6 @@ go.work.sum
 
 # python 出图脚本缓存
 __pycache__/
+
+# 本地实验出图 venv（bench-plot.py matplotlib，见 scripts/bench-plot.py 头注释）
+.venv/

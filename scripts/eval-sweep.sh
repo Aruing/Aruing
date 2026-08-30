@@ -23,6 +23,7 @@ OUT="${OUT:-eval/results/0.1.2}"
 CONFIG="${CONFIG:-playground/config.yaml}"
 ARUING="${ARUING:-go run ./cmd/aruing}"
 DRYRUN="${DRYRUN:-0}"
+FORCE="${FORCE:-0}"   # 1 = 忽略已有记录强制重跑（默认跳过已完成的单元）
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # 场景问题 = prompts.md 第 1 条有序列表提示词（与 smoke 验收同源）；
@@ -47,6 +48,7 @@ scn_kubeconfig() {
 
 units=0
 missing=0
+skipped=0
 scn_count=0
 mkdir -p "$OUT"
 
@@ -58,6 +60,13 @@ if [ "$DRYRUN" != "1" ]; then
             exit 1
         fi
     done
+    # manifest：装置归因（2026-08-30 追加裁决）——git / 模型 / 矩阵参数随批落盘
+    model="$(grep -E '^[[:space:]]*model:' "$CONFIG" | head -1 | sed 's/^[[:space:]]*model:[[:space:]]*//' | tr -d '"')"
+    printf '{\n  "tool": "eval-sweep",\n  "git": "%s",\n  "commit": "%s",\n  "model": "%s",\n  "config": "%s",\n  "scenarios": "%s",\n  "methods": "%s",\n  "ks": "%s",\n  "reps": "%s",\n  "started": "%s"\n}\n' \
+        "$(git -C "$ROOT" describe --always --dirty 2>/dev/null || echo unknown)" \
+        "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
+        "${model:-unknown}" "$CONFIG" "$SCENARIOS" "$METHODS" "$KS" "$REPS" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$OUT/manifest.json"
 fi
 
 for scn in $SCENARIOS; do
@@ -74,6 +83,12 @@ for scn in $SCENARIOS; do
             for r in $(seq 1 "$REPS"); do
                 units=$((units + 1))
                 rec="$OUT/records/$scn/${scn}__${m}__k${k}__r${r}.json"
+                # 断点续跑守卫：记录已存在且非空则跳过（中断重跑不重烧配额；FORCE=1 覆盖）
+                if [ "$DRYRUN" != "1" ] && [ "$FORCE" != "1" ] && [ -s "$rec" ]; then
+                    echo "[$units] $scn $m k=$k r=$r 已有记录，跳过"
+                    skipped=$((skipped + 1))
+                    continue
+                fi
                 envs="KUBECONFIG=$(scn_kubeconfig "$scn") ARUING_AGENT_ACQUIRE_METHOD=$m ARUING_AGENT_ACQUIRE_MAX_ROUNDS=$k"
                 # b2 臂种子 = 重复号（同方法同重复可复现；其余臂不注入）
                 if [ "$m" = "b2-random" ]; then
@@ -161,4 +176,4 @@ else
     echo "提示：出图需 matplotlib（python3 -m venv .venv && .venv/bin/pip install matplotlib 后重跑）"
 fi
 
-echo "完成：$units 单元，记录缺失 $missing（详见 $OUT/run.stderr.log）"
+echo "完成：$units 单元（跳过 $skipped），记录缺失 $missing（详见 $OUT/run.stderr.log）"
