@@ -17,16 +17,20 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// GroundTruth 场景真值四元组；scenario.yaml 的 ground_truth 段
+// GroundTruth 场景真值；scenario.yaml 的 ground_truth 段
 type GroundTruth struct {
 	// 资源类型（如 pod / deployment / service）
 	ResourceType string `yaml:"resource_type"`
-	// 资源名（判分①的机械匹配键）
+	// 资源名（判分①的机械匹配键之一）
 	ResourceName string `yaml:"resource_name"`
 	// 所属命名空间
 	Namespace string `yaml:"namespace"`
 	// 故障类型标签（如 bad-image-crashloop / selector-mismatch）
 	FaultType string `yaml:"fault_type"`
+	// 故障特征词（判分①的机械匹配键之二，任一命中即算）：模型结论常述故障
+	// 机制而不复述资源名（试点实测 crashloop 类 1/10 点名），特征词与资源名
+	// 任一命中即根因命中；缺省为空 = 退回纯资源名匹配（旧口径兼容）
+	FaultSignature []string `yaml:"fault_signature"`
 }
 
 // scenario 文件的顶层形状；只取 ground_truth 段，其余字段忽略
@@ -83,13 +87,15 @@ func JudgeRecord(rec RunRecord, gt GroundTruth) JudgeResult {
 		CitationViolations: []string{},
 	}
 
-	// ①：只在 supported 结论里找真值资源名——refuted/insufficient 提及资源不是根因主张
+	// ①：只在 supported 结论里找真值锚点——资源名或故障特征词（任一命中）；
+	// refuted/insufficient 提及资源不是根因主张。模型结论常述故障机制而不复述
+	// 资源名（试点实测），特征词与资源名同权机械包含，不做语义判断
 	want := strings.ToLower(gt.ResourceName)
 	for i, c := range rec.RootCauses {
 		if c.Result != "supported" {
 			continue
 		}
-		if strings.Contains(strings.ToLower(c.Reason), want) {
+		if reasonHitsSignature(c.Reason, want, gt.FaultSignature) {
 			res.RootCauseHit = true
 			res.RootCauseHitBy = i
 			break
@@ -107,6 +113,21 @@ func JudgeRecord(rec RunRecord, gt GroundTruth) JudgeResult {
 		}
 	}
 	return res
+}
+
+// reasonHitsSignature 判分①的机械包含内核：结论理由含资源名或任一故障特征词
+// （大小写归一；空特征词列表退回纯资源名匹配）
+func reasonHitsSignature(reason, resourceName string, signatures []string) bool {
+	lowered := strings.ToLower(reason)
+	if resourceName != "" && strings.Contains(lowered, resourceName) {
+		return true
+	}
+	for _, sig := range signatures {
+		if sig = strings.TrimSpace(strings.ToLower(sig)); sig != "" && strings.Contains(lowered, sig) {
+			return true
+		}
+	}
+	return false
 }
 
 // ProjectionHit 投影命中率判定的机械内核：根因资源名是否出现在投影文本中

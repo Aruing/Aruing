@@ -9,3 +9,4 @@ ground_truth:
   resource_name: demo-api
   namespace: demo
   fault_type: bad-image-crashloop
+  fault_signature: [ImagePullBackOff, ErrImagePull, this-tag-does-not-exist]
