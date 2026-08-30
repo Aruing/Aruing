@@ -98,6 +98,7 @@
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
 | 0.1.2-1 | acquire 决策计算内核 | ✅ | #119（含 6 轮 pr-agent 评审：前 5 条真缺陷按根因修复——Action 封闭不变量 + Options 全参数域校验；第 6 轮 1.5 条采纳 1 条证伪钉板）； `internal/agent/acquire` 纯函数包（零接线零依赖）：对数域贝叶斯更新 + EIG（bit）+ argmax EIG/c + MSPRT 三出口 + 强度更新 ℓ = 2^(α·d·s)（对数线性，思考文档 §3.4 随走查修正）+ §7 数值算例复算单测（EIG=0.71 bit / 后验 0.902/0.988 / 两次动作收敛）；core/编排零改 |
+| 0.1.2-2 | Planner 决策输出结构与 prompt 改造 | ✅ | #122；`core.Hypothesis.Confidence`（[0,1] 单字段，语义随写入方：决策规划写先验 / 决策循环写后验；architecture 数据表同步）+ `agent.PlanDecision` / `ActionProposal` / `StrengthJudgement`（动作级容错：非法动作丢弃并计数，全坏才报错；问用户成本固定 10）+ `LLMDecisionPlanner`（prompt `planner-decision.md`，{{TOOL_SPECS}} 注入，计划级违规重试）+ `LLMVerifier.JudgeStrength`（prompt `strength.md`，逐假设恰好一条 (d,s)，Verify 原语义不动）+ agenttest `FakeDecisionPlanner` / `FakeVerifier.JudgeStrength`（关键词表回放）；prompt 示例契约测试；旧 planner.md / LLMPlanner / investigateLoop 零改（B1 保真）；零编排接线（步骤 3） |
 | 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ✅ | #116；`eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化）；`internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
@@ -108,7 +109,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.2` 步骤 2（Planner 输出结构与 prompt 改造）——假设先验 + 动作提议 + 判别矩阵 D(o|hᵢ) 进 Plan JSON（`core.Hypothesis` 置信度字段随本步过架构评审）、Verifier 兼职强度 (d,s) 轻调用输出、prompt go:embed 改造、agenttest 假实现；零编排接线（步骤 3）。其后步骤 3 取证决策循环接线（大）→ 步骤 4 实验跑数（含 0.1.1 遗留 C4/下游端到端授权同批）。排序依据见笔记 `plan/version/0.2.0.md`。
+**下一项**：`0.1.2` 步骤 3（取证决策循环接线，大）——调查循环内 `a* ← argmax EIG/c`（动作全经 Dispatcher，#16）、观测经 classify 归入结果类别再更新信念、MSPRT 三出口映射 Verdict 三值、全局意外 abduction 重规划、问用户统一建模（复用 clarify 挂起）、config `agent.acquire.method` 基线分派（B1 = 旧 `investigateLoop` 零改保真）；消费步骤 2 产物（`PlanDecision` / `JudgeStrength` / acquire 内核）。其后步骤 4 实验跑数（含 0.1.1 遗留 C4/下游端到端授权同批）。排序依据见笔记 `plan/version/0.2.0.md`。
 
 **0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
 
