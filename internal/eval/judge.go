@@ -182,3 +182,135 @@ func sanitizeTableCell(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
 }
+
+// 探针判分状态（判分侧产出；no_* 两态透传自记录的期望展开状态）
+const (
+	// 答案满足全部期望组
+	ProbeStatusHit = "hit"
+	// 答案未满足全部期望组
+	ProbeStatusMiss = "miss"
+)
+
+// 单条探针的判分结果
+type ProbeVerdict struct {
+	// 探针编号
+	ProbeID string `json:"probe_id"`
+	// 类别：evidence / synthesis / chain
+	Class string `json:"class"`
+	// 判分状态：hit / miss / no_diagnosis / no_facts（后两态透传，不进成功率分母）
+	Status string `json:"status"`
+	// 是否命中（status=hit 时为真）
+	Hit bool `json:"hit"`
+}
+
+// 一条长会话记录的探针判分汇总（judge --probe 的输出单元）
+// 成功率分母只含可判探针（hit+miss）；no_diagnosis / no_facts 单列计数，
+// 不把诊断路由失败混进记忆度量，也不静默剔除（全量报告）
+type ProbeJudgeResult struct {
+	// 会话编号
+	SessionID string `json:"session_id"`
+	// 场景名
+	Scenario string `json:"scenario"`
+	// 记忆方法（分组变量）
+	MemoryMethod string `json:"memory_method"`
+	// 主体轮数（断崖曲线横轴）
+	Rounds int `json:"rounds"`
+	// 逐探针判分
+	Probes []ProbeVerdict `json:"probes"`
+	// 探针总数
+	ProbeTotal int `json:"probe_total"`
+	// 可判探针数（成功率分母）
+	ProbeScored int `json:"probe_scored"`
+	// 命中数
+	ProbeHits int `json:"probe_hits"`
+	// 成功率 = hits / scored；scored 为 0 时取 0
+	SuccessRate float64 `json:"success_rate"`
+	// 引用的诊断未发生数（单列报告）
+	NoDiagnosis int `json:"no_diagnosis"`
+	// 诊断无该类事实数（单列报告）
+	NoFacts int `json:"no_facts"`
+	// 内嵌诊断的逐条复判（复用单次诊断判分：完成率 / 根因命中 / 引用合法）
+	Diagnoses []JudgeResult `json:"diagnoses"`
+	// 穿插诊断总数
+	DiagnoseTotal int `json:"diagnose_total"`
+	// 完成数（报告落账本）
+	DiagnoseCompleted int `json:"diagnose_completed"`
+	// 根因命中数（内嵌复判①层）
+	DiagnoseRootCauseHits int `json:"diagnose_root_cause_hits"`
+}
+
+// JudgeProbeSession 判分一条探针会话记录
+// 探针层：①层机械包含——每期望组至少一串被答案包含（大小写不敏感），全组满足才 hit；
+// 内嵌诊断层：逐条复用 JudgeRecord（同场景真值），供完成率列与探针质量交叉核对
+func JudgeProbeSession(rec ProbeSessionRecord, gt GroundTruth) ProbeJudgeResult {
+	res := ProbeJudgeResult{
+		SessionID:    rec.SessionID,
+		Scenario:     rec.Scenario,
+		MemoryMethod: rec.MemoryMethod,
+		Rounds:       rec.Rounds,
+		Probes:       make([]ProbeVerdict, 0, len(rec.Probes)),
+		Diagnoses:    make([]JudgeResult, 0, len(rec.Diagnoses)),
+	}
+	for _, p := range rec.Probes {
+		v := ProbeVerdict{ProbeID: p.ProbeID, Class: p.Class}
+		switch p.ExpectStatus {
+		case ExpectNoDiagnosis:
+			v.Status = ExpectNoDiagnosis
+			res.NoDiagnosis++
+		case ExpectNoFacts:
+			v.Status = ExpectNoFacts
+			res.NoFacts++
+		default:
+			v.Hit = probeAnswerHits(p.Answer, p.Expected)
+			if v.Hit {
+				v.Status = ProbeStatusHit
+				res.ProbeHits++
+			} else {
+				v.Status = ProbeStatusMiss
+			}
+			res.ProbeScored++
+		}
+		res.ProbeTotal++
+		res.Probes = append(res.Probes, v)
+	}
+	if res.ProbeScored > 0 {
+		res.SuccessRate = float64(res.ProbeHits) / float64(res.ProbeScored)
+	}
+	for _, d := range rec.Diagnoses {
+		jr := JudgeRecord(d.Record, gt)
+		res.Diagnoses = append(res.Diagnoses, jr)
+		res.DiagnoseTotal++
+		if d.Status == "completed" {
+			res.DiagnoseCompleted++
+		}
+		if jr.RootCauseHit {
+			res.DiagnoseRootCauseHits++
+		}
+	}
+	return res
+}
+
+// probeAnswerHits 包含判定：每个期望组至少一串候选被答案包含（大小写不敏感）
+// 空组列表视为不命中（无期望即无从判对；规格校验已保证至少一组）
+func probeAnswerHits(answer string, groups [][]string) bool {
+	if len(groups) == 0 {
+		return false
+	}
+	lower := strings.ToLower(answer)
+	for _, g := range groups {
+		if len(g) == 0 {
+			return false
+		}
+		matched := false
+		for _, want := range g {
+			if want != "" && strings.Contains(lower, strings.ToLower(want)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}

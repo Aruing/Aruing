@@ -71,6 +71,32 @@ type TowerResponder struct {
 	memoryMethod MemoryMethod
 	// 记忆组装参数（D1 条数等；预算与窗口用包内默认，不进 config）
 	memoryOpts memoryOptions
+	// 最近一轮 Respond 的记忆观测量（只读统计，探针实验记录消费；不影响行为）
+	lastMemStats MemoryTurnStats
+}
+
+// 单轮记忆组装与分层检索的观测统计（只读副本；评测侧消费，不影响应答行为）
+// 定位层口径与回灌实现一致：λ₁ 命中（含未回灌的命中）/ λ₂ 兜底 / 无命中；
+// D1 / D2 实验臂无分层检索，恒为 none
+type MemoryTurnStats struct {
+	// 记忆方法规范名（ours / d1-last-n / d2-flat-summary）
+	Method string
+	// 本轮定位命中层：lambda1 / lambda2 / none
+	LocateLayer string
+	// λ₂ 是否实际调用（层为 lambda1 时恒 false）
+	Lambda2Called bool
+	// 回灌注入的对话消息条数
+	RehydratedMsgs int
+	// 回灌注入的合成证据条数（mode=evidence）
+	RehydratedEvidence int
+	// 本轮注入视图时的历史消息条数
+	HistTurns int
+}
+
+// LastMemoryStats 返回最近一轮 Respond 的记忆观测量（只读副本）
+// 单线程轮次约定下读，跨轮由调用方自持锁；评测侧在探针轮后立即读取
+func (t *TowerResponder) LastMemoryStats() MemoryTurnStats {
+	return t.lastMemStats
 }
 
 // 组装总控；客户端、编号工厂、执行器、账本必填，调度器与工具规格可选
@@ -185,6 +211,8 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}
 
 	t.progressf("tower: session=%s history=%d user_chars=%d", in.SessionID, len(in.History), len(in.UserText))
+	// 轮首重置记忆观测量：本轮任何路径（含挂起恢复）都有可读统计
+	t.lastMemStats = MemoryTurnStats{Method: string(t.memoryMethod), LocateLayer: "none", HistTurns: len(in.History)}
 
 	// 本轮 Put 进索引的 evidenceId；Respond 任一出口 Discard，避免跨轮泄漏
 	var putEvidenceIDs []string
@@ -235,7 +263,23 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		priorRuns = cards
 		// 分层检索回灌（仅 ours）：λ₁ 确定性寻址每轮必跑，λ₁ 空且压缩丢细节时
 		// λ₂ 大模型兜底；命中窗与证据预览压进子预算，作为回灌消息注入
-		rehydrated = rehydrateLayered(ctx, t.client, in.UserText, in.History, records, view)
+		var locStats LocateStats
+		rehydrated, locStats = rehydrateLayered(ctx, t.client, in.UserText, in.History, records, view)
+		// 回填定位层与回灌条目数：合成证据条目按 mode 标记区分对话消息
+		t.lastMemStats.LocateLayer = "none"
+		if locStats.MsgHits+locStats.EvidenceHits > 0 {
+			t.lastMemStats.LocateLayer = "lambda1"
+		} else if locStats.Lambda2Called {
+			t.lastMemStats.LocateLayer = "lambda2"
+		}
+		t.lastMemStats.Lambda2Called = locStats.Lambda2Called
+		for _, m := range rehydrated {
+			if m.Mode == rehydratedModeEvidence {
+				t.lastMemStats.RehydratedEvidence++
+			} else {
+				t.lastMemStats.RehydratedMsgs++
+			}
+		}
 		if len(rehydrated) > 0 {
 			t.progressf("tower: rehydrated=%d", len(rehydrated))
 		}

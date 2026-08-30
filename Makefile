@@ -133,6 +133,12 @@ bench:
 eval-sweep:
 	bash scripts/eval-sweep.sh
 
+# ---------------- probe sweep (0.1.3 step 4) ----------------
+# 探针实验矩阵驱动器：场景 × 记忆方法 × 轮数 × 重复 → 会话记录 + judge --probe + CSV
+# 例: make probe-sweep DRYRUN=1 / make probe-sweep METHODS="ours" ROUNDS="20" OUT=/tmp/probe
+probe-sweep:
+	bash scripts/probe-sweep.sh
+
 # 全量真集群 smoke（全部场景，严格校验）：up → chat → down，单场景失败不中断，末尾汇总。
 # 依赖 Docker/kind/kubectl + bin/aruing + LLM 配置（playground/config.yaml 或 ARUING_CONFIG）。
 smoke-all:

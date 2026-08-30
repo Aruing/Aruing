@@ -387,7 +387,19 @@ func firstSentence(content string, maxRunes int) string {
 	return s
 }
 
-// 分层检索回灌总装（Algorithm 1 第 6–8 行），轮内单遍执行
+// 单轮分层检索的观测统计（探针实验观测量；只读，不影响回灌行为）
+// 命中层口径：λ₁ 命中按提及计数（命中但视图未压缩时不回灌，仍是 λ₁ 层）；
+// λ₂ 只记是否实际调用，找到与否看回灌窗
+type LocateStats struct {
+	// λ₁ 命中的消息数（含命中但因视图未压缩未回灌的）
+	MsgHits int
+	// λ₁ 命中的证据条数
+	EvidenceHits int
+	// λ₂ 是否实际调用（λ₁ 空且视图丢细节且含语义指涉时）
+	Lambda2Called bool
+}
+
+// 分层检索回灌总装（Algorithm 1 第 6–8 行），轮内单遍执行；第二返回值为定位观测统计
 // λ₁ 每轮必跑；λ₁ 命中即取回，不再调 λ₂
 // 消息回灌仅在视图因压缩丢细节时注入（原文已在视图时不重复注入，省预算）；
 // 证据 raw 预览无论压缩与否都注入（raw 从不在默认视图）
@@ -400,9 +412,10 @@ func rehydrateLayered(
 	history []session.Message,
 	records []session.DiagnosticRecord,
 	view towerContextView,
-) []rehydratedMsg {
+) ([]rehydratedMsg, LocateStats) {
 	dict := buildEntityDict(records)
 	msgIdx, evIDs := locateByAddress(userText, history, records, dict)
+	stats := LocateStats{MsgHits: len(msgIdx), EvidenceHits: len(evIDs)}
 
 	var window []rehydratedMsg
 	if len(msgIdx) > 0 && viewCompactedAwayDetail(view) {
@@ -410,17 +423,18 @@ func rehydrateLayered(
 	}
 	window = append(window, evidencePreviewWindow(evIDs, records)...)
 	if len(window) > 0 {
-		return compactRange(window, defaultRehydrateBudgetTokens)
+		return compactRange(window, defaultRehydrateBudgetTokens), stats
 	}
 
 	// λ₂ 兜底：λ₁ 空、视图丢细节且问题含语义指涉时，时间线大纲定位一次
 	if !viewCompactedAwayDetail(view) || !referencesPastStep(userText) || client == nil {
-		return nil
+		return nil, stats
 	}
+	stats.Lambda2Called = true
 	if lo, hi, ok := llmLocateRange(ctx, client, userText, history); ok {
-		return compactRange(rehydrateRange(history, lo, hi), defaultRehydrateBudgetTokens)
+		return compactRange(rehydrateRange(history, lo, hi), defaultRehydrateBudgetTokens), stats
 	}
-	return nil
+	return nil, stats
 }
 
 // λ₁ 命中消息取原文：各自扩一圈邻接因果链（前一轮用户 + 本条 + 后一轮），
