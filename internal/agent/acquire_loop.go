@@ -13,9 +13,11 @@ package agent
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"math"
 	"slices"
 	"strings"
@@ -154,6 +156,18 @@ func (o *Orchestrator) acquireLoop(
 				return nil, nil, nil, InvestigateState{}, fmt.Errorf("select action (round %d): %w", round, selErr)
 			}
 			maxEIG = sel.MaxEIG
+			// 选择策略（步骤 4 裁决 2）：B2/B4 实验臂覆盖 ours 的 argmax 选择，
+			// 信念更新 / 停止准则 / 重规划等全部机制不变（对照口径「其余一切
+			// 同构」）；MaxEIG 恒为全候选最大 EIG（停止检查不随策略变）；
+			// BestScore 仅对 ours 有选择依据语义，实验臂清零
+			switch o.acquireMethod {
+			case AcquireMethodB2Random:
+				sel.Best = seededAcquireChoice(o.acquireSeed, belief, acts)
+				sel.BestScore = 0
+			case AcquireMethodB4Cheapest:
+				sel.Best = cheapestAcquireChoice(poolIdx, acq.Actions)
+				sel.BestScore = 0
+			}
 		}
 		if len(evidence) > 0 {
 			stop := acquire.CheckStop(belief, maxEIG, maxRounds-round, o.acquireOptions)
@@ -216,7 +230,11 @@ func (o *Orchestrator) acquireLoop(
 			}, cloneInvestigateState(state), nil
 		}
 
-		o.progressf("  选中动作 %q（EIG/c = %.2f）：%s", chosen.Name, sel.BestScore, chosen.Purpose)
+		if o.acquireMethod == AcquireMethodOurs {
+			o.progressf("  选中动作 %q（EIG/c = %.2f）：%s", chosen.Name, sel.BestScore, chosen.Purpose)
+		} else {
+			o.progressf("  选中动作 %q（策略 %s）：%s", chosen.Name, o.acquireMethod, chosen.Purpose)
+		}
 		task, taskErr := o.acquireTask(query, hypotheses, chosen)
 		if taskErr != nil {
 			return nil, nil, nil, InvestigateState{}, taskErr
@@ -394,6 +412,36 @@ func MergeReplanWeights(old []core.Hypothesis, post []float64, fresh []core.Hypo
 		}
 	}
 	return merged, weights
+}
+
+// 种子随机选择（B2 实验臂）：(seed, 信念后验) 哈希取均匀索引——纯函数，同种子同信念
+// 必同选择，与调用次序无关（实验可复现的口径）；候选不足 2 个时无需随机
+func seededAcquireChoice(seed int64, belief acquire.Belief, acts []acquire.Action) int {
+	if len(acts) <= 1 {
+		return 0
+	}
+	h := fnv.New64a()
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(seed))
+	h.Write(buf[:])
+	for _, p := range belief.Posterior() {
+		binary.LittleEndian.PutUint64(buf[:], math.Float64bits(p))
+		h.Write(buf[:])
+	}
+	return int(h.Sum64() % uint64(len(acts)))
+}
+
+// 最低成本选择（B4 实验臂）：恒选 argmin cost（并列取索引小，确定性）。
+// 成本取动作提议面（acquire.Action 的成本未导出，proposals 与 acts 经 poolIdx 对齐）。
+// 调用前提：poolIdx 非空且与候选集等长（循环内已守 len(acts) > 0，两者同步构建）
+func cheapestAcquireChoice(poolIdx []int, proposals []ActionProposal) int {
+	best := 0
+	for i := 1; i < len(poolIdx); i++ {
+		if proposals[poolIdx[i]].Cost < proposals[poolIdx[best]].Cost {
+			best = i
+		}
+	}
+	return best
 }
 
 // 出口收尾：后验已回写，正式 Verify 出判决（语义与 B1 收尾一致），记观测统计

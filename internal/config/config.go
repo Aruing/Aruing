@@ -76,11 +76,14 @@ type Agent struct {
 // 配置层不做二次校验
 // 对应环境变量 ARUING_AGENT_ACQUIRE_*
 type Acquire struct {
-	// ours | b1-serial；空 = ours（Ours 决策循环为产品默认，B1 一开关可达）
+	// ours | b1-serial | b2-random | b4-cheapest（后两者为实验臂：复用 ours 决策循环
+	// 只换选择策略——种子随机 / 恒选最低成本）；空 = ours（产品默认，一开关可达各臂）
 	Method string `yaml:"method"`
 	// 调查阶段轮数预算（两循环共用口径：一轮 = 一次动作/一次规划/一次问用户）；
 	// 0 = 默认 3（实验扫预算 K=1/2/3/5/8 用）
 	MaxRounds int `yaml:"max_rounds"`
+	// b2-random 实验臂的随机种子（选择可复现：同种子同信念必同选择）；其余方法不读
+	Seed int64 `yaml:"seed"`
 	// 强度更新灵敏度 α（ℓ = 2^(α·d·s)，每单位证据强度的 bit 证据权）；0 = 默认 3
 	Alpha float64 `yaml:"alpha"`
 	// supported 出口后验阈值 P*；0 = 默认 0.9
@@ -166,6 +169,7 @@ func LoadFrom(getenv func(string) string) Config {
 			Acquire: Acquire{
 				Method:    strings.TrimSpace(getenv("ARUING_AGENT_ACQUIRE_METHOD")),
 				MaxRounds: parseIntEnv(getenv("ARUING_AGENT_ACQUIRE_MAX_ROUNDS")),
+				Seed:      parseInt64Env(getenv("ARUING_AGENT_ACQUIRE_SEED")),
 				Alpha:     parseFloatEnv(getenv("ARUING_AGENT_ACQUIRE_ALPHA")),
 				PStar:     parseFloatEnv(getenv("ARUING_AGENT_ACQUIRE_P_STAR")),
 				A:         parseFloatEnv(getenv("ARUING_AGENT_ACQUIRE_A")),
@@ -244,6 +248,12 @@ func MergeEnvLookup(base Config, lookup func(string) (string, bool)) Config {
 	if v, ok := lookup("ARUING_AGENT_ACQUIRE_MAX_ROUNDS"); ok {
 		if n := parseIntEnv(v); n > 0 {
 			out.Agent.Acquire.MaxRounds = n
+		}
+	}
+	// 种子允许任意 int64（含负值）；0 视为未设置
+	if v, ok := lookup("ARUING_AGENT_ACQUIRE_SEED"); ok {
+		if n := parseInt64Env(v); n != 0 {
+			out.Agent.Acquire.Seed = n
 		}
 	}
 	if v, ok := lookup("ARUING_AGENT_ACQUIRE_ALPHA"); ok {
@@ -331,6 +341,18 @@ func parseFloatEnv(v string) float64 {
 }
 
 // 解析正整型环境变量；空、非数字或非正返回 0
+func parseInt64Env(v string) int64 {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
 func parseIntEnv(v string) int {
 	v = strings.TrimSpace(v)
 	if v == "" {

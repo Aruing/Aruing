@@ -282,21 +282,24 @@ func configureOrchestrator(orch *agent.Orchestrator, reconEnabled bool, progress
 	orch.SetProgress(progress)
 }
 
-// 配置取证决策循环：方法解析失败启动即错（不静默回落）；ours 时注入决策规划器与参数
+// 配置取证决策循环：方法解析失败启动即错（不静默回落）；决策循环路径（ours 与
+// b2-random / b4-cheapest 实验臂）注入决策规划器与参数；B1 路径不读这些角色
 // 验证器已实现强度判定（LLM 验证器与假实现均实现）；缺角色防御留给编排运行期兑底
 func configureAcquire(orch *agent.Orchestrator, cfg config.Config, roles orchestratorRoles) error {
 	method, err := agent.ParseAcquireMethod(cfg.Agent.Acquire.Method)
 	if err != nil {
 		return fmt.Errorf("agent.acquire.method: %w", err)
 	}
-	if method == agent.AcquireMethodOurs && roles.decision == nil {
-		return fmt.Errorf("agent.acquire.method: ours requires a decision planner")
+	if method != agent.AcquireMethodB1Serial && roles.decision == nil {
+		return fmt.Errorf("agent.acquire.method: %s requires a decision planner", method)
 	}
 	orch.SetAcquireMethod(method)
 	// 轮数预算显式配置时覆盖生产默认（两循环同口径，实验扫预算用）
 	if cfg.Agent.Acquire.MaxRounds > 0 {
 		orch.SetInvestigateMaxRounds(cfg.Agent.Acquire.MaxRounds)
 	}
+	// 种子仅 b2-random 实验臂消费；无条件透传（选不中选择策略是循环内的事）
+	orch.SetAcquireSeed(cfg.Agent.Acquire.Seed)
 	orch.SetAcquireOptions(acquire.Options{
 		Alpha:     cfg.Agent.Acquire.Alpha,
 		PStar:     cfg.Agent.Acquire.PStar,

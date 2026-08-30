@@ -57,6 +57,12 @@ func LoadGroundTruth(path string) (GroundTruth, error) {
 type JudgeResult struct {
 	// 被判分的运行编号
 	RunID string `json:"run_id"`
+	// 分组透传（来自评测记录本身，非判分产物）：实验矩阵按方法 / 名义 K /
+	// 实测轮数出列；旧记录无 acquire 字段时为零值，照常出列
+	AcquireMethod string `json:"acquire_method"`
+	MaxRounds     int    `json:"max_rounds"`
+	Rounds        int    `json:"rounds"`
+	Completed     bool   `json:"completed"`
 	// ①根因命中（0/1）
 	RootCauseHit bool `json:"root_cause_hit"`
 	// 命中的结论理由片段所在条目序号（-1 = 未命中）
@@ -69,6 +75,10 @@ type JudgeResult struct {
 func JudgeRecord(rec RunRecord, gt GroundTruth) JudgeResult {
 	res := JudgeResult{
 		RunID:              rec.RunID,
+		AcquireMethod:      rec.AcquireMethod,
+		MaxRounds:          rec.AcquireMaxRounds,
+		Rounds:             rec.Rounds,
+		Completed:          rec.Completed,
 		RootCauseHitBy:     -1,
 		CitationViolations: []string{},
 	}

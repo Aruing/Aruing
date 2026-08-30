@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-08-30（`0.1.2` 主动取证决策进行中：步骤 1–3 全部合并（#119 内核 / #122 决策输出 / #124 循环接线，产品默认 ours）；下一项步骤 4 实验跑数 + 真 LLM smoke。0.2.0 远景与排序依据见笔记 `plan/version/0.2.0.md`）
+> 最后更新：2026-08-30（`0.1.2` 主动取证决策进行中：步骤 1–4 基建全部合并（#119 内核 / #122 决策输出 / #124 循环接线 / #126 实验矩阵基建，产品默认 ours）；下一项真 LLM smoke（完成标志 7）+ 0.1.1 遗留 C4/下游端到端 + 实验矩阵三批授权跑（完成标志 8），全绿后 tag 归档。0.2.0 远景与排序依据见笔记 `plan/version/0.2.0.md`）
 
 ## 当前阶段
 
@@ -100,6 +100,7 @@
 | 0.1.2-1 | acquire 决策计算内核 | ✅ | #119（含 6 轮 pr-agent 评审：前 5 条真缺陷按根因修复——Action 封闭不变量 + Options 全参数域校验；第 6 轮 1.5 条采纳 1 条证伪钉板）； `internal/agent/acquire` 纯函数包（零接线零依赖）：对数域贝叶斯更新 + EIG（bit）+ argmax EIG/c + MSPRT 三出口 + 强度更新 ℓ = 2^(α·d·s)（对数线性，思考文档 §3.4 随走查修正）+ §7 数值算例复算单测（EIG=0.71 bit / 后验 0.902/0.988 / 两次动作收敛）；core/编排零改 |
 | 0.1.2-2 | Planner 决策输出结构与 prompt 改造 | ✅ | #122；`core.Hypothesis.Confidence`（[0,1] 单字段，语义随写入方：决策规划写先验 / 决策循环写后验；architecture 数据表同步）+ `agent.PlanDecision` / `ActionProposal` / `StrengthJudgement`（动作级容错：非法动作丢弃并计数，全坏才报错；问用户成本固定 10）+ `LLMDecisionPlanner`（prompt `planner-decision.md`，{{TOOL_SPECS}} 注入，计划级违规重试）+ `LLMVerifier.JudgeStrength`（prompt `strength.md`，逐假设恰好一条 (d,s)，Verify 原语义不动）+ agenttest `FakeDecisionPlanner` / `FakeVerifier.JudgeStrength`（关键词表回放）；prompt 示例契约测试；旧 planner.md / LLMPlanner / investigateLoop 零改（B1 保真）；零编排接线（步骤 3） |
 | 0.1.2-3 | 取证决策循环接线 | ✅ | #124；`acquireLoop`（ours 路径）与旧 `investigateLoop` 并行分派（`SetAcquireMethod`，config `agent.acquire.method` 空 = ours，b1-serial 零改保真）：argmax EIG/c 选择 → 动作映射 Task 全经 Dispatcher（#16）→ 机械归类优先（Summary 唯一命中）/ 零多命中走 JudgeStrength 强度更新 → MSPRT 三出口（supported → 正式 Verify + 后验回写 Confidence；refuted → abduction 重规划旧假设保留压低；insufficient → 平台/预算尽带缺口进 LastRunStats）→ 问用户统一建模（高成本动作，复用 investigate clarify 挂起，Resume 答复按结果类别归类更新，决策状态随 InvestigateState.Acquire 进快照）；config `agent.acquire` 段（method + 全套参数，env 覆盖）+ 装配层校验（未知 method / 缺角色启动报错）；顺手修存量 bug：LoadFile 此前漏拷 Tools.Projection（YAML 投影配置从未生效，beta20 TUI 同族）；agenttest 假实现端到端 + 三出口 + ask 挂起恢复 + 分派防御测试 |
+| 0.1.2-4 | 实验矩阵基建（选择策略实验臂 + eval record 扩展 + eval-sweep 驱动器） | ✅ | #126；`agent.acquire.method` 枚举扩 `b2-random`（种子随机：(seed,信念) 哈希纯函数可复现，种子 config `agent.acquire.seed`）/ `b4-cheapest`（argmin cost 并列取索引小）——两臂复用 acquireLoop 全部机制只换选择策略（修订步骤 3 裁决 1：实验须走 run 真路径，config 是唯一开关面）；`RunRecord` 增 acquire_method / acquire_max_rounds / acquire_seed / acquire_exit / acquire_gap（schema v1 向后兼容加字段；judge 结果透传 method/K/实测 rounds 供分组）；`scripts/eval-sweep.sh` + `make eval-sweep`（4 场景 × 4 方法 × 5 K × 3 重复 = 240 单元；DRYRUN 干跑核对、逐场景独立 kind 集群 KUBECONFIG、单元失败不中断全量报告、逐场景 judge 汇总 → CSV 联结观测量）；`bench-plot.py --mode acquire`（实测 rounds 预算曲线 + 名义 K 均值±std 汇总表）；真跑数与 smoke 待授权（完成标志 7/8） |
 | 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ✅ | #116；`eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化）；`internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
@@ -110,7 +111,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.2` 步骤 4（实验跑数）— 4 现有场景 × B1–B4 + Ours × 3 重复（预算-准确率曲线 K=1/2/3/5/8，统计纪律照实验框架 §六）；0.1.1 遗留 C4 / 下游 LLM 端到端矩阵同批授权跑；完成后 tag `v0.1.2` 归档。排序依据见笔记 `plan/version/0.2.0.md`。
+**下一项**：`0.1.2` 收尾三批授权跑（一次授权、依次执行，集群与配额不并行）——①真 LLM smoke（完成标志 7）：crashloop-bad-image / svc-wrong-selector 场景 `chat`（ours 默认路径，含一次 ask 挂起-恢复）；②0.1.1 遗留 C4（llm-rerank 投影矩阵）与下游诊断 LLM 端到端同批；③实验矩阵 `make eval-sweep`（240 单元全 LLM 调用，成本按既往 token 均值先报批，预算-准确率曲线横轴用实测 rounds）。全绿后 tag `v0.1.2` 归档（完成标志 9）。排序依据见笔记 `plan/version/0.2.0.md`。
 
 **0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
 

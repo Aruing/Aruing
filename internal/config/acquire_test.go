@@ -11,6 +11,7 @@ func TestLoadFromAcquireEnv(t *testing.T) {
 	env := map[string]string{
 		"ARUING_AGENT_ACQUIRE_METHOD":     "b1-serial",
 		"ARUING_AGENT_ACQUIRE_MAX_ROUNDS": "5",
+		"ARUING_AGENT_ACQUIRE_SEED":       "42",
 		"ARUING_AGENT_ACQUIRE_ALPHA":      "4",
 		"ARUING_AGENT_ACQUIRE_P_STAR":     "0.95",
 		"ARUING_AGENT_ACQUIRE_A":          "25",
@@ -20,9 +21,20 @@ func TestLoadFromAcquireEnv(t *testing.T) {
 	}
 	cfg := LoadFrom(func(k string) string { return env[k] })
 	a := cfg.Agent.Acquire
-	if a.Method != "b1-serial" || a.MaxRounds != 5 || a.Alpha != 4 || a.PStar != 0.95 ||
+	if a.Method != "b1-serial" || a.MaxRounds != 5 || a.Seed != 42 || a.Alpha != 4 || a.PStar != 0.95 ||
 		a.A != 25 || a.Tau != 0.02 || a.Delta != 0.01 || a.MassFloor != 0.1 {
 		t.Fatalf("取证决策配置解析错误：%+v", a)
+	}
+
+	// 种子非法数值归零（与方法名不同，种子无枚举域可校，静默归零与其他数值参数同口径）
+	badSeed := LoadFrom(func(k string) string {
+		if k == "ARUING_AGENT_ACQUIRE_SEED" {
+			return "not-a-number"
+		}
+		return ""
+	})
+	if badSeed.Agent.Acquire.Seed != 0 {
+		t.Fatalf("非法种子应归零，got %d", badSeed.Agent.Acquire.Seed)
 	}
 
 	// 非法数值归零：参数域校验由 acquire 包消费侧兜底，配置层不二次报错
