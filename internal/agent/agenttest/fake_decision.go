@@ -12,15 +12,28 @@ import (
 )
 
 // 可复用的假决策规划器，始终返回构造时给定的决策模板（按次克隆）
+// 可选脚本：WithNextDecision 设定后下一次 PlanDecision 只返回该模板，随后回落正常模板
+// （重规划测试用：首个计划触发出口后验证第二个计划的合并与续跑）
 type FakeDecisionPlanner struct {
 	// 固定决策模板（按次克隆）
 	decision agent.PlanDecision
+	// 待触发的重规划模板；触发一次后清空
+	next *agent.PlanDecision
+	// PlanDecision 调用计数（断言「挂起恢复不重规划」用）
+	Calls int
 }
 
 // 使用固定决策模板创建可重复使用的假决策规划器
 // 模板中的假设编号应已由测试预填；调用时只补运行绑定
 func NewFakeDecisionPlanner(decision agent.PlanDecision) *FakeDecisionPlanner {
 	return &FakeDecisionPlanner{decision: clonePlanDecision(decision)}
+}
+
+// 设定下一次规划返回的重规划模板（一次性；随后回落正常模板）
+func (p *FakeDecisionPlanner) WithNextDecision(decision agent.PlanDecision) *FakeDecisionPlanner {
+	cloned := clonePlanDecision(decision)
+	p.next = &cloned
+	return p
 }
 
 // 校验运行编号后返回绑定当前运行的独立决策
@@ -36,6 +49,17 @@ func (p *FakeDecisionPlanner) PlanDecision(ctx context.Context, state agent.Plan
 	}
 	if strings.TrimSpace(state.Query.RunID) == "" {
 		return agent.PlanDecision{}, fmt.Errorf("decision planner requires a run ID")
+	}
+
+	p.Calls++
+	// 重规划脚本：一次性触发后清空，随后回落固定模板
+	if p.next != nil {
+		decision := clonePlanDecision(*p.next)
+		p.next = nil
+		for i := range decision.Hypotheses {
+			decision.Hypotheses[i].RunID = state.Query.RunID
+		}
+		return decision, nil
 	}
 
 	decision := clonePlanDecision(p.decision)
