@@ -1,0 +1,33 @@
+# 探针实验规格（0.1.3 步骤 4）：crashloop-bad-image 场景的长会话脚本素材
+# 由 aruing probe 消费（scenario.yaml 同目录）；run/judge 主路径不读本文件
+# 真值口径：静态字面量埋稳定事实（deployment 名）；pod 名与命令串带运行时随机性，
+# 用 from_ledger 在跑数进程内从诊断账本机械展开（判分侧只做①层包含）
+name: crashloop-bad-image
+diagnose_request: "请正式诊断 demo namespace 下的 demo-api：Pod 一直起不来，排查根因并给出报告。"
+qa_pool:
+  - "现在 demo namespace 里大概有哪些工作负载？"
+  - "帮我看一眼 demo-api 的服务当前状态怎么样。"
+  - "集群节点资源占用情况如何？"
+  - "demo namespace 最近有没有什么异常事件？"
+  - "顺便说说 demo-api 平时的部署结构是什么样的。"
+probes:
+  # 证据回灌类：考第 3 次诊断找到的异常 pod 名（带随机后缀，账本展开）
+  - id: pod-of-run3
+    class: evidence
+    question: "第 3 次诊断查出的异常 pod 叫什么名字？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 3 }
+  # 证据链细节类：考最后一次诊断实际执行过的命令
+  - id: cmd-of-last
+    class: chain
+    question: "最后一次诊断时你跑了什么命令拿到关键证据？"
+    expect:
+      - from_ledger: { rule: kth_run_commands, k: -1 }
+  # 跨压缩综合类：对比首末诊断结论，须同时命中两次诊断的 pod 名与资源名
+  - id: first-vs-last
+    class: synthesis
+    question: "对比第一次和最后一次 demo-api 诊断的结论，结论一致吗？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 1 }
+      - from_ledger: { rule: kth_run_pods, k: -1 }
+      - literal: "demo-api"

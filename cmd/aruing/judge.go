@@ -30,8 +30,9 @@ func runJudge(args []string, stdout, stderr io.Writer) error {
 	scenario := fs.String("scenario", "", "scenario.yaml containing ground_truth")
 	sample := fs.Int("sample", 0, "emit a rubric markdown sampling N (conclusion, evidence) pairs for layer-3 review instead of scoring")
 	seed := fs.Int64("seed", 0, "random seed for --sample (fixed seed = reproducible sampling)")
+	probe := fs.Bool("probe", false, "score probe session records (aruing probe output) instead of run records")
 	fs.Usage = func() {
-		fmt.Fprintln(stderr, "Usage: aruing judge --run-json <file|dir> --scenario <scenario.yaml> [--sample N --seed S]")
+		fmt.Fprintln(stderr, "Usage: aruing judge [--probe] --run-json <file|dir> --scenario <scenario.yaml> [--sample N --seed S]")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "Score eval records against scenario ground truth (layers 1-2), or")
 		fmt.Fprintln(stderr, "sample a layer-3 review rubric with --sample.")
@@ -44,9 +45,30 @@ func runJudge(args []string, stdout, stderr io.Writer) error {
 		return fmt.Errorf("judge requires --run-json and --scenario")
 	}
 
-	gt, err := eval.LoadGroundTruth(*scenario)
-	if err != nil {
-		return fmt.Errorf("load ground truth: %w", err)
+	gt, gtErr := eval.LoadGroundTruth(*scenario)
+	if gtErr != nil {
+		return fmt.Errorf("load ground truth: %w", gtErr)
+	}
+
+	// probe 模式：判分会话级探针记录（探针①层 + 内嵌诊断复判），与 run 记录同 flag 入口
+	if *probe {
+		probeRecs, perr := loadProbeRecords(*runJSON)
+		if perr != nil {
+			return fmt.Errorf("load probe records: %w", perr)
+		}
+		if len(probeRecs) == 0 {
+			return fmt.Errorf("no probe session records found at %s", *runJSON)
+		}
+		results := make([]eval.ProbeJudgeResult, 0, len(probeRecs))
+		for _, rec := range probeRecs {
+			results = append(results, eval.JudgeProbeSession(rec, gt))
+		}
+		enc := json.NewEncoder(stdout)
+		enc.SetIndent("", "  ")
+		if err := enc.Encode(results); err != nil {
+			return fmt.Errorf("encode probe judge results: %w", err)
+		}
+		return nil
 	}
 
 	records, err := loadEvalRecords(*runJSON)
@@ -82,27 +104,34 @@ func runJudge(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// loadEvalRecords 读单份记录文件或目录下全部 *.json 记录
-// 目录按文件名排序保证输出顺序稳定
-func loadEvalRecords(path string) ([]eval.RunRecord, error) {
+// 列出单份 JSON 文件或目录下全部 *.json（按文件名排序，输出顺序稳定）
+func listJSONFiles(path string) ([]string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}
-	var files []string
-	if info.IsDir() {
-		entries, err := os.ReadDir(path)
-		if err != nil {
-			return nil, err
+	if !info.IsDir() {
+		return []string{path}, nil
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
 		}
-		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-				continue
-			}
-			files = append(files, filepath.Join(path, e.Name()))
-		}
-	} else {
-		files = []string{path}
+		files = append(files, filepath.Join(path, e.Name()))
+	}
+	return files, nil
+}
+
+// loadEvalRecords 读单份记录文件或目录下全部 *.json 记录
+func loadEvalRecords(path string) ([]eval.RunRecord, error) {
+	files, err := listJSONFiles(path)
+	if err != nil {
+		return nil, err
 	}
 	records := make([]eval.RunRecord, 0, len(files))
 	for _, f := range files {
@@ -111,6 +140,27 @@ func loadEvalRecords(path string) ([]eval.RunRecord, error) {
 			return nil, err
 		}
 		var rec eval.RunRecord
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return nil, fmt.Errorf("parse %s: %w", f, err)
+		}
+		records = append(records, rec)
+	}
+	return records, nil
+}
+
+// loadProbeRecords 读单份探针会话记录或目录下全部 *.json（judge --probe 入口）
+func loadProbeRecords(path string) ([]eval.ProbeSessionRecord, error) {
+	files, err := listJSONFiles(path)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]eval.ProbeSessionRecord, 0, len(files))
+	for _, f := range files {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		var rec eval.ProbeSessionRecord
 		if err := json.Unmarshal(raw, &rec); err != nil {
 			return nil, fmt.Errorf("parse %s: %w", f, err)
 		}

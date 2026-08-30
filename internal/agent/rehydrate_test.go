@@ -143,7 +143,7 @@ func TestRehydrateLayeredRestoresOriginal(t *testing.T) {
 	if !viewCompactedAwayDetail(view) {
 		t.Fatal("folded view should trigger rehydrate")
 	}
-	win := rehydrateLayered(context.Background(), nil, "run_x 之前那一步为什么", history, nil, view)
+	win, _ := rehydrateLayered(context.Background(), nil, "run_x 之前那一步为什么", history, nil, view)
 	if len(win) == 0 {
 		t.Fatal("λ₁ should hit run_x")
 	}
@@ -182,10 +182,10 @@ func TestRehydrateLayeredSkipsMessagesWhenViewClean(t *testing.T) {
 	}}
 	cleanView := towerContextView{Hist: []towerHistMsg{{Role: session.RoleUser, Content: "完整原文"}}}
 
-	if win := rehydrateLayered(context.Background(), nil, "run_x 那一步说了什么", history, records, cleanView); win != nil {
+	if win, _ := rehydrateLayered(context.Background(), nil, "run_x 那一步说了什么", history, records, cleanView); win != nil {
 		t.Fatalf("clean view must skip message rehydrate: %+v", win)
 	}
-	win := rehydrateLayered(context.Background(), nil, "e_ev1 当时的输出是什么", history, records, cleanView)
+	win, _ := rehydrateLayered(context.Background(), nil, "e_ev1 当时的输出是什么", history, records, cleanView)
 	if len(win) != 1 || win[0].Mode != rehydratedModeEvidence || win[0].RunID != "run_x" {
 		t.Fatalf("evidence hit must rehydrate raw preview: %+v", win)
 	}
@@ -208,7 +208,7 @@ func TestRehydrateLayeredEvidencePreview(t *testing.T) {
 	}}
 	cleanView := towerContextView{}
 
-	win := rehydrateLayered(context.Background(), nil, "e_evdeep 的完整输出", nil, records, cleanView)
+	win, _ := rehydrateLayered(context.Background(), nil, "e_evdeep 的完整输出", nil, records, cleanView)
 	if len(win) != 1 {
 		t.Fatalf("want single evidence entry: %+v", win)
 	}
@@ -224,7 +224,7 @@ func TestRehydrateLayeredEvidencePreview(t *testing.T) {
 		t.Fatalf("truncated preview must keep deep address via C1 footer: %q", tail(e.Content, 200))
 	}
 
-	if win := rehydrateLayered(context.Background(), nil, "e_ghost999 在哪", nil, records, cleanView); win != nil {
+	if win, _ := rehydrateLayered(context.Background(), nil, "e_ghost999 在哪", nil, records, cleanView); win != nil {
 		t.Fatalf("unknown evidence id must not synthesize entry: %+v", win)
 	}
 }
@@ -248,7 +248,7 @@ func TestRehydrateLayeredLLMFallback(t *testing.T) {
 		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 			writeChatCompletion(w, `{"found":true,"lo":0,"hi":1}`)
 		})
-		win := rehydrateLayered(context.Background(), client, "之前那一步为什么排除镜像问题", history, records, compacted)
+		win, _ := rehydrateLayered(context.Background(), client, "之前那一步为什么排除镜像问题", history, records, compacted)
 		if len(win) != 2 || win[0].Idx != 0 || win[1].Idx != 1 {
 			t.Fatalf("llm fallback window: %+v", win)
 		}
@@ -259,7 +259,7 @@ func TestRehydrateLayeredLLMFallback(t *testing.T) {
 			called = true
 			writeChatCompletion(w, `{"found":true,"lo":0,"hi":1}`)
 		})
-		if win := rehydrateLayered(context.Background(), client, "现在集群状态", history, records, compacted); win != nil {
+		if win, _ := rehydrateLayered(context.Background(), client, "现在集群状态", history, records, compacted); win != nil {
 			t.Fatalf("no anchor no semantic must not rehydrate: %+v", win)
 		}
 		if called {
@@ -271,7 +271,7 @@ func TestRehydrateLayeredLLMFallback(t *testing.T) {
 			writeChatCompletion(w, `{"found":true,"lo":0,"hi":1}`)
 		})
 		clean := towerContextView{Hist: []towerHistMsg{{Role: session.RoleUser, Content: "完整原文"}}}
-		if win := rehydrateLayered(context.Background(), client, "之前那一步为什么", history, records, clean); win != nil {
+		if win, _ := rehydrateLayered(context.Background(), client, "之前那一步为什么", history, records, clean); win != nil {
 			t.Fatalf("clean view must not rehydrate: %+v", win)
 		}
 	})
@@ -279,7 +279,7 @@ func TestRehydrateLayeredLLMFallback(t *testing.T) {
 		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
 			writeChatCompletion(w, `{"found":false}`)
 		})
-		if win := rehydrateLayered(context.Background(), client, "之前那一步为什么", history, records, compacted); win != nil {
+		if win, _ := rehydrateLayered(context.Background(), client, "之前那一步为什么", history, records, compacted); win != nil {
 			t.Fatalf("found=false must not rehydrate: %+v", win)
 		}
 	})

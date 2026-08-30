@@ -179,9 +179,33 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 	return orch, tracker, nil
 }
 
+// 会话栈全量句柄：探针实验装置等评测侧消费（读账本 / 记忆观测量 / 编排统计）
+// chat 路径只用 Service，probe 路径要全部句柄
+type sessionStack struct {
+	// 会话服务（Turn 入口）
+	service *session.Service
+	// 基线塔（LastMemoryStats 探针观测量）
+	tower *agent.TowerResponder
+	// 编排器（LastRunStats 逐诊断统计）
+	orch *agent.Orchestrator
+	// 诊断账本（内嵌 RunRecord 组装与 from_ledger 展开的权威源）
+	ledger session.RunLedger
+	// token 用量跟踪器（适配器未实现时为 nil）
+	tracker llm.UsageTracker
+}
+
 // 组装多轮对话会话栈：内存存储、诊断账本与基线塔
 // 无大模型配置时硬失败
 func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Writer) (*session.Service, error) {
+	st, err := newSessionStackFull(factory, cfg, progress)
+	if err != nil {
+		return nil, err
+	}
+	return st.service, nil
+}
+
+// 组装会话栈全量句柄（newSessionStack 的全量形态）
+func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.Writer) (*sessionStack, error) {
 	if err := config.ValidateLLM(cfg); err != nil {
 		return nil, err
 	}
@@ -236,8 +260,15 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 	if cfg.Debug {
 		tower.SetProgress(progress)
 	}
-
-	return session.NewService(store.NewMemoryStore(), factory, tower), nil
+	// tower 用角色标签客户端包装，token 记账归口到同一底层客户端适配器
+	tracker, _ := client.(llm.UsageTracker)
+	return &sessionStack{
+		service: session.NewService(store.NewMemoryStore(), factory, tower),
+		tower:   tower,
+		orch:    orch,
+		ledger:  ledger,
+		tracker: tracker,
+	}, nil
 }
 
 // 配置记忆组装：方法解析失败启动即错（不静默回落）；实验臂须显式配置，产品默认 ours

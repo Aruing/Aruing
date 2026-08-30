@@ -51,6 +51,7 @@ Commands:
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
   judge            Score eval records against scenario ground truth
   bench            Run the mechanical projection benchmark (no LLM, no cluster)
+  probe            Drive one scripted long session with tail probes (experiment rig)
 
 Configuration (file then env, env wins):
   --config PATH            config YAML (or ARUING_CONFIG)
@@ -107,6 +108,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runJudge(args[1:], stdout, stderr)
 	case "bench":
 		return runBench(args[1:], stdout, stderr)
+	case "probe":
+		return runProbe(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
