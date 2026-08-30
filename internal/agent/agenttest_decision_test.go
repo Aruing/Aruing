@@ -22,7 +22,8 @@ func TestFakeDecisionPlanner(t *testing.T) {
 			Argv:     []string{"get", "endpoints", "demo-api"},
 			Cost:     1,
 			Outcomes: []string{"empty", "full"},
-			Matrix:   [][]float64{{0.85}, {0.15}},
+			// 行 = 假设数（1），列 = 结果数（2），与解析层契约同形
+			Matrix: [][]float64{{0.85, 0.15}},
 		}},
 	}
 	planner := agenttest.NewFakeDecisionPlanner(template)
