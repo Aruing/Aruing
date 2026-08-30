@@ -88,8 +88,9 @@ func (v *LLMVerifier) JudgeStrength(
 }
 
 // 序列化强度判定输入：待判定证据 + 全部候选假设
-// 证据带原始输出（富文本判定的对象就是 raw），假设带语句与预期信号供对照；
-// 任务上下文不进载荷（强度判定只关心证据内容与假设的关系）
+// 证据带原始输出（富文本判定的对象就是 raw；raw 按类型契约为预编码 JSON，
+// 工具侧以结果信封封装——纯文本 stdout 是信封内的字符串字段，直接嵌入编组），
+// 假设带语句与预期信号供对照；任务上下文不进载荷（强度判定只关心证据内容与假设的关系）
 func buildStrengthUserPayload(evidence core.Evidence, hypotheses []core.Hypothesis) (string, error) {
 	// 单条猜想的精简视图
 	type hypView struct {

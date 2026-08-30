@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -101,6 +103,28 @@ func TestJudgeStrengthRecoversAfterInvalidDirection(t *testing.T) {
 	}
 	if judgements[0].Direction != 1 || judgements[0].Strength != 0.9 {
 		t.Errorf("judgement = %+v, want supports 0.9", judgements[0])
+	}
+}
+
+// 载荷构建对真实管线形态的回归（pr-agent 第 2 轮裁决证伪钉板）：
+// 工具侧 Evidence.Raw 恒为结果信封 JSON，纯文本 stdout 是信封内的字符串字段，
+// 嵌入编组不会失败；同构路径自 beta3 Verify 生产验证
+func TestBuildStrengthUserPayloadRawEnvelope(t *testing.T) {
+	evidence := core.Evidence{
+		ID:       "ev_1",
+		TaskID:   "t_1",
+		ToolName: "k8s",
+		Summary:  "pod CrashLoopBackOff",
+		Raw:      json.RawMessage(`{"argv":["logs","demo-api-abc"],"stdout":"2026-08-30 CrashLoopBackOff\n","exitCode":0}`),
+	}
+	hypotheses := []core.Hypothesis{{ID: "h_1", RunID: "run_1", Statement: "Pod 崩溃"}}
+
+	payload, err := buildStrengthUserPayload(evidence, hypotheses)
+	if err != nil {
+		t.Fatalf("build payload: %v", err)
+	}
+	if !strings.Contains(payload, "CrashLoopBackOff") {
+		t.Errorf("payload missing raw stdout text")
 	}
 }
 
