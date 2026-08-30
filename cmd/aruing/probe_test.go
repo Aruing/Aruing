@@ -109,3 +109,16 @@ func TestRunJudgeProbe(t *testing.T) {
 		t.Fatalf("embedded diagnose recount wrong: %+v", r)
 	}
 }
+
+// 记录落盘失败必须让命令非零退出：会话记录是 probe 的唯一主产物，
+// 静默丢失会让跑批把丢记录的单元误计为成功（runProbe 对该错误直接 return）
+func TestRunProbeRecordWriteFailure(t *testing.T) {
+	// --out 指向已存在文件下的子路径：MkdirAll 失败模拟不可写目录
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeProbeRecord(filepath.Join(blocker, "sub", "rec.json"), eval.ProbeSessionRecord{}); err == nil {
+		t.Fatal("write into a file path must fail")
+	}
+}

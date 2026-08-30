@@ -118,7 +118,9 @@ func runProbe(args []string, stdout, stderr io.Writer) error {
 	recPath := filepath.Join(outDir, fmt.Sprintf(
 		"probe-session-%s-%s-n%d-s%d.json", spec.Name, rec.MemoryMethod, *rounds, *seed))
 	if werr := writeProbeRecord(recPath, rec); werr != nil {
-		fmt.Fprintf(stderr, "写探针记录失败 %s：%v\n", recPath, werr)
+		// 会话记录是本命令的唯一主产物：写失败必须非零退出，
+		// 否则跑批把丢记录的单元误计为成功（与 run 路径旁路落盘语义不同）
+		return fmt.Errorf("write probe record %s: %w", recPath, werr)
 	}
 	if runErr != nil {
 		fmt.Fprintf(stderr, "长会话中途失败（部分记录已落盘 %s）：%v\n", recPath, runErr)
