@@ -48,6 +48,10 @@ type orchestratorRoles struct {
 	decision interface {
 		PlanDecision(context.Context, agent.PlanState) (agent.PlanDecision, error)
 	}
+	// B3 ReAct 选择器（b3-react 实验臂必需）；产品路径始终构建
+	react interface {
+		SelectAction(context.Context, agent.ReActSelectRequest) (agent.ReActChoice, error)
+	}
 }
 
 // 工具注册表与调度器；基线塔与编排器必须共用同一调度器
@@ -307,6 +311,11 @@ func buildLLMRoles(client llm.Client, factory *core.Factory, specs []tools.ToolS
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm decision planner: %w", err)
 	}
+	// B3 ReAct 选择器（b3-react 实验臂）：标签独立记账，未配置 b3-react 时不被调用
+	react, err := agent.NewLLMReActSelector(llm.NewLabelingClient(client, "react-select"))
+	if err != nil {
+		return orchestratorRoles{}, fmt.Errorf("build llm react selector: %w", err)
+	}
 	return orchestratorRoles{
 		parser:   parser,
 		resolver: resolver,
@@ -314,6 +323,7 @@ func buildLLMRoles(client llm.Client, factory *core.Factory, specs []tools.ToolS
 		verifier: verifier,
 		reporter: reporter,
 		decision: decision,
+		react:    react,
 	}, nil
 }
 
@@ -335,6 +345,10 @@ func configureAcquire(orch *agent.Orchestrator, cfg config.Config, roles orchest
 	if method != agent.AcquireMethodB1Serial && roles.decision == nil {
 		return fmt.Errorf("agent.acquire.method: %s requires a decision planner", method)
 	}
+	// b3-react 另需选择器（冻结裁决 4：缺角色启动报错，先例 0.1.2-3）
+	if method == agent.AcquireMethodB3React && roles.react == nil {
+		return fmt.Errorf("agent.acquire.method: b3-react requires an LLM ReAct selector")
+	}
 	orch.SetAcquireMethod(method)
 	// 轮数预算显式配置时覆盖生产默认（两循环同口径，实验扫预算用）
 	if cfg.Agent.Acquire.MaxRounds > 0 {
@@ -352,6 +366,9 @@ func configureAcquire(orch *agent.Orchestrator, cfg config.Config, roles orchest
 	})
 	if roles.decision != nil {
 		orch.SetDecisionPlanner(roles.decision)
+	}
+	if roles.react != nil {
+		orch.SetReActSelector(roles.react)
 	}
 	return nil
 }

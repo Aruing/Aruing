@@ -38,6 +38,8 @@ var (
 	errDecisionPlannerRequired = errors.New("acquire loop requires a decision planner")
 	// ours 方法的验证器未实现强度判定能力接口
 	errStrengthJudgeRequired = errors.New("acquire loop requires a verifier with JudgeStrength")
+	// b3-react 方法未注入 ReAct 选择器（装配层应前置校验，运行期兑底）
+	errReActSelectorRequired = errors.New("acquire loop (b3-react) requires an LLM ReAct selector")
 )
 
 // 调查阶段取证决策方法开关（config agent.acquire.method 的解析结果）
@@ -55,11 +57,16 @@ const (
 	AcquireMethodB2Random
 	// B4 实验臂：恒选最低成本动作——同上复用，只换选择策略（并列取索引小）
 	AcquireMethodB4Cheapest
+	// B3 实验臂：ReAct 式 LLM 自由决策（统一实验批强对照，业界 agent 现状
+	// 代表）——复用决策循环骨架，每轮一次 LLM 选择调用，无贝叶斯更新、无
+	// EIG、无 MSPRT；无显式信念状态正是对照点。LLM 声明足够 → 正式 Verify
+	// （不回写 Confidence）；选择器经 SetReActSelector 注入
+	AcquireMethodB3React
 )
 
 // 解析方法名（config 口径）：空或 "ours" → Ours（产品默认）；"b1-serial" → B1；
-// "b2-random" / "b4-cheapest" → 实验臂（复用决策循环只换选择策略）；其余报错
-// （启动明确失败）。注意与编排零值的区别：未显式配置的裸编排器走 B1
+// "b2-random" / "b4-cheapest" / "b3-react" → 实验臂（复用决策循环只换选择策略）；
+// 其余报错（启动明确失败）。注意与编排零值的区别：未显式配置的裸编排器走 B1
 func ParseAcquireMethod(name string) (AcquireMethod, error) {
 	switch strings.TrimSpace(strings.ToLower(name)) {
 	case "", "ours":
@@ -70,8 +77,10 @@ func ParseAcquireMethod(name string) (AcquireMethod, error) {
 		return AcquireMethodB2Random, nil
 	case "b4-cheapest":
 		return AcquireMethodB4Cheapest, nil
+	case "b3-react":
+		return AcquireMethodB3React, nil
 	default:
-		return 0, fmt.Errorf("unknown agent.acquire.method %q (want ours, b1-serial, b2-random or b4-cheapest)", name)
+		return 0, fmt.Errorf("unknown agent.acquire.method %q (want ours, b1-serial, b2-random, b4-cheapest or b3-react)", name)
 	}
 }
 
@@ -84,6 +93,8 @@ func (m AcquireMethod) String() string {
 		return "b2-random"
 	case AcquireMethodB4Cheapest:
 		return "b4-cheapest"
+	case AcquireMethodB3React:
+		return "b3-react"
 	default:
 		return "ours"
 	}
@@ -227,6 +238,10 @@ type InvestigateState struct {
 	// 取证决策循环状态（ours 路径专用；B1 路径为 nil 不参与）
 	// 挂起快照整体携带，Resume 后信念与动作池连续
 	Acquire *AcquireState
+	// 已收集的决策轨迹（观测非进度，但随快照携带）：ask 挂起时存入，Resume
+	// 段继续累积——否则恢复段的 defer 会用局部轨迹覆盖，挂起前历史丢失
+	// （pr-agent #134 R2）；挂起轮在恢复段重跑，轮号可重复，按发生序保留
+	Trace []DecisionTraceEntry
 }
 
 // 取证决策循环的跨轮状态（ours 路径）
@@ -274,6 +289,8 @@ type Orchestrator struct {
 	acquireOptions acquire.Options
 	// 决策规划器（ours 方法必需）；B1 路径不读
 	decisionPlanner decisionPlanner
+	// B3 ReAct 选择器（b3-react 方法必需）；其余方法不读，未注入时 b3 分派明确失败
+	reactSelector reactSelector
 	// 是否启用集群侦察；装配层在集群工具注册后开启，避免无集群环境（假实现或持续集成）产生噪音
 	// 关闭时侦察直接返回空，不进入证据链、不打印失败
 	reconEnabled bool
@@ -298,6 +315,40 @@ type RunStats struct {
 	AcquireExit string
 	// insufficient 出口的缺口说明（平台还是预算尽）；#18 明确失败可观测
 	AcquireGap string
+	// 逐轮决策轨迹（决策循环路径：ours / b2 / b4 / b3-react；b1-serial 臂为
+	// 空）。只读观测，不参与编排决策；评测记录（decision_trace）消费。
+	// 挂起恢复跨段累积（快照携带前段轨迹；挂起轮重跑致轮号可重复，按发生序）
+	DecisionTrace []DecisionTraceEntry
+}
+
+// DecisionTraceEntry 决策轨迹的一轮快照（RunStats.DecisionTrace 元素）
+//
+// 冻结裁决 7：ours / b2 / b4 臂逐轮记候选 EIG/c 得分、实际选择与信念前后
+// 对比；B3 臂同结构但无得分与信念列，改存 LLM 选择理由原文——ours 有数字、
+// B3 只有直觉，两列对照即案例研究本体
+// 零行为影响：轨迹只随 lastStats 透出，不进任何编排决策
+type DecisionTraceEntry struct {
+	// 轮次（1 起，已开始的调查轮）
+	Round int `json:"round"`
+	// 本轮选中的动作名；B3 声明足够轮为空
+	Chosen string `json:"chosen"`
+	// 候选动作的 EIG/c 得分（ours 口径；B2/B4 覆盖选择但得分照记）；B3 臂为空
+	Scores []ActionScore `json:"scores,omitempty"`
+	// 本轮决策前的信念后验；B3 臂为空
+	BeliefBefore []float64 `json:"belief_before,omitempty"`
+	// 本轮更新后的信念后验（挂起轮与前像相等）；B3 臂为空
+	BeliefAfter []float64 `json:"belief_after,omitempty"`
+	// B3 选择器的判断理由原文
+	Reason string `json:"reason,omitempty"`
+	// B3 声明证据足够（声明轮为真；零证据声明不采纳仍继续取证，见 #5 同门注释）
+	Sufficient bool `json:"sufficient,omitempty"`
+}
+
+// ActionScore 轨迹得分列：候选动作名与其 EIG/c 得分
+// 非有限得分封顶为最大有限值（JSON 无 Inf 表示；观测语义不变——仍是支配级得分）
+type ActionScore struct {
+	Name  string  `json:"name"`
+	Score float64 `json:"score"`
 }
 
 // 绑定完整闭环所需依赖并创建编排器
@@ -402,6 +453,14 @@ func (o *Orchestrator) SetDecisionPlanner(p decisionPlanner) {
 		return
 	}
 	o.decisionPlanner = p
+}
+
+// 注入 B3 ReAct 选择器（b3-react 方法必需）；其余方法不读，未注入时 b3 分派明确失败
+func (o *Orchestrator) SetReActSelector(s reactSelector) {
+	if o == nil {
+		return
+	}
+	o.reactSelector = s
 }
 
 // 向进度输出写一行；输出为空时跳过
@@ -691,6 +750,15 @@ func cloneInvestigateState(state InvestigateState) InvestigateState {
 		MaxRounds:      state.MaxRounds,
 		Clarifications: slices.Clone(state.Clarifications),
 	}
+	if len(state.Trace) > 0 {
+		cloned.Trace = make([]DecisionTraceEntry, len(state.Trace))
+		copy(cloned.Trace, state.Trace)
+		for i := range cloned.Trace {
+			cloned.Trace[i].Scores = slices.Clone(cloned.Trace[i].Scores)
+			cloned.Trace[i].BeliefBefore = slices.Clone(cloned.Trace[i].BeliefBefore)
+			cloned.Trace[i].BeliefAfter = slices.Clone(cloned.Trace[i].BeliefAfter)
+		}
+	}
 	if state.Acquire != nil {
 		acq := cloneAcquireState(*state.Acquire)
 		cloned.Acquire = &acq
@@ -737,11 +805,13 @@ func (o *Orchestrator) investigateLoop(
 	}
 
 	state := seed
-	// 只读统计：本段循环已开始的轮数，任何返回路径都落进 lastStats（评测观测用）
+	// 只读统计：本段循环已开始的轮数，任何返回路径都落进 lastStats（评测观测用）；
+	// 决策轨迹属决策循环路径，B1 恒空（防同编排器跨方法残留旧观测）
 	started := seed.Round
 	defer func() {
 		o.mu.Lock()
 		o.lastStats.InvestigateRounds = started - seed.Round
+		o.lastStats.DecisionTrace = nil
 		o.mu.Unlock()
 	}()
 	hypotheses := slices.Clone(seed.Hypotheses)

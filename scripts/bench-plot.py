@@ -29,7 +29,7 @@ import matplotlib.pyplot as plt
 MAIN_METHODS = ["full", "greedy", "fast", "greedy-knapsack", "head-tail", "uniform"]
 ABLATION_METHODS = ["greedy", "random", "simplestat", "greedy-knapsack"]
 # 创新点一（acquire 模式）：取证决策实验臂展示序，ours 置首突出主方法
-ACQUIRE_METHODS = ["ours", "b1-serial", "b2-random", "b4-cheapest"]
+ACQUIRE_METHODS = ["ours", "b1-serial", "b2-random", "b4-cheapest", "b3-react"]
 # 创新点三（probe 模式）：记忆组装实验臂展示序（B3 落地后 acquire 序另有 b3-react）
 PROBE_METHODS = ["ours", "d1-last-n", "d2-flat-summary"]
 

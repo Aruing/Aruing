@@ -86,12 +86,14 @@ type RunRecord struct {
 	AcquireExit string `json:"acquire_exit,omitempty"`
 	// insufficient 出口缺口说明（平台 / 预算尽）；#18 明确失败可观测
 	AcquireGap string `json:"acquire_gap,omitempty"`
+	// 逐轮决策轨迹（决策循环路径；b1-serial 臂为空，旧记录无此字段照常读）
+	DecisionTrace []DecisionTraceEntry `json:"decision_trace,omitempty"`
 	// 端到端耗时（毫秒）
 	WallTimeMS int64 `json:"wall_time_ms"`
 }
 
 // AcquireRecordInfo 取证决策的分组与出口观测量（评测记录侧）；方法名用解析后的
-// 规范名（ours/b1-serial/b2-random/b4-cheapest），避免空串与 "ours" 混写致分组歧义
+// 规范名（ours/b1-serial/b2-random/b4-cheapest/b3-react），避免空串与 "ours" 混写致分组歧义
 type AcquireRecordInfo struct {
 	// 规范化方法名（agent.ParseAcquireMethod 后的 String()）
 	Method string
@@ -103,6 +105,38 @@ type AcquireRecordInfo struct {
 	Exit string
 	// insufficient 缺口说明（LastRunStats.AcquireGap 透传）
 	Gap string
+	// 逐轮决策轨迹（编排只读观测的桥接转换；b1-serial 臂为空）；镜像结构显式
+	// 转换（eval 不 import agent，DiagnoseStats 同先例）
+	Trace []DecisionTraceEntry
+}
+
+// DecisionTraceEntry 决策轨迹的一轮快照（RunRecord.decision_trace 元素）
+//
+// ours / b2 / b4 臂含候选 EIG/c 得分与信念前后；B3 臂同结构但无得分与信念列，
+// 改存 LLM 选择理由原文（ours 有数字、B3 只有直觉，两列对照即案例研究本体）
+type DecisionTraceEntry struct {
+	// 轮次（1 起）
+	Round int `json:"round"`
+	// 本轮选中的动作名；B3 声明足够轮为空
+	Chosen string `json:"chosen"`
+	// 候选动作的 EIG/c 得分；B3 臂为空
+	Scores []ActionScore `json:"scores,omitempty"`
+	// 本轮决策前的信念后验；B3 臂为空
+	BeliefBefore []float64 `json:"belief_before,omitempty"`
+	// 本轮更新后的信念后验；B3 臂为空
+	BeliefAfter []float64 `json:"belief_after,omitempty"`
+	// B3 选择器的判断理由原文
+	Reason string `json:"reason,omitempty"`
+	// B3 声明证据足够（出口轮为真）
+	Sufficient bool `json:"sufficient,omitempty"`
+}
+
+// ActionScore 轨迹得分列：候选动作名与其 EIG/c 得分（非有限已封顶为有限值）
+type ActionScore struct {
+	// 候选动作名
+	Name string `json:"name"`
+	// EIG/c 得分（ours 口径）
+	Score float64 `json:"score"`
 }
 
 // BuildRunRecord 从一次执行的产物组装评测记录
@@ -133,6 +167,7 @@ func BuildRunRecord(
 		Rounds:           rounds,
 		AcquireExit:      acq.Exit,
 		AcquireGap:       acq.Gap,
+		DecisionTrace:    append([]DecisionTraceEntry(nil), acq.Trace...),
 		WallTimeMS:       wall.Milliseconds(),
 		RootCauses:       []RootCauseEntry{},
 		ToolCalls:        []ToolCallEntry{},

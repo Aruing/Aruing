@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # eval-sweep —— 创新点一实验矩阵驱动器（0.1.2 步骤 4，裁决 4/5/6）
 #
-# 矩阵：场景 × 方法(b1-serial/b2-random/b4-cheapest/ours) × K(1/2/3/5/8) × 重复
+# 矩阵：场景 × 方法(b1-serial/b2-random/b4-cheapest/ours/b3-react) × K(1/2/3/5/8) × 重复
 # 每单元：env 注入 method/K/seed → aruing run --eval-json 落记录 → 逐场景 judge
 # 汇总 → CSV（联结判分与记录观测量）。曲线横轴用实测 rounds（裁决 5），名义 K
 # 仅作注入参数与分桶校验。
 #
-# 成本纪律：全矩阵 4×4×5×3 = 240 单元全 LLM 调用——先 DRYRUN=1 核对矩阵、
+# 成本纪律：全矩阵 4×5×5×3 = 300 单元全 LLM 调用——先 DRYRUN=1 核对矩阵、
 # 按既往 token 均值估算成本报批后再真跑（裁决 4）。
 #
 # 用法：
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCENARIOS="${SCENARIOS:-crashloop-bad-image svc-wrong-selector same-name-multi-ns log-time-window}"
-METHODS="${METHODS:-b1-serial b2-random b4-cheapest ours}"
+METHODS="${METHODS:-b1-serial b2-random b4-cheapest ours b3-react}"
 KS="${KS:-1 2 3 5 8}"
 REPS="${REPS:-3}"
 OUT="${OUT:-eval/results/0.1.2}"

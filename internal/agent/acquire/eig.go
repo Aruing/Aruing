@@ -154,13 +154,16 @@ type Selection struct {
 	BestScore float64
 	// 全候选最大原始 EIG（bit）——CheckStop 平台检测的口径
 	MaxEIG float64
+	// 各候选的 EIG/c 得分（索引对齐入参 acts）——决策轨迹的只读观测列，
+	// 选择与平台检测口径不变；B2/B4 覆盖选择时仍按 ours 口径照记
+	Scores []float64
 }
 
 // Select 评估候选动作集：argmax EIG(a)/c(a)（并列取索引小者，确定性），
 // 同时返回全候选最大 EIG。任一动作矩阵与信念不对齐返回 ErrMisaligned（整集拒绝，
 // 不静默跳过——不对齐是调用方 bug，须暴露）；成本经构造器归一，此处恒为正有限
 func Select(b Belief, acts []Action) (Selection, error) {
-	sel := Selection{Best: -1}
+	sel := Selection{Best: -1, Scores: make([]float64, len(acts))}
 	for i, a := range acts {
 		g, err := EIG(b, a)
 		if err != nil {
@@ -169,7 +172,9 @@ func Select(b Belief, acts []Action) (Selection, error) {
 		if g > sel.MaxEIG {
 			sel.MaxEIG = g
 		}
-		if score := g / a.cost; sel.Best < 0 || score > sel.BestScore {
+		// 观测得分列与选择同一算式（g/c），不经第二路径产生口径漂移
+		sel.Scores[i] = g / a.cost
+		if score := sel.Scores[i]; sel.Best < 0 || score > sel.BestScore {
 			sel.Best, sel.BestScore = i, score
 		}
 	}

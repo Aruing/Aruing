@@ -58,6 +58,8 @@ type DiagnoseStats struct {
 	Exit string
 	// insufficient 出口缺口说明
 	Gap string
+	// 逐轮决策轨迹（桥接自编排只读统计；b1-serial 臂为空）
+	Trace []DecisionTraceEntry
 }
 
 // 会话级评测记录：一条长会话 × 尾部探针的机器可判分产物
@@ -296,6 +298,7 @@ func buildDiagnoseInfo(
 			Seed:      opts.Acquire.Seed,
 			Exit:      stats.Exit,
 			Gap:       stats.Gap,
+			Trace:     stats.Trace,
 		},
 		status == "completed", runErr, report, evidence,
 		nil, stats.Rounds, 0,
