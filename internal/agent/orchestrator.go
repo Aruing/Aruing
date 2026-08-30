@@ -238,6 +238,10 @@ type InvestigateState struct {
 	// 取证决策循环状态（ours 路径专用；B1 路径为 nil 不参与）
 	// 挂起快照整体携带，Resume 后信念与动作池连续
 	Acquire *AcquireState
+	// 已收集的决策轨迹（观测非进度，但随快照携带）：ask 挂起时存入，Resume
+	// 段继续累积——否则恢复段的 defer 会用局部轨迹覆盖，挂起前历史丢失
+	// （pr-agent #134 R2）；挂起轮在恢复段重跑，轮号可重复，按发生序保留
+	Trace []DecisionTraceEntry
 }
 
 // 取证决策循环的跨轮状态（ours 路径）
@@ -312,7 +316,8 @@ type RunStats struct {
 	// insufficient 出口的缺口说明（平台还是预算尽）；#18 明确失败可观测
 	AcquireGap string
 	// 逐轮决策轨迹（决策循环路径：ours / b2 / b4 / b3-react；b1-serial 臂为
-	// 空）。只读观测，不参与编排决策；评测记录（decision_trace）消费
+	// 空）。只读观测，不参与编排决策；评测记录（decision_trace）消费。
+	// 挂起恢复跨段累积（快照携带前段轨迹；挂起轮重跑致轮号可重复，按发生序）
 	DecisionTrace []DecisionTraceEntry
 }
 
@@ -744,6 +749,15 @@ func cloneInvestigateState(state InvestigateState) InvestigateState {
 		Round:          state.Round,
 		MaxRounds:      state.MaxRounds,
 		Clarifications: slices.Clone(state.Clarifications),
+	}
+	if len(state.Trace) > 0 {
+		cloned.Trace = make([]DecisionTraceEntry, len(state.Trace))
+		copy(cloned.Trace, state.Trace)
+		for i := range cloned.Trace {
+			cloned.Trace[i].Scores = slices.Clone(cloned.Trace[i].Scores)
+			cloned.Trace[i].BeliefBefore = slices.Clone(cloned.Trace[i].BeliefBefore)
+			cloned.Trace[i].BeliefAfter = slices.Clone(cloned.Trace[i].BeliefAfter)
+		}
 	}
 	if state.Acquire != nil {
 		acq := cloneAcquireState(*state.Acquire)

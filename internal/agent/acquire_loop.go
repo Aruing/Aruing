@@ -65,8 +65,9 @@ func (o *Orchestrator) acquireLoop(
 	state := seed
 	started := seed.Round
 	// 决策轨迹（逐轮快照，只读观测，冻结裁决 7）：任何返回路径都随 lastStats
-	// 落定；B1 路径不进本循环，轨迹恒空
-	var trace []DecisionTraceEntry
+	// 落定；挂起恢复自快照累积（pr-agent #134 R2：否则前段历史被覆盖丢失）；
+	// B1 路径不进本循环，轨迹恒空
+	trace := slices.Clone(seed.Trace)
 	defer func() {
 		o.mu.Lock()
 		o.lastStats.InvestigateRounds = started - seed.Round
@@ -312,6 +313,7 @@ func (o *Orchestrator) acquireLoop(
 			state.Verdicts = verdicts
 			state.Round = round
 			state.Acquire = acq
+			state.Trace = trace
 			return nil, nil, &ClarifyRequest{
 				Question: strings.TrimSpace(chosen.Ask),
 				Options:  slices.Clone(chosen.Outcomes),

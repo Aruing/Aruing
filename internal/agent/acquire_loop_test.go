@@ -768,6 +768,21 @@ func TestB3ReactAskSuspendResume(t *testing.T) {
 	if selector.Calls != 3 {
 		t.Errorf("selector calls = %d, want 3", selector.Calls)
 	}
+	// 跨挂起轨迹累积（pr-agent #134 R2 钉板）：挂起前的 ask 选择轮不丢，
+	// 恢复段重跑同轮号按发生序追加
+	trace := orch.LastRunStats().DecisionTrace
+	if len(trace) != 3 {
+		t.Fatalf("trace = %d entries, want 3 (ask + post-answer tool + declaration)", len(trace))
+	}
+	if trace[0].Round != 1 || trace[0].Chosen != "ask-change" || trace[0].Reason == "" {
+		t.Errorf("trace[0] = %+v, want pre-suspend ask selection preserved", trace[0])
+	}
+	if trace[1].Round != 1 || trace[1].Chosen != "check-pods" {
+		t.Errorf("trace[1] = %+v, want post-answer selection in re-run round", trace[1])
+	}
+	if !trace[2].Sufficient {
+		t.Errorf("trace[2] = %+v, want sufficient declaration", trace[2])
+	}
 	// 答复注入选择器载荷（信息公平面：澄清累积可见）
 	lastAsk := selector.LastRequest
 	if lastAsk.BudgetLeft <= 0 || len(lastAsk.Hypotheses) != 2 {
