@@ -157,8 +157,9 @@ func TestRunProbeSessionTurnFailure(t *testing.T) {
 	if rec.Completed || len(rec.TurnErrors) != 1 || rec.TurnErrors[0].TurnIndex != 0 {
 		t.Fatalf("failure record wrong: completed=%v errors=%+v", rec.Completed, rec.TurnErrors)
 	}
-	if rec.TurnsExecuted != 0 {
-		t.Fatalf("turns executed should stay at failure point, got %d", rec.TurnsExecuted)
+	// 失败轮计入执行数（与 turn_errors 不重复扣除）：首轮失败即执行 1 轮
+	if rec.TurnsExecuted != 1 {
+		t.Fatalf("turns executed should count the attempted failure, got %d", rec.TurnsExecuted)
 	}
 }
 

@@ -81,7 +81,8 @@ type ProbeSessionRecord struct {
 	ScriptSeed int64 `json:"script_seed"`
 	// 主体轮数 N（探针轮不计入）
 	Rounds int `json:"rounds"`
-	// 实际执行的总轮数（含探针轮；轮次失败中止时小于脚本长度）
+	// 实际执行的总轮数（含探针轮与尝试后失败的轮，失败轮另见 turn_errors；
+	// 中止时小于脚本长度）
 	TurnsExecuted int `json:"turns_executed"`
 	// 全部轮次是否执行完（false = 中途失败，失败轮记入 TurnErrors）
 	Completed bool `json:"completed"`
@@ -191,7 +192,8 @@ func RunProbeSession(
 	fail := func(i int, t ProbeTurn, err error) (ProbeSessionRecord, error) {
 		rec.TurnErrors = append(rec.TurnErrors, TurnError{TurnIndex: i, Kind: t.Kind, Error: err.Error()})
 		rec.Completed = false
-		rec.TurnsExecuted = i
+		// 失败轮已被尝试，计入执行数（TurnErrors 单列失败明细，二者不重复扣除）
+		rec.TurnsExecuted = i + 1
 		rec.WallTimeMS = time.Since(start).Milliseconds()
 		if deps.Tokens != nil {
 			rec.Tokens = deps.Tokens()
