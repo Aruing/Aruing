@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-08-30（`0.1.3` 实现项全绿：步骤 1 C1 机械校验（#129）、步骤 2 tier-aware 组装器 + `agent.memory.method` 开关（#130）、步骤 3 分层检索回灌（λ₁/λ₂ + 证据 raw 预览，#131）与步骤 4 探针实验装置（PR_PROC 中）已落地；待统一实验批跑数后归档发布 v0.1.3。0.1.2 实现完成（#119/#122/#124/#126），完成标志 7/8 顺延至 0.1.3 后最终版本统一实验批（2026-08-30 裁决）。0.2.0 远景与排序依据见笔记 `plan/version/0.2.0.md`）
+> 最后更新：2026-08-30（`0.1.3` 实现项全绿：步骤 1 C1 机械校验（#129）、步骤 2 tier-aware 组装器 + `agent.memory.method` 开关（#130）、步骤 3 分层检索回灌（λ₁/λ₂ + 证据 raw 预览，#131）与步骤 4 探针实验装置（#132）已落地；待统一实验批跑数后归档发布 v0.1.3。0.1.2 实现完成（#119/#122/#124/#126），完成标志 7/8 顺延至 0.1.3 后最终版本统一实验批（2026-08-30 裁决）。0.2.0 远景与排序依据见笔记 `plan/version/0.2.0.md`）
 
 ## 当前阶段
 
@@ -97,7 +97,7 @@
 | beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
-| 0.1.3-4 | 探针实验装置 | ✅ | PR_PENDING；eval 侧探针装置（probe.yaml 规格 + 种子脚本生成器：问答/诊断 3–5 间隔 + 尾部探针；from_ledger 期望展开 kth_run_pods / kth_run_commands，k=-1 末次，判分侧纯①层包含）+ 函数注入 ProbeRunner 组装会话级记录（探针轮无 Run，与 RunRecord 并列；逐诊断内嵌完整 RunRecord）+ judge --probe（no_diagnosis / no_facts 不进分母单列）+ `aruing probe` 子命令（chat 同源 wiring，--dry-run 零 LLM）+ `make probe-sweep`（2 场景 × 3 方法 × 2 轮数 × 3 重复 = 36 会话，DRYRUN 干跑）+ 两场景 probe.yaml；agent 侧 `TowerResponder.LastMemoryStats` 只读观测（定位层 / λ₂ 调用 / 回灌条目数）；真跑数推迟统一实验批 |
+| 0.1.3-4 | 探针实验装置 | ✅ | #132；eval 侧探针装置（probe.yaml 规格 + 种子脚本生成器：问答/诊断 3–5 间隔 + 尾部探针；from_ledger 期望展开 kth_run_pods / kth_run_commands，k=-1 末次，判分侧纯①层包含）+ 函数注入 ProbeRunner 组装会话级记录（探针轮无 Run，与 RunRecord 并列；逐诊断内嵌完整 RunRecord）+ judge --probe（no_diagnosis / no_facts 不进分母单列）+ `aruing probe` 子命令（chat 同源 wiring，--dry-run 零 LLM）+ `make probe-sweep`（2 场景 × 3 方法 × 2 轮数 × 3 重复 = 36 会话，DRYRUN 干跑）+ 两场景 probe.yaml；agent 侧 `TowerResponder.LastMemoryStats` 只读观测（定位层 / λ₂ 调用 / 回灌条目数）；真跑数推迟统一实验批 |
 | 0.1.3-3 | 分层检索回灌 | ✅ | #131；λ₁ `locateByAddress` 确定性寻址每轮必跑（ID 族正则 + 会话级资源名词典 `buildEntityDict`：诊断账本证据 CommandView/Summary 机械抽 DNS-1123 token，flag/镜像/选择器噪声不进词典）∩ 单元地址集（消息 = 正文地址 + RunID；证据 = e_ 编号 + 词典实体），锚点类 recall = 1；λ₂ `llmLocateRange` 原样兑底（λ₁ 空 + 视图压缩丢细节 + 语义指涉时一次）；证据命中必回灌 raw 预览（`mode=evidence` 合成条目并入 `rehydrated_messages`，idx=-1、C1 保地址），消息命中仅视图丢细节时回灌原文；迭代口径 = 轮内单遍、预算不足预览跨轮收敛（定理 1 对齐）；退役 `ruleLocateRange`/`relevanceScore` 族；白话走查 60 轮 3 诊断入单测；core/session/tools/config 零改 |
 | 0.1.3-2 | tier-aware 组装器 + 记忆方法开关 | ✅ | #130；`internal/agent` 新增 `memory_cards.go`（R 层索引卡：`buildMemoryCards`，字段钳 c_max=200、不带 raw、地址不钳；κ₂ 接口预留占位）+ `assembler.go`（`assembleTieredView` ours：R 锁定 + W 最近 w 轮 LRU + C 中段压缩每段过 C1，预算 R 先取满；`assembleLastN`/`assembleFlatSummary` D1/D2 纯对照臂）；Respond 按 `agent.memory.method` 分派（config `Agent.Memory` method+last_n，env ARUING_AGENT_MEMORY_*，未知值启动报错；D1/D2 无卡片无回灌）；`buildPriorRunDetails` 退役（ours 下 prior_run_details 由带 raw 深材料改为卡片，深细节归回灌/evidence.read）；payload 契约与 prompt 零改 |
 | 0.1.3-1 | C1 机械校验（压缩出口地址无损） | ✅ | #129；`internal/agent` 新增 `addrcheck.go`：ID 族正则（Factory 全部前缀）抽取 + `ensureAddrCoverage` 缺号以 `[addr_refs]` 行补附（幂等；词典实体参数留面、无权威词典前传 nil）；接线全部有损变换出口——`truncateContentPreview` / `foldLine` / `forceCompactMark` 内联（签名不变，复用路径自动覆盖含 beta7 回灌窗）+ L2 checkpoint 落库正文机械兑底（不信任模型 run_ids，RunID 字段纳入比对源）；footer 计入既有预算估算；core / session / tools / config 零改 |
