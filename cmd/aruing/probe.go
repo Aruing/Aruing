@@ -226,7 +226,12 @@ func normalizeAcquireMethod(cfg config.Config) string {
 }
 
 // writeProbeRecord 会话级记录落盘；父目录自动创建
+// 目标已存在时明确报错不覆盖：同参数重跑须换 seed 或 out，静默覆盖会丢旧记录
+// （记录是本命令唯一主产物；sweep 脚本按矩阵坐标改名、种子=重复号，天然不冲突）
 func writeProbeRecord(path string, rec eval.ProbeSessionRecord) error {
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("probe record already exists: %s (rerun with a different seed or --out)", path)
+	}
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create probe out dir: %w", err)

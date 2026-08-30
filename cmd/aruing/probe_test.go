@@ -122,3 +122,14 @@ func TestRunProbeRecordWriteFailure(t *testing.T) {
 		t.Fatal("write into a file path must fail")
 	}
 }
+
+// 同路径重复落盘明确报错：确定性文件名下静默覆盖会丢旧记录（同参数重跑须换 seed/out）
+func TestRunProbeRecordNoOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "probe-session-x.json")
+	if err := writeProbeRecord(path, eval.ProbeSessionRecord{}); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+	if err := writeProbeRecord(path, eval.ProbeSessionRecord{}); err == nil {
+		t.Fatal("second write to the same path must refuse to overwrite")
+	}
+}
