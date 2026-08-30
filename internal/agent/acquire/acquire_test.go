@@ -519,3 +519,27 @@ func TestOptionsNonFiniteSanitized(t *testing.T) {
 		t.Fatalf("A=NaN 应归默认，Λ 出口照常，got %+v", stop)
 	}
 }
+
+// Options 语义域校验：概率参数 ∈(0,1]、优势比阈值 >1——越域回默认，
+// 不得静默禁用/恒触发停止出口（pr-agent 五轮）
+func TestOptionsSemanticRange(t *testing.T) {
+	b, _ := NewBelief([]float64{0.95, 0.04, 0.01})
+	// PStar=1.5 曾使 P* 出口永不可达；归默认后 0.95 照常 supported
+	if stop := CheckStop(b, 0.5, 3, Options{PStar: 1.5}); !stop.Stop || stop.Kind != VerdictSupported {
+		t.Fatalf("PStar 越域应归默认，P* 出口照常，got %+v", stop)
+	}
+	// A=0.5 曾使 Λ 出口对任意信念恒真；归默认后均匀信念不得 supported
+	u, _ := NewUniformBelief(3)
+	if stop := CheckStop(u, 0.5, 3, Options{A: 0.5}); stop.Stop && stop.Kind == VerdictSupported {
+		t.Fatalf("A 越域应归默认，均匀信念不得 supported，got %+v", stop)
+	}
+	// Delta=1.5 曾恒报意外；归默认后正常观测无意外标志
+	a := mustAction(t, "a", []string{"x", "y"}, [][]float64{{.9, .1}, {.1, .9}, {.5, .5}}, 1)
+	if _, surprise, err := (Options{Delta: 1.5}).UpdateOutcome(u, a, "x"); err != nil || surprise {
+		t.Fatalf("Delta 越域应归默认，正常观测不得误报意外：%v %v", err, surprise)
+	}
+	// MassFloor=1.5 曾恒报 refuted；归默认后新鲜信念不得 refuted
+	if stop := CheckStop(u, 0.5, 3, Options{MassFloor: 1.5}); stop.Stop && stop.Kind == VerdictRefuted {
+		t.Fatalf("MassFloor 越域应归默认，不得恒报 refuted，got %+v", stop)
+	}
+}

@@ -32,9 +32,14 @@ type Options struct {
 }
 
 // withDefaults 归一非法字段并填充默认参数，返回有效副本
-// 非法 = 非正或非有限：NaN 与 x<=0 比较为 false 会穿透旧判断，+Inf 同样穿透——
-// NaN 经算术污染后验（Inf−Inf），Inf 语义级污染（Tau=Inf 恒报平台、MassFloor=Inf 恒报
-// refuted、A=Inf 关闭 Λ 出口），全部静默错（pr-agent 四轮）
+// 非法两层（pr-agent 四、五轮）：
+//  1. 非正或非有限：NaN 与 x<=0 比较为 false 会穿透，+Inf 同样穿透——NaN 经算术污染
+//     后验（Inf−Inf），Inf 语义级污染（Tau=Inf 恒报平台、MassFloor=Inf 恒报 refuted）
+//  2. 超语义域：PStar/Delta/MassFloor 是概率须 ∈ (0,1]，A 是优势比阈值须 >1
+//     （胜者对其余的后验比恒 ≥1，A≤1 使 Λ 出口对任意信念恒真）——越域会静默
+//     开启/关闭停止出口，毒化扫参实验
+//
+// 越域一律回默认（与非法值同处置），不静默钳位到边界
 func (o Options) withDefaults() Options {
 	sanitize := func(v, def float64) float64 {
 		if !(v > 0) || math.IsInf(v, 0) { // !(v>0) 同时覆盖 NaN 与零/负
@@ -42,12 +47,21 @@ func (o Options) withDefaults() Options {
 		}
 		return v
 	}
+	sanitizeProb := func(v, def float64) float64 { // 概率参数额外要求 ≤ 1
+		if v = sanitize(v, def); v > 1 {
+			return def
+		}
+		return v
+	}
 	o.Alpha = sanitize(o.Alpha, 3)
-	o.PStar = sanitize(o.PStar, 0.9)
-	o.A = sanitize(o.A, 19)
 	o.Tau = sanitize(o.Tau, 0.01)
-	o.Delta = sanitize(o.Delta, 0.05)
-	o.MassFloor = sanitize(o.MassFloor, 0.05)
+	o.PStar = sanitizeProb(o.PStar, 0.9)
+	o.Delta = sanitizeProb(o.Delta, 0.05)
+	o.MassFloor = sanitizeProb(o.MassFloor, 0.05)
+	o.A = sanitize(o.A, 19)
+	if o.A <= 1 {
+		o.A = 19
+	}
 	return o
 }
 
