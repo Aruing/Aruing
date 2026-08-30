@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -203,4 +204,35 @@ func TestReActPromptContract(t *testing.T) {
 	if !sufficient.Sufficient {
 		t.Fatalf("prompt sufficient example = %+v", sufficient)
 	}
+}
+
+// 轨迹得分列封顶：近零成本动作的 EIG/c 为 +Inf（Selection.Scores 保留原值），
+// 轨迹侧必须封顶为有限值——JSON 无 Inf，落评测记录会整条写失败
+func TestActionScoresCapsNonFinite(t *testing.T) {
+	pool := []ActionProposal{
+		{Name: "near-free", Cost: 0.001},
+		{Name: "normal", Cost: 1},
+	}
+	poolIdx := []int{0, 1}
+	scores := []float64{math.Inf(1), 0.71}
+
+	got := actionScores(pool, poolIdx, scores)
+	if len(got) != 2 {
+		t.Fatalf("scores = %+v, want 2", got)
+	}
+	if math.IsInf(got[0].Score, 0) || got[0].Score != math.MaxFloat64 {
+		t.Errorf("near-free score = %v, want capped MaxFloat64", got[0].Score)
+	}
+	if got[0].Name != "near-free" || got[1].Name != "normal" || got[1].Score != 0.71 {
+		t.Errorf("scores = %+v, want names aligned and finite value kept", got)
+	}
+	if !jsonSerializable(t, got) {
+		t.Errorf("capped scores must marshal")
+	}
+}
+
+func jsonSerializable(t *testing.T, v any) bool {
+	t.Helper()
+	_, err := json.Marshal(v)
+	return err == nil
 }
