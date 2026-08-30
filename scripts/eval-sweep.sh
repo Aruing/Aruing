@@ -176,4 +176,4 @@ else
     echo "提示：出图需 matplotlib（python3 -m venv .venv && .venv/bin/pip install matplotlib 后重跑）"
 fi
 
-echo "完成：$units 单元（跳过 $skipped），记录缺失 $missing（详见 $OUT/run.stderr.log）"
+echo "完成：${units} 单元（跳过 ${skipped}），记录缺失 ${missing}（详见 ${OUT}/run.stderr.log）"

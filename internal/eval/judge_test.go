@@ -72,6 +72,36 @@ func TestJudgeRootCause(t *testing.T) {
 	}
 }
 
+// 判分①特征词面（试点装置修复）：模型结论常述故障机制不复述资源名，
+// 特征词与资源名任一命中即根因命中；空特征词列表退回纯资源名口径
+func TestJudgeRootCauseFaultSignature(t *testing.T) {
+	gt := GroundTruth{ResourceType: "deployment", ResourceName: "demo-api", Namespace: "demo",
+		FaultType: "bad-image-crashloop", FaultSignature: []string{"ImagePullBackOff", "this-tag-does-not-exist"}}
+
+	// 结论只述故障机制不点资源名（试点实测形态）：特征词命中
+	mech := RunRecord{RunID: "r1", RootCauses: []RootCauseEntry{
+		{Result: "supported", Reason: "容器处于 imagepullbackoff，镜像 nginx:this-tag-does-not-exist-aruing 拉取失败"},
+	}}
+	if res := JudgeRecord(mech, gt); !res.RootCauseHit {
+		t.Fatalf("特征词应命中（大小写归一）：%+v", res)
+	}
+
+	// 无关故障迷感词不命中：说了 crashloop 家族外的机制且无资源名
+	miss := RunRecord{RunID: "r2", RootCauses: []RootCauseEntry{
+		{Result: "supported", Reason: "节点磁盘压力导致驱逐"},
+	}}
+	if res := JudgeRecord(miss, gt); res.RootCauseHit {
+		t.Fatalf("无关机制不应命中：%+v", res)
+	}
+
+	// 空特征词列表 = 旧口径（纯资源名）：机制描述不命中
+	legacy := gt
+	legacy.FaultSignature = nil
+	if res := JudgeRecord(mech, legacy); res.RootCauseHit {
+		t.Fatalf("空特征词应退回纯资源名口径不命中：%+v", res)
+	}
+}
+
 // 判分②：引用编号必须存在于本次证据链
 func TestJudgeCitations(t *testing.T) {
 	rec := RunRecord{

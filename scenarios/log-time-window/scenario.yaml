@@ -9,3 +9,4 @@ ground_truth:
   resource_name: demo-api
   namespace: demo
   fault_type: crashloop
+  fault_signature: [CrashLoopBackOff, exit, 退出]

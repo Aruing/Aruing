@@ -163,5 +163,5 @@ with open(csv_path, "w", newline="", encoding="utf-8") as f:
     w.writerows(rows)
 print(f"csv: {csv_path} ({len(rows)} sessions)")
 PY
-echo "完成：$units 会话（跳过 $skipped），缺失记录：$missing" >&2
+echo "完成：${units} 会话（跳过 ${skipped}），缺失记录：${missing}" >&2
 [ "$missing" -eq 0 ]
