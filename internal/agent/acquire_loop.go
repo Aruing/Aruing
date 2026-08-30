@@ -300,54 +300,7 @@ func (o *Orchestrator) replanAcquire(
 		return false, fmt.Errorf("replan decision: %w", err)
 	}
 
-	fresh := make(map[string]struct{}, len(decision.Hypotheses))
-	for _, h := range decision.Hypotheses {
-		fresh[strings.TrimSpace(h.Statement)] = struct{}{}
-	}
-	post := belief.Posterior()
-	merged := make([]core.Hypothesis, 0, len(*hypotheses)+len(decision.Hypotheses))
-	weights := make([]float64, 0, len(*hypotheses)+len(decision.Hypotheses))
-
-	// 旧假设保留侧：未被重提的按后验比例分旧份额（零后验压下限，可复活）
-	var keptShare float64
-	for i, h := range *hypotheses {
-		if _, reproj := fresh[strings.TrimSpace(h.Statement)]; reproj {
-			continue
-		}
-		w := post[i]
-		if w < priorFloor {
-			w = priorFloor
-		}
-		merged = append(merged, h)
-		weights = append(weights, w)
-		keptShare += w
-	}
-	// 新假设侧：按先验分（全部为零时均匀）；无保留旧假设时占满全量
-	newShare := 1.0
-	if keptShare > 0 {
-		newShare = replanOldShare
-		for i := range weights {
-			weights[i] *= replanOldShare / keptShare
-		}
-	}
-	var freshPriorSum float64
-	allZero := true
-	for _, h := range decision.Hypotheses {
-		if h.Confidence > 0 {
-			allZero = false
-		}
-		freshPriorSum += h.Confidence
-	}
-	for _, h := range decision.Hypotheses {
-		w := h.Confidence
-		if allZero {
-			w = 1
-		} else if w < priorFloor {
-			w = priorFloor
-		}
-		merged = append(merged, h)
-		weights = append(weights, newShare*w)
-	}
+	merged, weights := MergeReplanWeights(*hypotheses, belief.Posterior(), decision.Hypotheses)
 
 	next, berr := acquire.NewBelief(weights)
 	if berr != nil {
@@ -374,6 +327,71 @@ func (o *Orchestrator) replanAcquire(
 	acq.Actions = pool
 	o.progressf("  重规划：%d 个假设（保留 %d 旧）、%d 个新动作", len(merged), len(merged)-len(decision.Hypotheses), len(pool))
 	return len(pool) == 0, nil
+}
+
+// 重规划假设合并的纯算术：旧假设未被重提的按后验比例分 replanOldShare（零后验压
+// 下限可复活），新假设按先验比例分其余；两侧各自先归一再乘份额——直接乘原始先验
+// 会让「先验和 ≠ 1」的计划偏占质量，50/50 拆分被破坏（pr-agent 评审采纳修正）
+//
+// 语句精确匹配视为同一假设被重提（进新侧、采用新先验）；无保留旧假设时新侧占满全量
+func MergeReplanWeights(old []core.Hypothesis, post []float64, fresh []core.Hypothesis) ([]core.Hypothesis, []float64) {
+	freshSet := make(map[string]struct{}, len(fresh))
+	for _, h := range fresh {
+		freshSet[strings.TrimSpace(h.Statement)] = struct{}{}
+	}
+	merged := make([]core.Hypothesis, 0, len(old)+len(fresh))
+	oldWeights := make([]float64, 0, len(old))
+
+	var keptShare float64
+	for i, h := range old {
+		if _, reproj := freshSet[strings.TrimSpace(h.Statement)]; reproj {
+			continue
+		}
+		w := priorFloor
+		if i < len(post) && post[i] > priorFloor {
+			w = post[i]
+		}
+		merged = append(merged, h)
+		oldWeights = append(oldWeights, w)
+		keptShare += w
+	}
+
+	newShare := 1.0
+	if keptShare > 0 {
+		newShare = replanOldShare
+		for i := range oldWeights {
+			oldWeights[i] *= replanOldShare / keptShare
+		}
+	}
+
+	allZero := true
+	for _, h := range fresh {
+		if h.Confidence > 0 {
+			allZero = false
+			break
+		}
+	}
+	freshWeights := make([]float64, len(fresh))
+	var freshTotal float64
+	for i, h := range fresh {
+		w := h.Confidence
+		if allZero {
+			w = 1
+		} else if w < priorFloor {
+			w = priorFloor
+		}
+		freshWeights[i] = w
+		freshTotal += w
+	}
+
+	weights := oldWeights
+	if freshTotal > 0 {
+		for i, h := range fresh {
+			merged = append(merged, h)
+			weights = append(weights, newShare*freshWeights[i]/freshTotal)
+		}
+	}
+	return merged, weights
 }
 
 // 出口收尾：后验已回写，正式 Verify 出判决（语义与 B1 收尾一致），记观测统计

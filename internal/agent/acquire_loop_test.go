@@ -6,6 +6,7 @@ package agent_test
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -374,6 +375,66 @@ func TestAcquireLoopInsufficientBudget(t *testing.T) {
 	stats := orch.LastRunStats()
 	if stats.AcquireExit != "insufficient" || !strings.Contains(stats.AcquireGap, "预算尽") {
 		t.Errorf("stats = %+v, want insufficient + 预算尽", stats)
+	}
+}
+
+// 重规划 50/50 拆分（pr-agent 第 1 轮采纳钉板，纯函数直测）：
+// 新假设先验和 ≠ 1 时两侧仍各占一半，不被原始先验幅度污染
+func TestReplanAcquireSplitsMass(t *testing.T) {
+	old := []core.Hypothesis{
+		{ID: "h_1", Statement: "旧方向一"},
+		{ID: "h_2", Statement: "旧方向二"},
+	}
+	post := []float64{0.8, 0.2}
+	// 先验和 0.7（非归一）：修复前新侧只分到 0.35、旧侧 0.5
+	fresh := []core.Hypothesis{
+		{ID: "h_3", Statement: "新方向", Confidence: 0.6},
+		{ID: "h_4", Statement: "另一个新方向", Confidence: 0.1},
+	}
+
+	merged, weights := agent.MergeReplanWeights(old, post, fresh)
+	if len(merged) != 4 {
+		t.Fatalf("merged = %d, want 4", len(merged))
+	}
+	var oldMass, newMass float64
+	for i, w := range weights {
+		if strings.HasPrefix(merged[i].Statement, "旧方向") {
+			oldMass += w
+		} else {
+			newMass += w
+		}
+	}
+	// 旧侧按后验比例分 0.5（0.8:0.2 → 0.4:0.1），新侧按先验比例分 0.5（0.6:0.1 → 3/7:1/7）
+	if math.Abs(oldMass-0.5) > 1e-9 || math.Abs(newMass-0.5) > 1e-9 {
+		t.Fatalf("mass split = old %.4f / new %.4f, want 0.5 / 0.5", oldMass, newMass)
+	}
+	if math.Abs(weights[2]-0.5*0.6/0.7) > 1e-9 {
+		t.Fatalf("fresh weight[0] = %v, want %.4f", weights[2], 0.5*0.6/0.7)
+	}
+}
+
+// 重规划合并不留死假设：被重提的旧假设进新侧（新先验），未重提的零后验压下限参与
+func TestReplanAcquireReproposedUsesFreshPrior(t *testing.T) {
+	old := []core.Hypothesis{
+		{ID: "h_1", Statement: "方向一"},
+		{ID: "h_2", Statement: "方向二"},
+	}
+	post := []float64{0.0, 1.0}
+	fresh := []core.Hypothesis{
+		{ID: "h_3", Statement: "方向一", Confidence: 0.1}, // 重提（语句相同）
+		{ID: "h_4", Statement: "方向三", Confidence: 0.9},
+	}
+
+	merged, weights := agent.MergeReplanWeights(old, post, fresh)
+	if len(merged) != 3 {
+		t.Fatalf("merged = %d, want 3（重提的不重复保留）", len(merged))
+	}
+	// h_2（后验 1.0）独占旧侧 0.5；新侧按 0.1:0.9 分 0.5
+	if math.Abs(weights[0]-0.5) > 1e-9 {
+		t.Fatalf("kept old weight = %v, want 0.5", weights[0])
+	}
+	if math.Abs(weights[1]-0.5*0.1) > 1e-9 || math.Abs(weights[2]-0.5*0.9) > 1e-9 {
+		t.Fatalf("fresh weights = %v, want 0.05/0.45", weights[1:])
 	}
 }
 
