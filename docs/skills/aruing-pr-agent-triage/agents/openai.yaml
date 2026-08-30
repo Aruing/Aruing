@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing PR-Agent Triage"
+  short_description: "实测裁决 pr-agent 评论：采纳按类修复、证伪钉板，用最少轮次收敛评审"
+  default_prompt: "Use $aruing-pr-agent-triage when handling pr-agent review comments on a PR: verify each finding by execution, fix accepted ones by family (not instance), pin rejected semantics, and batch everything into a single push."
+
+policy:
+  allow_implicit_invocation: true
