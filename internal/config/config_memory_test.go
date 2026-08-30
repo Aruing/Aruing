@@ -51,4 +51,18 @@ func TestMergeEnvLookupMemory(t *testing.T) {
 	if out.Agent.Memory.Method != "d2-flat-summary" {
 		t.Fatalf("non-empty env must override: %q", out.Agent.Memory.Method)
 	}
+
+	// 钉板（pr-agent #130 R1 证伪）：显式 env 0 不重置文件非零值——
+	// 非正整数 env 归零等同未设置（parseIntEnv 口径，与 acquire.max_rounds /
+	// tools.projection.budget 同族），默认值兑底归消费方 assembleLastN；
+	// 「回默认」的正路是文件里写 0 或删行，而非 env 置 0
+	out = MergeEnvLookup(base, func(k string) (string, bool) {
+		if k == "ARUING_AGENT_MEMORY_LAST_N" {
+			return "0", true
+		}
+		return "", false
+	})
+	if out.Agent.Memory.LastN != 10 {
+		t.Fatalf("explicit env 0 must not reset file value (non-positive = unset): %d", out.Agent.Memory.LastN)
+	}
 }
