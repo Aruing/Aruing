@@ -162,6 +162,22 @@ func TestRunProbeSessionTurnFailure(t *testing.T) {
 	}
 }
 
+// 依赖最小集：Turn / 账本缺失启动期报错，不到轮次里 panic
+func TestRunProbeSessionDepsValidation(t *testing.T) {
+	spec := ProbeSpec{Name: "s", DiagnoseRequest: "d", QAPool: []string{"q"},
+		Probes: []ProbeQuestion{{ID: "p", Class: ProbeClassEvidence, Question: "?", Expect: []ExpectGroup{{Literal: "x"}}}}}
+	script, err := GenerateProbeScript(spec, 4, 1)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if _, err := RunProbeSession(context.Background(), ProbeDeps{}, ProbeRunOptions{SessionID: "s"}, spec, script); err == nil {
+		t.Fatal("empty deps must error")
+	}
+	if _, err := RunProbeSession(context.Background(), ProbeDeps{Ledger: store.NewMemoryRunLedger()}, ProbeRunOptions{SessionID: "s"}, spec, script); err == nil {
+		t.Fatal("missing Turn must error")
+	}
+}
+
 // turnAnswer 构造基线回复轮结果（假栈助手消息）
 func turnAnswer(content string) session.TurnResult {
 	return session.TurnResult{

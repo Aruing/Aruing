@@ -166,6 +166,13 @@ func RunProbeSession(
 	spec ProbeSpec,
 	script ProbeScript,
 ) (ProbeSessionRecord, error) {
+	// 依赖最小集校验：Turn 与账本缺失属装配错误，启动期报错不panic
+	if deps.Turn == nil {
+		return ProbeSessionRecord{}, fmt.Errorf("probe deps: Turn is required")
+	}
+	if deps.Ledger == nil {
+		return ProbeSessionRecord{}, fmt.Errorf("probe deps: Ledger is required")
+	}
 	rec := ProbeSessionRecord{
 		SchemaVersion:    SchemaVersion,
 		SessionID:        opts.SessionID,
