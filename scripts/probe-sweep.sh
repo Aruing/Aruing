@@ -53,10 +53,10 @@ if [ "$DRYRUN" != "1" ]; then
     done
     # manifest：装置归因（2026-08-30 追加裁决）——git / 模型 / 矩阵参数随批落盘
     model="$(grep -E '^[[:space:]]*model:' "$CONFIG" | head -1 | sed 's/^[[:space:]]*model:[[:space:]]*//' | tr -d '"')"
-    printf '{\n  "tool": "probe-sweep",\n  "git": "%s",\n  "commit": "%s",\n  "model": "%s",\n  "config": "%s",\n  "scenarios": "%s",\n  "methods": "%s",\n  "rounds": "%ROUNDS",\n  "reps": "%REPS",\n  "started": "%s"\n}\n' \
+    printf '{\n  "tool": "probe-sweep",\n  "git": "%s",\n  "commit": "%s",\n  "model": "%s",\n  "config": "%s",\n  "scenarios": "%s",\n  "methods": "%s",\n  "rounds": "%s",\n  "reps": "%s",\n  "started": "%s"\n}\n' \
         "$(git -C "$ROOT" describe --always --dirty 2>/dev/null || echo unknown)" \
         "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
-        "${model:-unknown}" "$CONFIG" "$SCENARIOS" "$METHODS" \
+        "${model:-unknown}" "$CONFIG" "$SCENARIOS" "$METHODS" "$ROUNDS" "$REPS" \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$OUT/manifest.json"
 fi
 
