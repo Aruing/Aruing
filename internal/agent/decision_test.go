@@ -121,6 +121,37 @@ func TestParseDecisionOutputDropsInvalidActions(t *testing.T) {
 	}
 }
 
+// 值域边界（pr-agent 第 1 轮裁决）：
+// 采纳——行和溢出在解析层拒绝，与 acquire.NewAction 的溢出检查同族同判，
+// 避免容错分裂在两层（解析层报有效、构造层才拒）；
+// 证伪钉板——[0,1] 之外的有限值是相对权重（归一交 NewAction 构造期），
+// 全零行是缺损质量设计语义（NewAction 有 sum>0 守卫无除零，EIG=0 已在
+// acquire 测试钉板），两者保留不丢
+func TestParseDecisionOutputMatrixValueDomain(t *testing.T) {
+	body := `{
+		"hypotheses": [{"statement": "a"}, {"statement": "b"}],
+		"actions": [
+			{"name": "overflow", "argv": ["get", "pods"], "cost": 1, "outcomes": ["u", "v"], "matrix": [[1e308, 1e308], [0.5, 0.5]]},
+			{"name": "relative-weights", "argv": ["get", "svc"], "cost": 1, "outcomes": ["u", "v"], "matrix": [[5, 3], [1, 1]]},
+			{"name": "zero-row", "argv": ["get", "ep"], "cost": 1, "outcomes": ["u", "v"], "matrix": [[0, 0], [0.7, 0.3]]}
+		]
+	}`
+	decision, err := parseDecisionOutput([]byte(body))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if decision.DroppedActions != 1 {
+		t.Errorf("dropped = %d, want 1 (overflow only)", decision.DroppedActions)
+	}
+	kept := map[string]bool{}
+	for _, a := range decision.Actions {
+		kept[a.Name] = true
+	}
+	if !kept["relative-weights"] || !kept["zero-row"] {
+		t.Errorf("design-semantics actions dropped: kept = %v", kept)
+	}
+}
+
 // 计划级下限：零假设、空语句、全部动作非法都整计划拒绝
 func TestParseDecisionOutputPlanLevelErrors(t *testing.T) {
 	cases := []struct {

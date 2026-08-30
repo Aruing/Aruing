@@ -219,7 +219,10 @@ func buildActionProposal(a decisionActionOut, hypothesisCount int) (ActionPropos
 	}
 
 	// 矩阵形状：行数对齐假设数（缺行会被当作概率 1 预测，必须拒绝），
-	// 列数对齐结果数；元素非负有限（NaN/±Inf 经行归一会静默污染下游）
+	// 列数对齐结果数；元素非负有限（NaN/±Inf 经行归一会静默污染下游）。
+	// 值域不拒 [0,1] 之外的有限值：行是相对权重，归一交给 acquire.NewAction
+	// 构造期做（冻结口径）；但行和溢出在这里提前拒——否则解析层报有效、
+	// 构造层才拒，容错分裂在两层（与 NewAction 的溢出检查同族同判）
 	if len(a.Matrix) != hypothesisCount {
 		return ActionProposal{}, errors.New("action matrix rows must align with hypotheses")
 	}
@@ -229,11 +232,16 @@ func buildActionProposal(a decisionActionOut, hypothesisCount int) (ActionPropos
 			return ActionProposal{}, errors.New("action matrix columns must align with outcomes")
 		}
 		matrix[i] = make([]float64, len(row))
+		var rowSum float64
 		for j, v := range row {
 			if v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
 				return ActionProposal{}, errors.New("action matrix entries must be non-negative finite")
 			}
 			matrix[i][j] = v
+			rowSum += v
+		}
+		if math.IsInf(rowSum, 0) {
+			return ActionProposal{}, errors.New("action matrix row sum overflows")
 		}
 	}
 
