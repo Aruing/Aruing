@@ -233,13 +233,11 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		}
 		view = v
 		priorRuns = cards
-		// 压缩后按范围回灌（仅 ours）：视图丢失旧文时，定位规则优先、大模型兜底，
-		// 命中后窗内压缩压进子预算，作为回灌消息注入
-		if viewCompactedAwayDetail(view) {
-			if lo, hi, ok := locateRange(ctx, t.client, in.UserText, in.History); ok {
-				rehydrated = compactRange(rehydrateRange(in.History, lo, hi), defaultRehydrateBudgetTokens)
-				t.progressf("tower: rehydrated=%d range=[%d,%d]", len(rehydrated), lo, hi)
-			}
+		// 分层检索回灌（仅 ours）：λ₁ 确定性寻址每轮必跑，λ₁ 空且压缩丢细节时
+		// λ₂ 大模型兜底；命中窗与证据预览压进子预算，作为回灌消息注入
+		rehydrated = rehydrateLayered(ctx, t.client, in.UserText, in.History, records, view)
+		if len(rehydrated) > 0 {
+			t.progressf("tower: rehydrated=%d", len(rehydrated))
 		}
 	}
 	t.progressf("tower: memory=%s hist=%d checkpoint=%v prior_cards=%d",
@@ -702,7 +700,7 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 // 组装用户载荷：当前句、历史视图、先前诊断摘要与索引卡、本轮观察、工具列表、可选集群资源、可选回灌窗
 // 禁止按固定条数静默截断；历史超预算见记忆组装器；
 // 观察原始输出见预算治理；索引卡不带 raw（深细节归回灌与 evidence.read）；
-// 回灌窗仅在压缩丢细节且定位命中时注入（D1/D2 实验臂不注入）
+// 回灌窗仅 ours 注入（消息原文 + 证据预览条目；D1/D2 实验臂不注入）
 func buildTowerUserPayload(
 	in session.RespondInput,
 	view towerContextView,
@@ -733,7 +731,7 @@ func buildTowerUserPayload(
 		Tools []toolItem `json:"tools"`
 		// 本集群实际可用资源类型（含自定义资源）；基线上下文，非正式证据
 		ClusterResources []ClusterResource `json:"cluster_resources,omitempty"`
-		// 压缩后按范围回灌的原文窗（仅当默认视图丢失旧文且定位命中时存在）
+		// 压缩后分层检索回灌的原文窗（λ₁ 锚定或 λ₂ 兜底命中时存在；含证据原文预览条目）
 		// 步骤级细节优先依据本字段，不得编造未出现的步骤
 		RehydratedMessages []rehydratedMsg `json:"rehydrated_messages,omitempty"`
 	}
