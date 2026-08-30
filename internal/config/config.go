@@ -63,10 +63,12 @@ type Tools struct {
 
 // 诊断编排侧配置
 //
-// 当前仅含主动取证决策段；后续编排侧能力开关按同模式性扩展
+// 能力开关按同模式扩展：取证决策（acquire）与记忆组装（memory）
 type Agent struct {
 	// 主动取证决策（调查阶段循环方法与决策参数）
 	Acquire Acquire `yaml:"acquire"`
+	// 记忆组装（会话历史注入视图方法开关；实验臂须显式配置）
+	Memory Memory `yaml:"memory"`
 }
 
 // 主动取证决策配置：调查循环方法开关与决策参数（实验敏感性扫参用）；零值 = 默认
@@ -96,6 +98,18 @@ type Acquire struct {
 	Delta float64 `yaml:"delta"`
 	// refuted 出口假设空间保留质量下限；0 = 默认 0.05
 	MassFloor float64 `yaml:"mass_floor"`
+}
+
+// 记忆组装配置：会话历史注入视图的组装方法开关与实验参数；零值 = 默认
+//
+// 方法名解析与校验在装配层（启动明确失败，不静默回落，照 tools.projection / agent.acquire 先例）
+// 对应环境变量 ARUING_AGENT_MEMORY_*
+type Memory struct {
+	// ours | d1-last-n | d2-flat-summary（后两者为实验对照臂：纯记忆策略，
+	// 无索引卡无回灌；D1 last-N 违反 #18 仅实验豁免）；空 = ours（产品默认）
+	Method string `yaml:"method"`
+	// D1 保留的最近消息条数；0 = 默认 20（实验扫描用）；其余方法不读
+	LastN int `yaml:"last_n"`
 }
 
 // 表格投影配置：方法开关与预算口径，透传给投影层
@@ -176,6 +190,10 @@ func LoadFrom(getenv func(string) string) Config {
 				Tau:       parseFloatEnv(getenv("ARUING_AGENT_ACQUIRE_TAU")),
 				Delta:     parseFloatEnv(getenv("ARUING_AGENT_ACQUIRE_DELTA")),
 				MassFloor: parseFloatEnv(getenv("ARUING_AGENT_ACQUIRE_MASS_FLOOR")),
+			},
+			Memory: Memory{
+				Method: strings.TrimSpace(getenv("ARUING_AGENT_MEMORY_METHOD")),
+				LastN:  parseIntEnv(getenv("ARUING_AGENT_MEMORY_LAST_N")),
 			},
 		},
 		TUI: TUI{
@@ -284,6 +302,16 @@ func MergeEnvLookup(base Config, lookup func(string) (string, bool)) Config {
 	if v, ok := lookup("ARUING_AGENT_ACQUIRE_MASS_FLOOR"); ok {
 		if f := parseFloatEnv(v); f > 0 {
 			out.Agent.Acquire.MassFloor = f
+		}
+	}
+	if v, ok := lookup("ARUING_AGENT_MEMORY_METHOD"); ok {
+		if t := strings.TrimSpace(v); t != "" {
+			out.Agent.Memory.Method = t
+		}
+	}
+	if v, ok := lookup("ARUING_AGENT_MEMORY_LAST_N"); ok {
+		if n := parseIntEnv(v); n > 0 {
+			out.Agent.Memory.LastN = n
 		}
 	}
 	if v, ok := lookup("ARUING_TUI_THEME"); ok {

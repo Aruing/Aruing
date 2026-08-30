@@ -230,11 +230,22 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 	if err != nil {
 		return nil, fmt.Errorf("build tower: %w", err)
 	}
+	if memErr := configureMemory(tower, cfg); memErr != nil {
+		return nil, memErr
+	}
 	if cfg.Debug {
 		tower.SetProgress(progress)
 	}
 
 	return session.NewService(store.NewMemoryStore(), factory, tower), nil
+}
+
+// 配置记忆组装：方法解析失败启动即错（不静默回落）；实验臂须显式配置，产品默认 ours
+func configureMemory(tower *agent.TowerResponder, cfg config.Config) error {
+	if err := tower.SetMemoryMethod(cfg.Agent.Memory.Method, cfg.Agent.Memory.LastN); err != nil {
+		return fmt.Errorf("agent.memory.method: %w", err)
+	}
+	return nil
 }
 
 // 用大模型客户端组装五角色；工具规格与调度器同源

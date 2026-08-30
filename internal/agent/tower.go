@@ -67,6 +67,10 @@ type TowerResponder struct {
 	progress io.Writer
 	// 轮内观察索引；非空时 Put 成功观察并在 Respond 返回前 Discard
 	obsIndex *tools.ObservationIndex
+	// 记忆组装方法：ours 产品默认（tier-aware）/ D1 / D2 实验臂；空值按 ours
+	memoryMethod MemoryMethod
+	// 记忆组装参数（D1 条数等；预算与窗口用包内默认，不进 config）
+	memoryOpts memoryOptions
 }
 
 // 组装总控；客户端、编号工厂、执行器、账本必填，调度器与工具规格可选
@@ -116,6 +120,7 @@ func NewTowerResponder(
 		baselineMaxToolRounds: defaultBaselineMaxToolRounds,
 		progress:              io.Discard,
 		obsIndex:              obsIndex,
+		memoryMethod:          MemoryMethodOurs,
 	}, nil
 }
 
@@ -126,6 +131,18 @@ func (t *TowerResponder) SetBaselineMaxToolRounds(n int) {
 		return
 	}
 	t.baselineMaxToolRounds = n
+}
+
+// 配置记忆组装方法（agent.memory.method）：解析失败报错，由装配层启动拦截
+// lastN 为 D1 保留条数（非正走默认）；ours / D2 不读
+func (t *TowerResponder) SetMemoryMethod(method string, lastN int) error {
+	m, err := ParseMemoryMethod(method)
+	if err != nil {
+		return err
+	}
+	t.memoryMethod = m
+	t.memoryOpts.lastN = lastN
+	return nil
 }
 
 // 设置进度与调试输出；空时回退丢弃
@@ -177,20 +194,6 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		}
 	}()
 
-	view, err := prepareTowerContext(
-		ctx,
-		t.client,
-		in.History,
-		defaultTowerContextBudgetTokens,
-		defaultMaxMessageContentTokens,
-		defaultTruncatedPreviewTokens,
-	)
-	if err != nil {
-		return session.RespondOutput{}, fmt.Errorf("tower context: %w", err)
-	}
-	t.progressf("tower: context_ready hist=%d checkpoint=%v", len(view.Hist), view.CheckpointContent != "")
-
-	// 压缩后按范围回灌：视图丢失旧文时，定位相关区间从权威存储取原文注入
 	// 挂起恢复优先：会话内有 waiting_user 的 run 时，本轮用户原文作澄清答复，不经动作决策
 	if runner, ok := t.executor.(session.SuspendedRunner); ok {
 		if runID := runner.FindSuspended(in.SessionID); runID != "" {
@@ -203,22 +206,44 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		}
 	}
 
-	// 定位规则优先、大模型兜底；命中后窗内压缩压进子预算，作为回灌消息注入
-	var rehydrated []rehydratedMsg
-	if viewCompactedAwayDetail(view) {
-		if lo, hi, ok := locateRange(ctx, t.client, in.UserText, in.History); ok {
-			rehydrated = compactRange(rehydrateRange(in.History, lo, hi), defaultRehydrateBudgetTokens)
-			t.progressf("tower: rehydrated=%d range=[%d,%d]", len(rehydrated), lo, hi)
-		}
-	}
-
-	// 本会话正式诊断深材料（报告加证据）；权威源为诊断账本，非消息摘要
+	// 本会话正式诊断记录；权威源为诊断账本，非消息摘要
 	records, listErr := t.ledger.ListBySession(ctx, in.SessionID)
 	if listErr != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower list diagnostic runs: %w", listErr)
 	}
-	priorRuns := buildPriorRunDetails(records, defaultPriorEvidenceBudgetTokens)
-	t.progressf("tower: prior_run_details=%d", len(priorRuns))
+
+	// 记忆组装按方法分派：ours = tier-aware（R 卡片锁定常驻 + W 窗口 + C 压缩）
+	// D1 / D2 为纯记忆策略实验臂——无卡片无回灌（对照口径：回灌与卡片归 ours 组件）
+	var view towerContextView
+	var priorRuns []towerPriorRunDetail
+	var rehydrated []rehydratedMsg
+	switch t.memoryMethod {
+	case MemoryMethodD1LastN:
+		view = assembleLastN(in.History, t.memoryOpts.lastN)
+	case MemoryMethodD2FlatSummary:
+		v, asmErr := assembleFlatSummary(ctx, t.client, in.History, 0)
+		if asmErr != nil {
+			return session.RespondOutput{}, fmt.Errorf("tower memory assemble: %w", asmErr)
+		}
+		view = v
+	default:
+		v, cards, asmErr := assembleTieredView(ctx, t.client, in.History, records, t.memoryOpts)
+		if asmErr != nil {
+			return session.RespondOutput{}, fmt.Errorf("tower memory assemble: %w", asmErr)
+		}
+		view = v
+		priorRuns = cards
+		// 压缩后按范围回灌（仅 ours）：视图丢失旧文时，定位规则优先、大模型兜底，
+		// 命中后窗内压缩压进子预算，作为回灌消息注入
+		if viewCompactedAwayDetail(view) {
+			if lo, hi, ok := locateRange(ctx, t.client, in.UserText, in.History); ok {
+				rehydrated = compactRange(rehydrateRange(in.History, lo, hi), defaultRehydrateBudgetTokens)
+				t.progressf("tower: rehydrated=%d range=[%d,%d]", len(rehydrated), lo, hi)
+			}
+		}
+	}
+	t.progressf("tower: memory=%s hist=%d checkpoint=%v prior_cards=%d",
+		t.memoryMethod, len(view.Hist), view.CheckpointContent != "", len(priorRuns))
 
 	// 每轮一次；与正式管道侦察同源解析；无运行编号，不进证据账本
 	clusterResources := t.fetchBaselineClusterResources(ctx)
@@ -356,7 +381,7 @@ type towerToolCallJSON struct {
 }
 
 // 调用模型直至得到合法决策或业务重试耗尽
-// 先前运行材料为本会话诊断账本深材料；集群资源为本轮轻量侦察（可空）
+// 先前运行材料为本会话诊断账本的 R 层索引卡；集群资源为本轮轻量侦察（可空）
 // 回灌为压缩后按范围回灌的原文窗（可空）；三者仅注入提示词，不写入观察账本
 func (t *TowerResponder) decide(
 	ctx context.Context,
@@ -674,10 +699,10 @@ func buildTowerSystemPrompt(template string, specs []tools.ToolSpec) (string, er
 	return strings.Replace(template, "{{TOOL_SPECS}}", string(raw), 1), nil
 }
 
-// 组装用户载荷：当前句、历史视图、先前诊断摘要与深材料、本轮观察、工具列表、可选集群资源、可选回灌窗
-// 禁止按固定条数静默截断；历史超预算见上下文准备；
-// 观察原始输出见预算治理；先前证据原始输出见深材料组装；
-// 回灌窗仅在压缩丢细节且定位命中时注入
+// 组装用户载荷：当前句、历史视图、先前诊断摘要与索引卡、本轮观察、工具列表、可选集群资源、可选回灌窗
+// 禁止按固定条数静默截断；历史超预算见记忆组装器；
+// 观察原始输出见预算治理；索引卡不带 raw（深细节归回灌与 evidence.read）；
+// 回灌窗仅在压缩丢细节且定位命中时注入（D1/D2 实验臂不注入）
 func buildTowerUserPayload(
 	in session.RespondInput,
 	view towerContextView,
@@ -700,7 +725,7 @@ func buildTowerUserPayload(
 		History []towerHistMsg `json:"history"`
 		// 本会话既有诊断摘要（消息侧；无条数上限，由预算统一治理）
 		PriorDiagnostics []towerPriorDiagnostic `json:"prior_diagnostics"`
-		// 本会话正式诊断深材料（诊断账本：结论加证据；原始输出共享预算）
+		// 本会话正式诊断索引卡（诊断账本：结论加证据卡面；不带 raw）
 		PriorRunDetails []towerPriorRunDetail `json:"prior_run_details"`
 		// 本轮工具观察（原始输出经预算治理后的注入副本）
 		Observations []towerObservation `json:"observations"`

@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-08-30（`0.1.3` 分层记忆组装启动：步骤 1 C1 机械校验合并（#129，压缩出口地址无损补附）；`0.1.2` 实现完成（#119/#122/#124/#126，产品默认 ours），完成标志 7/8 顺延至 0.1.3 后最终版本统一实验批（2026-08-30 裁决）。0.2.0 远景与排序依据见笔记 `plan/version/0.2.0.md`）
+> 最后更新：2026-08-30（`0.1.3` 进行中：步骤 1 C1 机械校验（#129）与步骤 2 tier-aware 组装器 + `agent.memory.method` 开关已落地；0.1.2 实现完成（#119/#122/#124/#126），完成标志 7/8 顺延至 0.1.3 后最终版本统一实验批（2026-08-30 裁决）。0.2.0 远景与排序依据见笔记 `plan/version/0.2.0.md`）
 
 ## 当前阶段
 
@@ -97,6 +97,7 @@
 | beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
+| 0.1.3-2 | tier-aware 组装器 + 记忆方法开关 | ✅ | #130；`internal/agent` 新增 `memory_cards.go`（R 层索引卡：`buildMemoryCards`，字段钳 c_max=200、不带 raw、地址不钳；κ₂ 接口预留占位）+ `assembler.go`（`assembleTieredView` ours：R 锁定 + W 最近 w 轮 LRU + C 中段压缩每段过 C1，预算 R 先取满；`assembleLastN`/`assembleFlatSummary` D1/D2 纯对照臂）；Respond 按 `agent.memory.method` 分派（config `Agent.Memory` method+last_n，env ARUING_AGENT_MEMORY_*，未知值启动报错；D1/D2 无卡片无回灌）；`buildPriorRunDetails` 退役（ours 下 prior_run_details 由带 raw 深材料改为卡片，深细节归回灌/evidence.read）；payload 契约与 prompt 零改 |
 | 0.1.3-1 | C1 机械校验（压缩出口地址无损） | ✅ | #129；`internal/agent` 新增 `addrcheck.go`：ID 族正则（Factory 全部前缀）抽取 + `ensureAddrCoverage` 缺号以 `[addr_refs]` 行补附（幂等；词典实体参数留面、无权威词典前传 nil）；接线全部有损变换出口——`truncateContentPreview` / `foldLine` / `forceCompactMark` 内联（签名不变，复用路径自动覆盖含 beta7 回灌窗）+ L2 checkpoint 落库正文机械兑底（不信任模型 run_ids，RunID 字段纳入比对源）；footer 计入既有预算估算；core / session / tools / config 零改 |
 | 0.1.2-1 | acquire 决策计算内核 | ✅ | #119（含 6 轮 pr-agent 评审：前 5 条真缺陷按根因修复——Action 封闭不变量 + Options 全参数域校验；第 6 轮 1.5 条采纳 1 条证伪钉板）； `internal/agent/acquire` 纯函数包（零接线零依赖）：对数域贝叶斯更新 + EIG（bit）+ argmax EIG/c + MSPRT 三出口 + 强度更新 ℓ = 2^(α·d·s)（对数线性，思考文档 §3.4 随走查修正）+ §7 数值算例复算单测（EIG=0.71 bit / 后验 0.902/0.988 / 两次动作收敛）；core/编排零改 |
 | 0.1.2-2 | Planner 决策输出结构与 prompt 改造 | ✅ | #122；`core.Hypothesis.Confidence`（[0,1] 单字段，语义随写入方：决策规划写先验 / 决策循环写后验；architecture 数据表同步）+ `agent.PlanDecision` / `ActionProposal` / `StrengthJudgement`（动作级容错：非法动作丢弃并计数，全坏才报错；问用户成本固定 10）+ `LLMDecisionPlanner`（prompt `planner-decision.md`，{{TOOL_SPECS}} 注入，计划级违规重试）+ `LLMVerifier.JudgeStrength`（prompt `strength.md`，逐假设恰好一条 (d,s)，Verify 原语义不动）+ agenttest `FakeDecisionPlanner` / `FakeVerifier.JudgeStrength`（关键词表回放）；prompt 示例契约测试；旧 planner.md / LLMPlanner / investigateLoop 零改（B1 保真）；零编排接线（步骤 3） |
@@ -112,7 +113,7 @@
 
 ## 下一步
 
-**下一项**：`0.1.3` 步骤 2 tier-aware 组装器（R 证据/结论索引卡锁定常驻 / W 最近 w 轮 LRU / C 中段叙事压缩每段过 C1；预算分配 + κ₂ 接口预留；统一 prior_run_details 线与摘要线；`agent.memory.method` 开关含 D1 last-N / D2 平铺摘要实验臂，显式配置才生效，产品默认 ours）。其后：步骤 3 分层检索回灌（λ₁ 确定性寻址 + λ₂ LLM 定位 + 回灌迭代）、步骤 4 探针实验基建。**实验批次调整（2026-08-30 裁决）**：0.1.2 完成标志 7（真 LLM smoke）/ 8（实验数据）、0.1.1 遗留 C4 / 下游 LLM 端到端、0.1.3 探针实验——统一推迟到 0.1.3 完成后的最终版本上同批跑（实验数据一律以最终版本为装置，不做中途增量跑数）；届时 0.1.2 完成标志全绿归档（不独立发版，随 v0.1.3 一并交付——发布裁决 2026-08-30）。排序依据见笔记 `plan/version/0.2.0.md`。
+**下一项**：`0.1.3` 步骤 3 分层检索回灌（λ₁ 确定性寻址 `mentions(q)` 正则+词典 ∩ 地址集 + λ₂ LLM 定位升格既有 locateRange 兑底 + 回灌迭代/预览；资源名词典来源随本步 grill）。其后：步骤 4 探针实验基建（脚本化长会话 harness + 观测量 + 判分脚本）。**实验批次调整（2026-08-30 裁决）**：0.1.2 完成标志 7（真 LLM smoke）/ 8（实验数据）、0.1.1 遗留 C4 / 下游 LLM 端到端、0.1.3 探针实验——统一推迟到 0.1.3 完成后的最终版本上同批跑（实验数据一律以最终版本为装置，不做中途增量跑数）；届时 0.1.2 完成标志全绿归档（不独立发版，随 v0.1.3 一并交付——发布裁决 2026-08-30）。排序依据见笔记 `plan/version/0.2.0.md`。
 
 **0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
 
