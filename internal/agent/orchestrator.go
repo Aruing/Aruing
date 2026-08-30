@@ -50,27 +50,43 @@ const (
 	AcquireMethodB1Serial AcquireMethod = iota
 	// Ours 决策循环（产品默认）：a* ← argmax EIG/c 序贯取证 + MSPRT 停止
 	AcquireMethodOurs
+	// B2 实验臂：种子随机选择——复用 Ours 决策循环全部机制只换选择策略
+	// （对照口径「其余一切同构」；种子经 config agent.acquire.seed 可复现）
+	AcquireMethodB2Random
+	// B4 实验臂：恒选最低成本动作——同上复用，只换选择策略（并列取索引小）
+	AcquireMethodB4Cheapest
 )
 
 // 解析方法名（config 口径）：空或 "ours" → Ours（产品默认）；"b1-serial" → B1；
-// 其余报错（启动明确失败）。注意与编排零值的区别：未显式配置的裸编排器走 B1
+// "b2-random" / "b4-cheapest" → 实验臂（复用决策循环只换选择策略）；其余报错
+// （启动明确失败）。注意与编排零值的区别：未显式配置的裸编排器走 B1
 func ParseAcquireMethod(name string) (AcquireMethod, error) {
 	switch strings.TrimSpace(strings.ToLower(name)) {
 	case "", "ours":
 		return AcquireMethodOurs, nil
 	case "b1-serial":
 		return AcquireMethodB1Serial, nil
+	case "b2-random":
+		return AcquireMethodB2Random, nil
+	case "b4-cheapest":
+		return AcquireMethodB4Cheapest, nil
 	default:
-		return 0, fmt.Errorf("unknown agent.acquire.method %q (want ours or b1-serial)", name)
+		return 0, fmt.Errorf("unknown agent.acquire.method %q (want ours, b1-serial, b2-random or b4-cheapest)", name)
 	}
 }
 
 // 方法名展示（进度与日志用）
 func (m AcquireMethod) String() string {
-	if m == AcquireMethodB1Serial {
+	switch m {
+	case AcquireMethodB1Serial:
 		return "b1-serial"
+	case AcquireMethodB2Random:
+		return "b2-random"
+	case AcquireMethodB4Cheapest:
+		return "b4-cheapest"
+	default:
+		return "ours"
 	}
-	return "ours"
 }
 
 // 描述编排器理解原始问题所需的最小能力
@@ -250,8 +266,10 @@ type Orchestrator struct {
 	// 调查阶段规划轮数预算，零值表示使用默认调查轮次上限
 	// 默认一轮，与早期单轮行为等价；调高并改多轮提示词后才真正迭代
 	investigateMaxRounds int
-	// 调查阶段取证决策方法；零值 = ours（产品默认），B1 经 config 显式切换
+	// 调查阶段取证决策方法；零值 = ours（产品默认），B1 / B2 / B4 经 config 显式切换
 	acquireMethod AcquireMethod
+	// B2 实验臂的随机种子（种子随机选择可复现用）；其余方法不读
+	acquireSeed int64
 	// 取证决策参数（α/P*/A/τ/δ/质量下限）；零值由 acquire 包取默认
 	acquireOptions acquire.Options
 	// 决策规划器（ours 方法必需）；B1 路径不读
@@ -275,7 +293,8 @@ type Orchestrator struct {
 type RunStats struct {
 	// 调查循环已开始的轮数（挂起后 Resume 续跑会覆盖为本段循环的轮数）
 	InvestigateRounds int
-	// 取证决策循环出口（ours 路径）：supported / insufficient；B1 路径为空
+	// 取证决策循环出口（决策循环路径：ours / b2-random / b4-cheapest）：
+	// supported / insufficient；b1-serial 路径为空
 	AcquireExit string
 	// insufficient 出口的缺口说明（平台还是预算尽）；#18 明确失败可观测
 	AcquireGap string
@@ -367,6 +386,14 @@ func (o *Orchestrator) SetAcquireOptions(opts acquire.Options) {
 		return
 	}
 	o.acquireOptions = opts
+}
+
+// 设置选择策略随机种子（b2-random 实验臂可复现用）；其余方法不读
+func (o *Orchestrator) SetAcquireSeed(seed int64) {
+	if o == nil {
+		return
+	}
+	o.acquireSeed = seed
 }
 
 // 注入决策规划器（ours 方法必需）；B1 路径不读，未注入时 ours 分派明确失败
@@ -544,7 +571,8 @@ func (o *Orchestrator) continueFromInvestigate(
 	}
 
 	// 调查阶段为编排可见循环：按方法分派——B1 走旧串行循环（零改保真），
-	// ours 走取证决策循环（a* ← argmax EIG/c 序贯取证 + MSPRT 停止）
+	// 其余（ours 产品默认 / b2-random / b4-cheapest 实验臂）走取证决策循环
+	// （实验臂复用全部机制只换选择策略，对照口径「其余一切同构」）
 	// 两循环同签名同返回，澄清挂起/报告路径共用
 	var (
 		evidence []core.Evidence
@@ -553,7 +581,7 @@ func (o *Orchestrator) continueFromInvestigate(
 		paused   InvestigateState
 		err      error
 	)
-	if o.acquireMethod == AcquireMethodOurs {
+	if o.acquireMethod != AcquireMethodB1Serial {
 		evidence, verdicts, clarify, paused, err = o.acquireLoop(ctx, query, seed, clusterResources)
 	} else {
 		evidence, verdicts, clarify, paused, err = o.investigateLoop(ctx, query, seed, clusterResources)

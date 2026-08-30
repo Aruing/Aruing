@@ -47,3 +47,6 @@ go.work.sum
 # macOS noise
 .DS_Store
 .benchvenv/
+
+# python 出图脚本缓存
+__pycache__/

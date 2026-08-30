@@ -127,6 +127,12 @@ OUT ?=
 bench:
 	$(GO) run $(CMD) bench $(if $(MATRIX),--matrix $(MATRIX),) $(if $(OUT),--out $(OUT),)
 
+# 创新点一实验矩阵（真 LLM + kind，先授权后跑）：场景 × 方法(B1/B2/B4/Ours) × K × 重复
+# → eval 记录 + judge 汇总 + CSV 到 eval/results/；子集与输出目录经 env 覆盖
+# 例: make eval-sweep DRYRUN=1 / make eval-sweep METHODS="ours b1-serial" OUT=/tmp/sweep
+eval-sweep:
+	bash scripts/eval-sweep.sh
+
 # 全量真集群 smoke（全部场景，严格校验）：up → chat → down，单场景失败不中断，末尾汇总。
 # 依赖 Docker/kind/kubectl + bin/aruing + LLM 配置（playground/config.yaml 或 ARUING_CONFIG）。
 smoke-all:

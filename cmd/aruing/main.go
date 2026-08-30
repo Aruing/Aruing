@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Aruing/Aruing/internal/agent"
 	"github.com/Aruing/Aruing/internal/config"
 	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/eval"
@@ -201,10 +202,24 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		if tracker != nil {
 			tokens = tracker.UsageSnapshot()
 		}
+		stats := orchestrator.LastRunStats()
+		// 规范化方法名入记录（空串与 "ours" 归一，实验分组无歧义）；
+		// 解析在此不会失败（newOrchestrator 已在启动时校验过同一配置）
+		method := cfg.Agent.Acquire.Method
+		if m, perr := agent.ParseAcquireMethod(method); perr == nil {
+			method = m.String()
+		}
 		rec := eval.BuildRunRecord(
 			run.ID, question, cfg.LLM.Model, cfg.Tools.Projection.Method,
+			eval.AcquireRecordInfo{
+				Method:    method,
+				MaxRounds: cfg.Agent.Acquire.MaxRounds,
+				Seed:      cfg.Agent.Acquire.Seed,
+				Exit:      stats.AcquireExit,
+				Gap:       stats.AcquireGap,
+			},
 			completed, errMsg, report, evidence,
-			tokens, orchestrator.LastRunStats().InvestigateRounds, time.Since(start),
+			tokens, stats.InvestigateRounds, time.Since(start),
 		)
 		if werr := writeEvalRecord(*evalJSON, rec); werr != nil {
 			fmt.Fprintf(stderr, "写评测记录失败 %s：%v\n", *evalJSON, werr)

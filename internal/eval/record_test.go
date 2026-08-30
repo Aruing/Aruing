@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -25,7 +26,9 @@ func TestBuildRunRecordSuccess(t *testing.T) {
 		"parser": {PromptTokens: 10, CompletionTokens: 5, Calls: 1},
 	}
 
-	rec := BuildRunRecord("run_x", "为什么", "test-model", "greedy", true, "", report, evidence, tokens, 2, 1500*time.Millisecond)
+	rec := BuildRunRecord("run_x", "为什么", "test-model", "greedy",
+		AcquireRecordInfo{Method: "ours", MaxRounds: 3, Seed: 0, Exit: "supported"},
+		true, "", report, evidence, tokens, 2, 1500*time.Millisecond)
 
 	if rec.SchemaVersion != SchemaVersion || rec.RunID != "run_x" || !rec.Completed {
 		t.Fatalf("基础字段错误：%+v", rec)
@@ -49,11 +52,14 @@ func TestBuildRunRecordSuccess(t *testing.T) {
 	if rec.Rounds != 2 || rec.WallTimeMS != 1500 {
 		t.Fatalf("轮次/耗时错误：%d %d", rec.Rounds, rec.WallTimeMS)
 	}
+	if rec.AcquireMethod != "ours" || rec.AcquireMaxRounds != 3 || rec.AcquireExit != "supported" || rec.AcquireSeed != 0 {
+		t.Fatalf("取证决策分组/出口字段错误：%s %d %d %q", rec.AcquireMethod, rec.AcquireMaxRounds, rec.AcquireSeed, rec.AcquireExit)
+	}
 }
 
 // 失败路径：report 为 nil 也能落盘（completed=false + 错误信息照实）
 func TestBuildRunRecordFailure(t *testing.T) {
-	rec := BuildRunRecord("run_x", "q", "m", "fast", false, "boom", nil, nil, nil, 0, 0)
+	rec := BuildRunRecord("run_x", "q", "m", "fast", AcquireRecordInfo{Method: "b1-serial", Exit: "insufficient", Gap: "预算尽"}, false, "boom", nil, nil, nil, 0, 0)
 	if rec.Completed || rec.Error != "boom" {
 		t.Fatalf("失败记录字段错误：%+v", rec)
 	}
@@ -69,8 +75,26 @@ func TestBuildRunRecordNilEvidenceIDsNormalize(t *testing.T) {
 			{HypothesisID: "h1", Result: core.VerdictSupported, Reason: "无引用结论"},
 		},
 	}
-	rec := BuildRunRecord("run_x", "q", "m", "fast", true, "", report, nil, nil, 0, 0)
+	rec := BuildRunRecord("run_x", "q", "m", "fast", AcquireRecordInfo{Method: "ours"}, true, "", report, nil, nil, 0, 0)
 	if rec.RootCauses[0].EvidenceIDs == nil {
 		t.Fatal("无引用结论的 evidence_ids 应归一为空切片")
+	}
+}
+
+// 旧记录（无 acquire 字段）向后兼容：反序列化照常，新字段零值，judge 不受影响
+func TestRunRecordLegacyJSONCompat(t *testing.T) {
+	legacy := `{"schema_version":1,"run_id":"run_old","question":"q","model":"m",` +
+		`"projection_method":"fast","completed":true,"verdict_root_cause":[],` +
+		`"tool_calls":[],"evidence_cited":[],"tokens":{},"rounds":2,"wall_time_ms":100}`
+	var rec RunRecord
+	if err := json.Unmarshal([]byte(legacy), &rec); err != nil {
+		t.Fatalf("旧记录反序列化失败：%v", err)
+	}
+	if rec.AcquireMethod != "" || rec.AcquireExit != "" || rec.AcquireSeed != 0 {
+		t.Fatalf("旧记录 acquire 字段应为零值：%+v", rec)
+	}
+	res := JudgeRecord(rec, GroundTruth{ResourceName: "demo-web"})
+	if res.RunID != "run_old" || res.AcquireMethod != "" || res.Rounds != 2 {
+		t.Fatalf("旧记录判分透传错误：%+v", res)
 	}
 }
