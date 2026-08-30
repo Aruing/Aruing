@@ -185,6 +185,13 @@ func (o *Orchestrator) acquireLoop(
 				return nil, nil, nil, InvestigateState{}, fmt.Errorf("react select (round %d): %w", round, selErr)
 			}
 			if choice.Sufficient {
+				if len(evidence) == 0 {
+					// 零证据不可出判（#5：Verdict 必须引用 Evidence，与 ours 停止检查同门）：
+					// 声明记入轨迹但不采纳，继续取证；预算尽走 insufficient（#18 明确失败）
+					trace = append(trace, DecisionTraceEntry{Round: round + 1, Sufficient: true, Reason: choice.Reason})
+					o.progressf("  零证据声明足够，不采纳（先取证再声明），继续")
+					continue
+				}
 				// 声明足够 → 正式 Verify（出口与 ours 收敛口同为 supported；
 				// 不回写 Confidence，假设先验原样进验证）
 				trace = append(trace, DecisionTraceEntry{Round: round + 1, Sufficient: true, Reason: choice.Reason})

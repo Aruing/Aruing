@@ -866,3 +866,51 @@ func TestB3ReactRequiresSelector(t *testing.T) {
 		t.Fatalf("err = %v, want ReAct selector required", err)
 	}
 }
+
+// B3 零证据声明足够不被采纳（#5 同门，pr-agent #134 R1 采纳）：首轮声明 → 记入
+// 轨迹但继续取证 → 证据在手后再声明才走 supported 出口
+func TestB3ReactSufficientRequiresEvidence(t *testing.T) {
+	decision := agent.PlanDecision{
+		Hypotheses: []core.Hypothesis{
+			{ID: "h_1", Statement: "Pod 崩溃", Confidence: 0.5},
+			{ID: "h_2", Statement: "选择器配错", Confidence: 0.5},
+		},
+		Actions: []agent.ActionProposal{
+			{Name: "probe-a", Argv: []string{"get", "aaa"}, Purpose: "探针", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.8, 0.2}, {0.1, 0.9}}},
+			{Name: "probe-b", Argv: []string{"get", "bbb"}, Purpose: "探针二", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.8, 0.2}, {0.1, 0.9}}},
+		},
+	}
+	fk := agenttest.NewFakeVerifier([]core.Verdict{{
+		ID: "v_1", HypothesisID: "h_1", Result: core.VerdictSupported, Reason: "证据支持",
+	}})
+	verifier := &recordingVerifier{FakeVerifier: fk}
+	executor := &scriptedExecutor{script: map[string]string{"aaa": "pod CrashLoopBackOff"}}
+	selector := agenttest.NewFakeReActSelector(
+		agent.ReActChoice{Sufficient: true, Reason: "零证据就声明（退化）"},
+		agent.ReActChoice{ActionName: "probe-a", Reason: "被拒后先取证"},
+		agent.ReActChoice{Sufficient: true, Reason: "证据在手"},
+	)
+	orch := newB3Orchestrator(t, agenttest.NewFakeDecisionPlanner(decision), verifier, executor, selector)
+
+	outcome, err := orch.Execute(context.Background(), core.Run{ID: "run_1", Question: "q"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	// 首次声明被忽略：至少执行了一个动作、拿到证据后才出 supported
+	if outcome.Report == nil {
+		t.Fatalf("expected report")
+	}
+	if got := orch.LastRunStats().AcquireExit; got != "supported" {
+		t.Errorf("exit = %q, want supported after evidence-backed declaration", got)
+	}
+	if len(outcome.Evidence) < 1 {
+		t.Errorf("evidence = %d, want >= 1（零证据声明不得直接出判）", len(outcome.Evidence))
+	}
+	// 退化声明进轨迹（对手认真审计信号），后续轮照常记录
+	trace := orch.LastRunStats().DecisionTrace
+	if len(trace) != 3 || !trace[0].Sufficient || trace[1].Chosen != "probe-a" || !trace[2].Sufficient {
+		t.Errorf("trace = %+v, want [declined-declaration, action, honored-declaration]", trace)
+	}
+}

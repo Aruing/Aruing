@@ -335,7 +335,7 @@ type DecisionTraceEntry struct {
 	BeliefAfter []float64 `json:"belief_after,omitempty"`
 	// B3 选择器的判断理由原文
 	Reason string `json:"reason,omitempty"`
-	// B3 声明证据足够（出口轮为真）
+	// B3 声明证据足够（声明轮为真；零证据声明不采纳仍继续取证，见 #5 同门注释）
 	Sufficient bool `json:"sufficient,omitempty"`
 }
 
