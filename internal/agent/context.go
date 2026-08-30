@@ -261,6 +261,7 @@ func compactL0(hist []towerHistMsg, maxMsgTokens, previewTokens int) []towerHist
 }
 
 // 按预览词元上限截断正文，并附截断标记说明存储层仍全量
+// 截断有损，出口过 C1：预览缺失的地址以 [addr_refs] 行补附，锦点不随截断丢失
 func truncateContentPreview(content string, previewTokens int) string {
 	runes := []rune(content)
 	// 预览词元乘四约等于字符数，与估算对齐
@@ -271,9 +272,10 @@ func truncateContentPreview(content string, previewTokens int) string {
 	if len(runes) <= maxRunes {
 		return content
 	}
-	return string(runes[:maxRunes]) + fmt.Sprintf(
+	preview := string(runes[:maxRunes]) + fmt.Sprintf(
 		"\n…[truncated, full message retained in store; shown %d/%d runes]",
 		maxRunes, len(runes))
+	return ensureAddrCoverage(content, preview, nil)
 }
 
 // 中层：从最旧开始折叠非诊断消息，尽量保留诊断全文
@@ -340,19 +342,23 @@ func firstUntruncatedDiagnostic(hist []towerHistMsg) int {
 }
 
 // 在已无法按预览窗口再缩时打截断标记，防止中层压缩死循环
+// 出口过 C1：极限压缩后地址仍以 [addr_refs] 补附保留
 func forceCompactMark(content string) string {
 	runes := []rune(strings.TrimSpace(content))
 	const n = 40
+	var marked string
 	if len(runes) > n {
-		return string(runes[:n]) + "…[truncated, full message retained in store]"
+		marked = string(runes[:n]) + "…[truncated, full message retained in store]"
+	} else if content == "" {
+		marked = "[truncated, full message retained in store]"
+	} else {
+		marked = content + "\n…[truncated, full message retained in store]"
 	}
-	if content == "" {
-		return "[truncated, full message retained in store]"
-	}
-	return content + "\n…[truncated, full message retained in store]"
+	return ensureAddrCoverage(content, marked, nil)
 }
 
 // 将单条消息压成一行折叠骨架，保留角色、模式、运行编号与短预览
+// 折叠有损，出口过 C1：骨架之外再补正文中的 ID 族地址（runId 字段之外 e_ 等不丢）
 func foldLine(m towerHistMsg) string {
 	preview := strings.TrimSpace(m.Content)
 	runes := []rune(preview)
@@ -367,7 +373,8 @@ func foldLine(m towerHistMsg) string {
 	if runID == "" {
 		runID = "-"
 	}
-	return fmt.Sprintf("[folded] %s mode=%s runId=%s | %s", m.Role, mode, runID, preview)
+	line := fmt.Sprintf("[folded] %s mode=%s runId=%s | %s", m.Role, mode, runID, preview)
+	return ensureAddrCoverage(m.Content, line, nil)
 }
 
 // 深层：对装不下的旧段做交接摘要，保留近期原文
@@ -403,6 +410,9 @@ func compactL2(
 
 	// 注入视图与落库正文同源，便于下一轮历史识别检查点
 	checkpointBody := formatCheckpointContent(summary)
+	// C1 机械兑底：不信任模型 run_ids 输出，oldSeg 全部地址（含 RunID 字段）缺失即补附
+	// 上游 L0/L1 出口已过 C1，此处比对基线仍含原始全部地址，链条不断
+	checkpointBody = ensureAddrCoverage(histAddrSource(oldSeg), checkpointBody, nil)
 	merged := make([]towerHistMsg, 0, 1+len(recent))
 	merged = append(merged, towerHistMsg{
 		Role:    session.RoleAssistant,
