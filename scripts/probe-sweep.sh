@@ -24,6 +24,7 @@ OUT="${OUT:-eval/results/0.1.3}"
 CONFIG="${CONFIG:-playground/config.yaml}"
 ARUING="${ARUING:-go run ./cmd/aruing}"
 DRYRUN="${DRYRUN:-0}"
+FORCE="${FORCE:-0}"   # 1 = 忽略已有记录强制重跑（默认跳过已完成的单元）
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # 每场景独立 kind 集群：kubeconfig 由 scenario-up 落在 scenarios/.kube/<scn>.yaml
@@ -35,6 +36,7 @@ scn_kubeconfig() {
 units=0
 scn_count=0
 missing=0
+skipped=0
 mkdir -p "$OUT"
 
 # 预检：全部场景集群就绪 + probe.yaml 存在才开跑（真跑前 make lab-up SCN=...）
@@ -49,6 +51,13 @@ if [ "$DRYRUN" != "1" ]; then
             exit 1
         fi
     done
+    # manifest：装置归因（2026-08-30 追加裁决）——git / 模型 / 矩阵参数随批落盘
+    model="$(grep -E '^[[:space:]]*model:' "$CONFIG" | head -1 | sed 's/^[[:space:]]*model:[[:space:]]*//' | tr -d '"')"
+    printf '{\n  "tool": "probe-sweep",\n  "git": "%s",\n  "commit": "%s",\n  "model": "%s",\n  "config": "%s",\n  "scenarios": "%s",\n  "methods": "%s",\n  "rounds": "%s",\n  "reps": "%s",\n  "started": "%s"\n}\n' \
+        "$(git -C "$ROOT" describe --always --dirty 2>/dev/null || echo unknown)" \
+        "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
+        "${model:-unknown}" "$CONFIG" "$SCENARIOS" "$METHODS" "$ROUNDS" "$REPS" \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >"$OUT/manifest.json"
 fi
 
 for scn in $SCENARIOS; do
@@ -59,6 +68,14 @@ for scn in $SCENARIOS; do
             for r in $(seq 1 "$REPS"); do
                 units=$((units + 1))
                 rec="$OUT/records/$scn/${scn}__${m}__n${n}__r${r}.json"
+                gen="$OUT/records/$scn/probe-session-$scn-$m-n$n-s$r.json"
+                # 断点续跑守卫：矩阵坐标记录已存在则跳过；残留生成名 = 上次中断的半成品，清掉重跑
+                if [ "$DRYRUN" != "1" ] && [ "$FORCE" != "1" ] && [ -s "$rec" ]; then
+                    echo "[$units] $scn $m n=$n r=$r 已有记录，跳过"
+                    skipped=$((skipped + 1))
+                    continue
+                fi
+                [ "$DRYRUN" = "1" ] || rm -f "$gen"
                 # 种子 = 重复号：同方法同重复脚本一致，跨重复脚本不同
                 envs="KUBECONFIG=$(scn_kubeconfig "$scn") ARUING_AGENT_MEMORY_METHOD=$m"
                 if [ "$DRYRUN" = "1" ]; then
@@ -76,8 +93,7 @@ for scn in $SCENARIOS; do
                     echo "  单元非零退出（部分记录仍计入）" >&2
                 fi
                 # 单元落盘名与脚本生成名不同：probe 子命令按规格名+方法+轮数+种子命名；
-                # 这里统一改名为矩阵坐标名，便于 CSV 联结
-                gen="$OUT/records/$scn/probe-session-$scn-$m-n$n-s$r.json"
+                # 这里统一改名为矩阵坐标名，便于 CSV 联结（gen 已在守卫处定义并清理）
                 if [ -s "$gen" ]; then
                     mv "$gen" "$rec"
                 fi
@@ -147,5 +163,5 @@ with open(csv_path, "w", newline="", encoding="utf-8") as f:
     w.writerows(rows)
 print(f"csv: {csv_path} ({len(rows)} sessions)")
 PY
-echo "缺失记录：$missing" >&2
+echo "完成：$units 会话（跳过 $skipped），缺失记录：$missing" >&2
 [ "$missing" -eq 0 ]
