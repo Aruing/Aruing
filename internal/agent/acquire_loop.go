@@ -57,12 +57,20 @@ func (o *Orchestrator) acquireLoop(
 	if !ok {
 		return nil, nil, nil, InvestigateState{}, errStrengthJudgeRequired
 	}
+	// b3-react 同样前置校验选择器（冻结裁决 4：缺角色启动报错，运行期兑底）
+	if o.acquireMethod == AcquireMethodB3React && o.reactSelector == nil {
+		return nil, nil, nil, InvestigateState{}, errReActSelectorRequired
+	}
 
 	state := seed
 	started := seed.Round
+	// 决策轨迹（逐轮快照，只读观测，冻结裁决 7）：任何返回路径都随 lastStats
+	// 落定；B1 路径不进本循环，轨迹恒空
+	var trace []DecisionTraceEntry
 	defer func() {
 		o.mu.Lock()
 		o.lastStats.InvestigateRounds = started - seed.Round
+		o.lastStats.DecisionTrace = trace
 		o.mu.Unlock()
 	}()
 	hypotheses := slices.Clone(seed.Hypotheses)
@@ -90,9 +98,13 @@ func (o *Orchestrator) acquireLoop(
 			return nil, nil, nil, InvestigateState{}, fmt.Errorf("plan decision: %w", planErr)
 		}
 		hypotheses = decision.Hypotheses
-		belief, err = beliefFromPriors(hypotheses)
-		if err != nil {
-			return nil, nil, nil, InvestigateState{}, fmt.Errorf("build belief from priors: %w", err)
+		// B3 无信念层：先验不建信念（假设 Confidence 保持决策规划写入的先验，
+		// 循环不回写后验——零值 = 未给语义，冻结裁决 3）
+		if o.acquireMethod != AcquireMethodB3React {
+			belief, err = beliefFromPriors(hypotheses)
+			if err != nil {
+				return nil, nil, nil, InvestigateState{}, fmt.Errorf("build belief from priors: %w", err)
+			}
 		}
 		acq = &AcquireState{Belief: belief, Actions: slices.Clone(decision.Actions)}
 		o.progressf("决策规划：%d 个假设、%d 个动作（解析期丢弃 %d 非法动作）",
@@ -111,8 +123,11 @@ func (o *Orchestrator) acquireLoop(
 			answer := state.Clarifications[len(state.Clarifications)-1]
 			asked := *acq.Asked
 			acq.Asked = nil
-			o.progressf("调查第 %d 轮（答复归类）…", round+1)
-			if outcome, hit := classifyOutcome(answer, asked.Outcomes); hit {
+			if o.acquireMethod == AcquireMethodB3React {
+				// B3 无信念层：答复不归类更新（判别矩阵无消费方）；原文已在澄清
+				// 累积，选择器下一轮载荷可见；消耗的预算不退（与 ours 挂起同口径）
+				o.progressf("调查第 %d 轮（答复注入）…", round+1)
+			} else if outcome, hit := classifyOutcome(answer, asked.Outcomes); hit {
 				if act, actErr := acquire.NewAction(asked.Name, asked.Outcomes, asked.Matrix, asked.Cost); actErr == nil {
 					var surprise bool
 					belief, surprise, err = updateBeliefOutcome(o.acquireOptions, belief, act, outcome)
@@ -138,79 +153,141 @@ func (o *Orchestrator) acquireLoop(
 
 		o.progressf("调查第 %d 轮（决策）…", round+1)
 
-		// 构建候选动作集：矩阵行须与当前假设数对齐（重规划换假设空间后旧矩阵
-		// 自然失配，跳过即丢弃——动作级容错与解析层同口径）
-		acts, poolIdx := buildAcquireActions(acq.Actions, len(hypotheses))
-
-		// 停止检查（先于选择与池尽处理，思考文档 §2 步骤 4）：supported → 收敛出判；
-		// refuted → 质量坍缩重规划；insufficient → 平台/预算尽带缺口。
-		// 前置：至少一条证据——Verdict 必须引用 Evidence（#5），零证据收敛无法出判。
-		// 动作池尽时 maxEIG 取 +Inf：池尽不是信息平台（有动作区分不动才是），
-		// 平台分支自然不触发，supported/refuted 照常评估
-		maxEIG := math.Inf(1)
-		var sel acquire.Selection
-		if len(acts) > 0 {
-			var selErr error
-			sel, selErr = acquire.Select(belief, acts)
+		// B3 ReAct 臂（冻结裁决 1）：复用本循环全部骨架，只把选择换为每轮一次
+		// LLM 调用——无 EIG、无 MSPRT 停止检查、无观测后信念更新，无显式信念
+		// 状态正是对照点；出口：LLM 声明足够 → 正式 Verify / 预算尽 → insufficient。
+		// 选择器所见与 ours 决策输入同构只少数学层（裁决 2：同菜单/同成本/同假设
+		// 与证据摘要，不喂矩阵与后验）
+		var chosen ActionProposal
+		var chosenAct acquire.Action
+		if o.acquireMethod == AcquireMethodB3React {
+			// 动作池尽：重规划补充（与 ours 同构的池尽出口；菜单无矩阵过滤——
+			// 判别矩阵是数学层素材，B3 不消费）
+			if len(acq.Actions) == 0 {
+				o.progressf("  动作池尽，重规划补充…")
+				exhausted, replanErr := o.replanAcquire(ctx, query, state.Targets, &hypotheses, &belief, acq, evidence, verdicts, clusterResources, state.Clarifications)
+				if replanErr != nil {
+					return nil, nil, nil, InvestigateState{}, replanErr
+				}
+				if exhausted {
+					return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "决策规划无新动作提议（动作空间平台）")
+				}
+				continue
+			}
+			choice, selErr := o.reactSelector.SelectAction(ctx, ReActSelectRequest{
+				Hypotheses:     hypotheses,
+				Evidence:       evidence,
+				Actions:        acq.Actions,
+				Clarifications: slices.Clone(state.Clarifications),
+				BudgetLeft:     maxRounds - round,
+			})
 			if selErr != nil {
-				return nil, nil, nil, InvestigateState{}, fmt.Errorf("select action (round %d): %w", round, selErr)
+				return nil, nil, nil, InvestigateState{}, fmt.Errorf("react select (round %d): %w", round, selErr)
 			}
-			maxEIG = sel.MaxEIG
-			// 选择策略（步骤 4 裁决 2）：B2/B4 实验臂覆盖 ours 的 argmax 选择，
-			// 信念更新 / 停止准则 / 重规划等全部机制不变（对照口径「其余一切
-			// 同构」）；MaxEIG 恒为全候选最大 EIG（停止检查不随策略变）；
-			// BestScore 仅对 ours 有选择依据语义，实验臂清零
-			switch o.acquireMethod {
-			case AcquireMethodB2Random:
-				sel.Best = seededAcquireChoice(o.acquireSeed, belief, acts)
-				sel.BestScore = 0
-			case AcquireMethodB4Cheapest:
-				sel.Best = cheapestAcquireChoice(poolIdx, acq.Actions)
-				sel.BestScore = 0
+			if choice.Sufficient {
+				// 声明足够 → 正式 Verify（出口与 ours 收敛口同为 supported；
+				// 不回写 Confidence，假设先验原样进验证）
+				trace = append(trace, DecisionTraceEntry{Round: round + 1, Sufficient: true, Reason: choice.Reason})
+				o.progressf("  选择器声明证据足够，出正式判断")
+				return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "supported", "")
 			}
-		}
-		if len(evidence) > 0 {
-			stop := acquire.CheckStop(belief, maxEIG, maxRounds-round, o.acquireOptions)
-			if stop.Stop {
-				switch stop.Kind {
-				case acquire.VerdictSupported:
-					writeConfidence(hypotheses, belief)
-					o.progressf("  取证收敛：假设 %d 后验 %.3f，出正式判断", stop.Winner, stop.Confidence)
-					return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "supported", "")
-				case acquire.VerdictInsufficient:
-					writeConfidence(hypotheses, belief)
-					o.progressf("  取证停止（insufficient）：%s", stop.Gap)
-					return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", stop.Gap)
-				case acquire.VerdictRefuted:
-					o.progressf("  假设空间被证据压死（质量坍缩），abduction 重规划…")
-					exhausted, replanErr := o.replanAcquire(ctx, query, state.Targets, &hypotheses, &belief, acq, evidence, verdicts, clusterResources, state.Clarifications)
-					if replanErr != nil {
-						return nil, nil, nil, InvestigateState{}, replanErr
-					}
-					if exhausted {
-						return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "重规划后无新动作（假设空间压死后无新方向）")
-					}
-					continue
+			idx := slices.IndexFunc(acq.Actions, func(p ActionProposal) bool { return p.Name == choice.ActionName })
+			if idx < 0 {
+				// 选择器输出经菜单名校验，这里必命中；防御性失败不静默跳过
+				return nil, nil, nil, InvestigateState{}, fmt.Errorf("react select (round %d): action %q missing from pool", round, choice.ActionName)
+			}
+			chosen = acq.Actions[idx]
+			trace = append(trace, DecisionTraceEntry{Round: round + 1, Chosen: chosen.Name, Reason: choice.Reason})
+			o.progressf("  选择器选中动作 %q（成本 %.0f）：%s", chosen.Name, chosen.Cost, chosen.Purpose)
+		} else {
+			// 构建候选动作集：矩阵行须与当前假设数对齐（重规划换假设空间后旧矩阵
+			// 自然失配，跳过即丢弃——动作级容错与解析层同口径）
+			acts, poolIdx := buildAcquireActions(acq.Actions, len(hypotheses))
+
+			// 停止检查（先于选择与池尽处理，思考文档 §2 步骤 4）：supported → 收敛出判；
+			// refuted → 质量坍缩重规划；insufficient → 平台/预算尽带缺口。
+			// 前置：至少一条证据——Verdict 必须引用 Evidence（#5），零证据收敛无法出判。
+			// 动作池尽时 maxEIG 取 +Inf：池尽不是信息平台（有动作区分不动才是），
+			// 平台分支自然不触发，supported/refuted 照常评估
+			maxEIG := math.Inf(1)
+			var sel acquire.Selection
+			if len(acts) > 0 {
+				var selErr error
+				sel, selErr = acquire.Select(belief, acts)
+				if selErr != nil {
+					return nil, nil, nil, InvestigateState{}, fmt.Errorf("select action (round %d): %w", round, selErr)
+				}
+				maxEIG = sel.MaxEIG
+				// 选择策略（步骤 4 裁决 2）：B2/B4 实验臂覆盖 ours 的 argmax 选择，
+				// 信念更新 / 停止准则 / 重规划等全部机制不变（对照口径「其余一切
+				// 同构」）；MaxEIG 恒为全候选最大 EIG（停止检查不随策略变）；
+				// BestScore 仅对 ours 有选择依据语义，实验臂清零
+				switch o.acquireMethod {
+				case AcquireMethodB2Random:
+					sel.Best = seededAcquireChoice(o.acquireSeed, belief, acts)
+					sel.BestScore = 0
+				case AcquireMethodB4Cheapest:
+					sel.Best = cheapestAcquireChoice(poolIdx, acq.Actions)
+					sel.BestScore = 0
 				}
 			}
+			if len(evidence) > 0 {
+				stop := acquire.CheckStop(belief, maxEIG, maxRounds-round, o.acquireOptions)
+				if stop.Stop {
+					switch stop.Kind {
+					case acquire.VerdictSupported:
+						writeConfidence(hypotheses, belief)
+						o.progressf("  取证收敛：假设 %d 后验 %.3f，出正式判断", stop.Winner, stop.Confidence)
+						return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "supported", "")
+					case acquire.VerdictInsufficient:
+						writeConfidence(hypotheses, belief)
+						o.progressf("  取证停止（insufficient）：%s", stop.Gap)
+						return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", stop.Gap)
+					case acquire.VerdictRefuted:
+						o.progressf("  假设空间被证据压死（质量坍缩），abduction 重规划…")
+						exhausted, replanErr := o.replanAcquire(ctx, query, state.Targets, &hypotheses, &belief, acq, evidence, verdicts, clusterResources, state.Clarifications)
+						if replanErr != nil {
+							return nil, nil, nil, InvestigateState{}, replanErr
+						}
+						if exhausted {
+							return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "重规划后无新动作（假设空间压死后无新方向）")
+						}
+						continue
+					}
+				}
+			}
+
+			if len(acts) == 0 {
+				// 动作池尽：重规划一次补充；仍无新动作 = 动作空间平台，insufficient 出口
+				o.progressf("  动作池尽，重规划补充…")
+				exhausted, replanErr := o.replanAcquire(ctx, query, state.Targets, &hypotheses, &belief, acq, evidence, verdicts, clusterResources, state.Clarifications)
+				if replanErr != nil {
+					return nil, nil, nil, InvestigateState{}, replanErr
+				}
+				if exhausted {
+					return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "决策规划无新动作提议（动作空间平台）")
+				}
+				continue
+			}
+
+			// 执行选中动作：问用户动作挂起（复用 investigate clarify 机制，选项即
+			// 结果类别），工具动作映射 core.Task 经 Dispatcher 执行（#16）
+			chosen = acq.Actions[poolIdx[sel.Best]]
+			chosenAct = acts[sel.Best]
+			// 轨迹（ours 系）：池得分 + 选择 + 信念前像；后像在更新完成或挂起时回填
+			trace = append(trace, DecisionTraceEntry{
+				Round:        round + 1,
+				Chosen:       chosen.Name,
+				Scores:       actionScores(acq.Actions, poolIdx, sel.Scores),
+				BeliefBefore: belief.Posterior(),
+			})
+			if o.acquireMethod == AcquireMethodOurs {
+				o.progressf("  选中动作 %q（EIG/c = %.2f）：%s", chosen.Name, sel.BestScore, chosen.Purpose)
+			} else {
+				o.progressf("  选中动作 %q（策略 %s）：%s", chosen.Name, o.acquireMethod, chosen.Purpose)
+			}
 		}
 
-		if len(acts) == 0 {
-			// 动作池尽：重规划一次补充；仍无新动作 = 动作空间平台，insufficient 出口
-			o.progressf("  动作池尽，重规划补充…")
-			exhausted, replanErr := o.replanAcquire(ctx, query, state.Targets, &hypotheses, &belief, acq, evidence, verdicts, clusterResources, state.Clarifications)
-			if replanErr != nil {
-				return nil, nil, nil, InvestigateState{}, replanErr
-			}
-			if exhausted {
-				return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "决策规划无新动作提议（动作空间平台）")
-			}
-			continue
-		}
-
-		// 执行 a*：问用户动作挂起（复用 investigate clarify 机制，选项即结果类别），
-		// 工具动作映射 core.Task 经 Dispatcher 执行（#16）
-		chosen := acq.Actions[poolIdx[sel.Best]]
 		if chosen.Ask != "" {
 			asked := chosen
 			acq.Asked = &asked
@@ -218,6 +295,10 @@ func (o *Orchestrator) acquireLoop(
 			acq.Executed = append(acq.Executed, chosen.Name)
 			acq.Belief = belief
 			o.progressf("  选中问用户动作 %q（成本 %.0f）", chosen.Name, chosen.Cost)
+			if n := len(trace); n > 0 && o.acquireMethod != AcquireMethodB3React {
+				// 挂起轮未消费观测：后像与前像相等（轨迹口径完整）
+				trace[n-1].BeliefAfter = trace[n-1].BeliefBefore
+			}
 			state.Hypotheses = hypotheses
 			state.Tasks = tasks
 			state.Evidence = evidence
@@ -230,11 +311,6 @@ func (o *Orchestrator) acquireLoop(
 			}, cloneInvestigateState(state), nil
 		}
 
-		if o.acquireMethod == AcquireMethodOurs {
-			o.progressf("  选中动作 %q（EIG/c = %.2f）：%s", chosen.Name, sel.BestScore, chosen.Purpose)
-		} else {
-			o.progressf("  选中动作 %q（策略 %s）：%s", chosen.Name, o.acquireMethod, chosen.Purpose)
-		}
 		task, taskErr := o.acquireTask(query, hypotheses, chosen)
 		if taskErr != nil {
 			return nil, nil, nil, InvestigateState{}, taskErr
@@ -249,42 +325,57 @@ func (o *Orchestrator) acquireLoop(
 		acq.Actions = slices.DeleteFunc(acq.Actions, func(p ActionProposal) bool { return p.Name == chosen.Name })
 		acq.Executed = append(acq.Executed, chosen.Name)
 
-		// 观测归类与信念更新：机械优先（唯一命中判别矩阵列），零/多命中走强度路径
-		act := acts[sel.Best]
-		var surprise bool
-		if outcome, hit := classifyOutcome(evidenceText(item), chosen.Outcomes); hit {
-			belief, surprise, err = updateBeliefOutcome(o.acquireOptions, belief, act, outcome)
+		if o.acquireMethod == AcquireMethodB3React {
+			// B3 无信念层：观测不更新信念（证据进链即可），下一轮选择器看摘要
+			// 自判；轨迹无信念列，无需回填后像
+			o.progressf("  取得观测，累计证据 %d 条", len(evidence))
 		} else {
-			belief, surprise, err = o.strengthUpdate(ctx, judge, *item, hypotheses, belief)
-		}
-		if err != nil {
-			return nil, nil, nil, InvestigateState{}, err
-		}
-		acq.Belief = belief
-		writeConfidence(hypotheses, belief)
-		post := belief.Posterior()
-		top := 0
-		for i, p := range post {
-			if p > post[top] {
-				top = i
+			// 观测归类与信念更新：机械优先（唯一命中判别矩阵列），零/多命中走强度路径
+			act := chosenAct
+			var surprise bool
+			if outcome, hit := classifyOutcome(evidenceText(item), chosen.Outcomes); hit {
+				belief, surprise, err = updateBeliefOutcome(o.acquireOptions, belief, act, outcome)
+			} else {
+				belief, surprise, err = o.strengthUpdate(ctx, judge, *item, hypotheses, belief)
 			}
-		}
-		o.progressf("  信念更新：领先假设后验 %.3f", post[top])
+			if err != nil {
+				return nil, nil, nil, InvestigateState{}, err
+			}
+			acq.Belief = belief
+			writeConfidence(hypotheses, belief)
+			post := belief.Posterior()
+			top := 0
+			for i, p := range post {
+				if p > post[top] {
+					top = i
+				}
+			}
+			o.progressf("  信念更新：领先假设后验 %.3f", post[top])
+			// 轨迹回填：本轮更新后的信念后像
+			if n := len(trace); n > 0 {
+				trace[n-1].BeliefAfter = belief.Posterior()
+			}
 
-		// 全局意外：观测在所有假设下都低概率 → abduction 重规划（旧假设保留压低）
-		if surprise {
-			o.progressf("  全局意外：假设空间未预期该观测，abduction 重规划…")
-			exhausted, replanErr := o.replanAcquire(ctx, query, state.Targets, &hypotheses, &belief, acq, evidence, verdicts, clusterResources, state.Clarifications)
-			if replanErr != nil {
-				return nil, nil, nil, InvestigateState{}, replanErr
-			}
-			if exhausted {
-				return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "重规划后无新动作（意外观测未开启新方向）")
+			// 全局意外：观测在所有假设下都低概率 → abduction 重规划（旧假设保留压低）
+			if surprise {
+				o.progressf("  全局意外：假设空间未预期该观测，abduction 重规划…")
+				exhausted, replanErr := o.replanAcquire(ctx, query, state.Targets, &hypotheses, &belief, acq, evidence, verdicts, clusterResources, state.Clarifications)
+				if replanErr != nil {
+					return nil, nil, nil, InvestigateState{}, replanErr
+				}
+				if exhausted {
+					return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "重规划后无新动作（意外观测未开启新方向）")
+				}
 			}
 		}
 	}
 
 	// 预算尽：insufficient 出口（#18 明确失败，非静默截断）
+	if o.acquireMethod == AcquireMethodB3React {
+		// B3 无信念层：不回写后验（Confidence 保持规划先验，零值 = 未给语义）
+		o.progressf("  取证预算尽，选择器未声明证据足够，出 insufficient")
+		return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "预算尽：选择器未声明证据足够")
+	}
 	writeConfidence(hypotheses, belief)
 	o.progressf("  取证预算尽，出 insufficient")
 	return o.finishAcquire(ctx, query, hypotheses, tasks, evidence, "insufficient", "预算尽：取证动作次数已达上限")
@@ -320,17 +411,27 @@ func (o *Orchestrator) replanAcquire(
 		return false, fmt.Errorf("replan decision: %w", err)
 	}
 
-	merged, weights := MergeReplanWeights(*hypotheses, belief.Posterior(), decision.Hypotheses)
+	// B3 无信念层：假设空间只做列表合并（旧假设未被重提的保留，Confidence
+	// 保持原值不回写——零值 = 未给语义），不重建信念；动作池换新与已执行
+	// 过滤在下方与 ours 共用（复用骨架的对照口径，冻结裁决 1）
+	var merged []core.Hypothesis
+	if o.acquireMethod == AcquireMethodB3React {
+		merged, _ = MergeReplanWeights(*hypotheses, nil, decision.Hypotheses)
+		*hypotheses = merged
+	} else {
+		var weights []float64
+		merged, weights = MergeReplanWeights(*hypotheses, belief.Posterior(), decision.Hypotheses)
 
-	next, berr := acquire.NewBelief(weights)
-	if berr != nil {
-		// 合并权重全非法属编程错误（两侧均有下限保障），明确上抛
-		return false, fmt.Errorf("rebuild belief after replan: %w", berr)
+		next, berr := acquire.NewBelief(weights)
+		if berr != nil {
+			// 合并权重全非法属编程错误（两侧均有下限保障），明确上抛
+			return false, fmt.Errorf("rebuild belief after replan: %w", berr)
+		}
+		*hypotheses = merged
+		*belief = next
+		acq.Belief = next
+		writeConfidence(merged, next)
 	}
-	*hypotheses = merged
-	*belief = next
-	acq.Belief = next
-	writeConfidence(merged, next)
 
 	// 动作池换新（旧矩阵对旧假设空间，失配自然作废）；过滤已执行同名动作
 	executed := make(map[string]struct{}, len(acq.Executed))
@@ -412,6 +513,21 @@ func MergeReplanWeights(old []core.Hypothesis, post []float64, fresh []core.Hypo
 		}
 	}
 	return merged, weights
+}
+
+// 轨迹得分列：候选名与 EIG/c 配对（scores 与 poolIdx 索引对齐，名字取池内
+// 提议面）；非有限得分封顶为最大有限值（JSON 无 Inf，封顶不改变支配级语义）
+func actionScores(pool []ActionProposal, poolIdx []int, scores []float64) []ActionScore {
+	out := make([]ActionScore, 0, len(scores))
+	for i, s := range scores {
+		if math.IsInf(s, 0) || math.IsNaN(s) {
+			s = math.MaxFloat64
+		}
+		if i < len(poolIdx) && poolIdx[i] < len(pool) {
+			out = append(out, ActionScore{Name: pool[poolIdx[i]].Name, Score: s})
+		}
+	}
+	return out
 }
 
 // 种子随机选择（B2 实验臂）：(seed, 信念后验) 哈希取均匀索引——纯函数，同种子同信念

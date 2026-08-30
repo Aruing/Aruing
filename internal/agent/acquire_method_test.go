@@ -16,7 +16,8 @@ func TestParseAcquireMethod(t *testing.T) {
 		{"b1-serial", "b1-serial", AcquireMethodB1Serial, false},
 		{"b2-random 实验臂", "b2-random", AcquireMethodB2Random, false},
 		{"b4-cheapest 实验臂", "b4-cheapest", AcquireMethodB4Cheapest, false},
-		{"未知方法报错", "b3-react", 0, true},
+		{"b3-react 实验臂", "b3-react", AcquireMethodB3React, false},
+		{"未知方法报错", "react", 0, true},
 	}
 	for _, tc := range cases {
 		got, err := ParseAcquireMethod(tc.in)
@@ -39,6 +40,7 @@ func TestAcquireMethodString(t *testing.T) {
 		AcquireMethodB1Serial:   "b1-serial",
 		AcquireMethodB2Random:   "b2-random",
 		AcquireMethodB4Cheapest: "b4-cheapest",
+		AcquireMethodB3React:    "b3-react",
 	} {
 		if got := m.String(); got != want {
 			t.Errorf("String() = %q, want %q", got, want)

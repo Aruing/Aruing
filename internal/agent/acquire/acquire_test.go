@@ -597,3 +597,27 @@ func TestSubnormalCostSemantics(t *testing.T) {
 		t.Fatalf("并列近零成本应确定性取先者，got %+v", sel2)
 	}
 }
+
+// 选择得分观测列：Scores 与候选索引对齐且等于 EIG/c（决策轨迹消费口径；
+// Best/BestScore 与观测列同算式，不经第二路径漂移）
+func TestSelectScoresColumn(t *testing.T) {
+	b, _ := NewUniformBelief(2)
+	weak := mustAction(t, "weak", []string{"x", "y"}, [][]float64{{.55, .45}, {.45, .55}}, 2)
+	strong := mustAction(t, "strong", []string{"x", "y"}, [][]float64{{.99, .01}, {.01, .99}}, 1)
+	sel, err := Select(b, []Action{weak, strong})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if len(sel.Scores) != 2 {
+		t.Fatalf("scores = %v, want 2（索引对齐候选）", sel.Scores)
+	}
+	for i, a := range []Action{weak, strong} {
+		g, _ := EIG(b, a)
+		if math.Abs(sel.Scores[i]-g/a.cost) > 1e-12 {
+			t.Errorf("scores[%d] = %v, want EIG/c = %v", i, sel.Scores[i], g/a.cost)
+		}
+	}
+	if sel.Best != 1 || sel.BestScore != sel.Scores[1] {
+		t.Errorf("best = %+v, want strong with score column value", sel)
+	}
+}

@@ -2,6 +2,7 @@ package eval
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,51 @@ func TestBuildRunRecordSuccess(t *testing.T) {
 	}
 	if rec.AcquireMethod != "ours" || rec.AcquireMaxRounds != 3 || rec.AcquireExit != "supported" || rec.AcquireSeed != 0 {
 		t.Fatalf("取证决策分组/出口字段错误：%s %d %d %q", rec.AcquireMethod, rec.AcquireMaxRounds, rec.AcquireSeed, rec.AcquireExit)
+	}
+}
+
+// 决策轨迹随 AcquireRecordInfo 入记录（ours 系得分/信念列 + B3 理由列同构携带）
+func TestBuildRunRecordDecisionTrace(t *testing.T) {
+	acq := AcquireRecordInfo{
+		Method: "b3-react", MaxRounds: 5, Exit: "supported",
+		Trace: []DecisionTraceEntry{
+			{Round: 1, Chosen: "check-pods", Reason: "最便宜的区分点",
+				Scores: []ActionScore{{Name: "check-pods", Score: 0.71}, {Name: "ask", Score: 0.1}}},
+			{Round: 2, Sufficient: true, Reason: "已收敛"},
+		},
+	}
+	rec := BuildRunRecord("run_x", "q", "m", "fast", acq, true, "", nil, nil, nil, 2, time.Second)
+	if len(rec.DecisionTrace) != 2 {
+		t.Fatalf("trace = %d, want 2", len(rec.DecisionTrace))
+	}
+	first := rec.DecisionTrace[0]
+	if first.Chosen != "check-pods" || len(first.Scores) != 2 || first.Scores[0].Name != "check-pods" {
+		t.Errorf("trace[0] = %+v", first)
+	}
+	if !rec.DecisionTrace[1].Sufficient || rec.DecisionTrace[1].Reason != "已收敛" {
+		t.Errorf("trace[1] = %+v", rec.DecisionTrace[1])
+	}
+	// JSON 序列化可过（非有限得分已在编排侧封顶；此处验证 schema 面合法）
+	if _, err := json.Marshal(rec); err != nil {
+		t.Fatalf("marshal record with trace: %v", err)
+	}
+
+	// 空轨迹省略字段（旧记录兼容面）：不带 Trace 的记录序列化后无 decision_trace 键
+	empty := BuildRunRecord("run_y", "q", "m", "fast", AcquireRecordInfo{Method: "b1-serial"}, true, "", nil, nil, nil, 1, time.Second)
+	raw, err := json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "decision_trace") {
+		t.Errorf("b1 record should omit decision_trace, got %s", raw)
+	}
+	// 旧记录（无该字段）反序列化照常读，轨迹为零值
+	var legacy RunRecord
+	if err := json.Unmarshal([]byte(`{"schema_version":1,"run_id":"r","question":"q","model":"m","projection_method":"fast","acquire_method":"ours","completed":true,"rounds":1}`), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy: %v", err)
+	}
+	if legacy.DecisionTrace != nil {
+		t.Errorf("legacy trace = %+v, want nil", legacy.DecisionTrace)
 	}
 }
 

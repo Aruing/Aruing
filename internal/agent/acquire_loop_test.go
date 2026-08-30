@@ -122,6 +122,21 @@ func newAcquireOrchestrator(
 	return orch
 }
 
+// 组装走 b3-react 路径的编排器（复用 ours 假栈，另注入选择器脚本）
+func newB3Orchestrator(
+	t *testing.T,
+	decision *agenttest.FakeDecisionPlanner,
+	verifier *recordingVerifier,
+	executor *scriptedExecutor,
+	selector *agenttest.FakeReActSelector,
+) *agent.Orchestrator {
+	t.Helper()
+	orch := newAcquireOrchestrator(t, decision, verifier, executor)
+	orch.SetAcquireMethod(agent.AcquireMethodB3React)
+	orch.SetReActSelector(selector)
+	return orch
+}
+
 // 双假设决策模板：h1 Pod 崩溃 / h2 选择器配错；两个强区分动作
 func twoHypothesisDecision() agent.PlanDecision {
 	return agent.PlanDecision{
@@ -184,6 +199,20 @@ func TestAcquireLoopSupported(t *testing.T) {
 	// 机械归类全程命中，不应触发富文本强度路径
 	if verifier.StrengthCalls != 0 {
 		t.Errorf("strength calls = %d, want 0 (mechanical classify should hit)", verifier.StrengthCalls)
+	}
+	// 轨迹（ours 系）：逐轮含候选得分、选择与信念前后；后验在轮内抬升
+	trace := stats.DecisionTrace
+	if len(trace) < 2 {
+		t.Fatalf("trace = %d entries, want >= 2", len(trace))
+	}
+	for _, e := range trace {
+		// 得分列随动作池消耗递减（已执行动作移出），只需非空且带选择与信念前后
+		if len(e.Scores) < 1 || e.Chosen == "" || len(e.BeliefBefore) != 2 || len(e.BeliefAfter) != 2 {
+			t.Errorf("trace entry = %+v, want scores+chosen+belief before/after", e)
+		}
+	}
+	if last := trace[len(trace)-1]; !(last.BeliefAfter[0] > last.BeliefBefore[0]) {
+		t.Errorf("belief should sharpen h1 within round: before %v after %v", last.BeliefBefore, last.BeliefAfter)
 	}
 }
 
@@ -562,7 +591,278 @@ func TestAcquireMethodB1Dispatch(t *testing.T) {
 	if outcome.Report == nil {
 		t.Fatalf("b1 path should produce report via legacy loop")
 	}
-	if stats := orch.LastRunStats(); stats.AcquireExit != "" {
+	stats := orch.LastRunStats()
+	if stats.AcquireExit != "" {
 		t.Errorf("b1 stats exit = %q, want empty", stats.AcquireExit)
+	}
+	// B1 旧循环不产决策轨迹（decision_trace 为空口径）
+	if stats.DecisionTrace != nil {
+		t.Errorf("b1 stats trace = %d entries, want nil", len(stats.DecisionTrace))
+	}
+}
+
+// ---- B3 ReAct 对比臂（0.1.2 步骤 5）：选择器驱动、出口、挂起与轨迹 ----
+
+// B3 端到端：选工具动作 → 声明足够 → 正式 Verify；不回写置信度（先验原样）、
+// 轨迹存理由原文无得分/信念列
+func TestB3ReactDeclaredSufficient(t *testing.T) {
+	decision := agenttest.NewFakeDecisionPlanner(twoHypothesisDecision())
+	verifier := &recordingVerifier{FakeVerifier: agenttest.NewFakeVerifier([]core.Verdict{{
+		ID: "v_1", HypothesisID: "h_1", Result: core.VerdictSupported, Reason: "证据支持",
+	}})}
+	executor := &scriptedExecutor{script: map[string]string{
+		"pods":   "pod CrashLoopBackOff restarts 8",
+		"events": "事件 BackOff 反复出现",
+	}}
+	selector := agenttest.NewFakeReActSelector(
+		agent.ReActChoice{ActionName: "check-pods", Reason: "最便宜的家族级区分点"},
+		agent.ReActChoice{Sufficient: true, Reason: "CrashLoopBackOff 已直接支持 h1"},
+	)
+	orch := newB3Orchestrator(t, decision, verifier, executor, selector)
+
+	outcome, err := orch.Execute(context.Background(), core.Run{ID: "run_1", Question: "q"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Suspension != nil || outcome.Report == nil {
+		t.Fatalf("expected report, got suspension=%v", outcome.Suspension)
+	}
+	if len(outcome.Evidence) < 1 {
+		t.Fatalf("evidence = %d, want >= 1", len(outcome.Evidence))
+	}
+	stats := orch.LastRunStats()
+	if stats.AcquireExit != "supported" {
+		t.Errorf("exit = %q, want supported (LLM-declared)", stats.AcquireExit)
+	}
+	// 冻结裁决 3：后验不回写——假设置信度保持决策规划的先验（0.5/0.5）
+	if len(verifier.SeenConfidence) != 2 || verifier.SeenConfidence[0] != 0.5 || verifier.SeenConfidence[1] != 0.5 {
+		t.Errorf("confidence = %v, want priors [0.5 0.5] (no posterior writeback)", verifier.SeenConfidence)
+	}
+	// 轨迹：两轮——动作轮（理由 + 无得分/信念列）与声明轮
+	trace := stats.DecisionTrace
+	if len(trace) != 2 {
+		t.Fatalf("trace = %d entries, want 2", len(trace))
+	}
+	first := trace[0]
+	if first.Chosen != "check-pods" || first.Reason == "" || first.Scores != nil || first.BeliefBefore != nil {
+		t.Errorf("trace[0] = %+v, want chosen+reason, no scores/belief (B3 列)", first)
+	}
+	if !trace[1].Sufficient || trace[1].Chosen != "" || trace[1].Reason == "" {
+		t.Errorf("trace[1] = %+v, want sufficient declaration", trace[1])
+	}
+}
+
+// B3 预算尽：脚本恒选动作（耗尽后重复末条）不声明足够 → 轮次耗尽 insufficient
+// 带缺口；选择器调用数 = 预算轮数
+func TestB3ReactBudgetExhausted(t *testing.T) {
+	decision := agent.PlanDecision{
+		Hypotheses: []core.Hypothesis{
+			{ID: "h_1", Statement: "方向一", Confidence: 0.5},
+			{ID: "h_2", Statement: "方向二", Confidence: 0.5},
+		},
+		Actions: []agent.ActionProposal{
+			{Name: "probe-a", Argv: []string{"get", "aaa"}, Purpose: "探针", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.8, 0.2}, {0.1, 0.9}}},
+			{Name: "probe-b", Argv: []string{"get", "bbb"}, Purpose: "探针", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.8, 0.2}, {0.1, 0.9}}},
+			{Name: "probe-c", Argv: []string{"get", "ccc"}, Purpose: "探针", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.8, 0.2}, {0.1, 0.9}}},
+		},
+	}
+	fk := agenttest.NewFakeVerifier([]core.Verdict{{
+		ID: "v_1", HypothesisID: "h_1", Result: core.VerdictInsufficient, Reason: "证据不足",
+	}})
+	verifier := &recordingVerifier{FakeVerifier: fk}
+	executor := &scriptedExecutor{script: map[string]string{
+		"aaa": "无信号一", "bbb": "无信号二", "ccc": "无信号三",
+	}}
+	// 单条脚本：耗尽后重复——恒选 probe-c 直到预算尽
+	selector := agenttest.NewFakeReActSelector(
+		agent.ReActChoice{ActionName: "probe-a", Reason: "先看 a"},
+		agent.ReActChoice{ActionName: "probe-b", Reason: "再看 b"},
+		agent.ReActChoice{ActionName: "probe-c", Reason: "最后 c"},
+	)
+	orch := newB3Orchestrator(t, agenttest.NewFakeDecisionPlanner(decision), verifier, executor, selector)
+	orch.SetInvestigateMaxRounds(3)
+
+	outcome, err := orch.Execute(context.Background(), core.Run{ID: "run_1", Question: "q"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Report == nil {
+		t.Fatalf("预算尽仍应出正式报告")
+	}
+	stats := orch.LastRunStats()
+	if stats.AcquireExit != "insufficient" || !strings.Contains(stats.AcquireGap, "选择器未声明证据足够") {
+		t.Errorf("stats = %+v, want insufficient + 选择器未声明", stats)
+	}
+	if len(stats.DecisionTrace) != 3 {
+		t.Errorf("trace = %d entries, want 3", len(stats.DecisionTrace))
+	}
+}
+
+// B3 问用户挂起恢复：选择器选 ask → 挂起 → 答复注入（不归类更新）→ 工具 → 声明足够
+func TestB3ReactAskSuspendResume(t *testing.T) {
+	decision := agent.PlanDecision{
+		Hypotheses: []core.Hypothesis{
+			{ID: "h_1", Statement: "近期变更引入", Confidence: 0.5},
+			{ID: "h_2", Statement: "环境漂移", Confidence: 0.5},
+		},
+		Actions: []agent.ActionProposal{
+			{
+				Name: "ask-change", Ask: "问题是最近变更后出现的吗？", Purpose: "区分变更引入", Cost: 10,
+				Outcomes: []string{"yes", "no"}, Matrix: [][]float64{{0.7, 0.3}, {0.2, 0.8}},
+			},
+			{
+				Name: "check-pods", Argv: []string{"get", "pods"}, Purpose: "看 Pod 状态", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.85, 0.15}, {0.1, 0.9}},
+			},
+			{
+				// 菜单余量：声明足够发生在菜单未空时（池尽会先走重规划出口）
+				Name: "check-events", Argv: []string{"get", "events"}, Purpose: "看事件", Cost: 1,
+				Outcomes: []string{"backoff", "none"}, Matrix: [][]float64{{0.85, 0.15}, {0.2, 0.8}},
+			},
+		},
+	}
+	fakeDecision := agenttest.NewFakeDecisionPlanner(decision)
+	fk := agenttest.NewFakeVerifier([]core.Verdict{{
+		ID: "v_1", HypothesisID: "h_1", Result: core.VerdictSupported, Reason: "证据支持",
+	}})
+	verifier := &recordingVerifier{FakeVerifier: fk}
+	executor := &scriptedExecutor{script: map[string]string{"pods": "pod CrashLoopBackOff"}}
+	selector := agenttest.NewFakeReActSelector(
+		agent.ReActChoice{ActionName: "ask-change", Reason: "起始时间只有用户知道"},
+		agent.ReActChoice{ActionName: "check-pods", Reason: "答复指向变更，查 Pod 状态"},
+		agent.ReActChoice{Sufficient: true, Reason: "观察已收敛"},
+	)
+	orch := newB3Orchestrator(t, fakeDecision, verifier, executor, selector)
+
+	outcome, err := orch.Execute(context.Background(), core.Run{ID: "run_1", SessionID: "sess_1", Question: "q"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Suspension == nil {
+		t.Fatalf("expected suspension for ask action, got report=%v", outcome.Report)
+	}
+	if outcome.Suspension.Question != "问题是最近变更后出现的吗？" {
+		t.Errorf("question = %q", outcome.Suspension.Question)
+	}
+	if calls := fakeDecision.Calls; calls != 1 {
+		t.Errorf("plan calls before suspend = %d, want 1", calls)
+	}
+
+	resumed, err := orch.Resume(context.Background(), "run_1", "yes，变更后出现")
+	if err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if resumed.Report == nil {
+		t.Fatalf("expected report after resume")
+	}
+	if got := orch.LastRunStats().AcquireExit; got != "supported" {
+		t.Errorf("exit = %q, want supported after resume", got)
+	}
+	// 挂起恢复不重规划（决策规划仍 1 次）；选择器共 3 次（ask / 工具 / 声明）
+	if calls := fakeDecision.Calls; calls != 1 {
+		t.Errorf("plan calls after resume = %d, want 1 (no replan)", calls)
+	}
+	if selector.Calls != 3 {
+		t.Errorf("selector calls = %d, want 3", selector.Calls)
+	}
+	// 答复注入选择器载荷（信息公平面：澄清累积可见）
+	lastAsk := selector.LastRequest
+	if lastAsk.BudgetLeft <= 0 || len(lastAsk.Hypotheses) != 2 {
+		t.Errorf("last request = %+v, want hypotheses + budget", lastAsk)
+	}
+}
+
+// B3 动作池尽重规划：首个计划单动作执行完 → 池尽 → 第二计划补新动作（旧假设保留、
+// 已执行动作过滤）→ 继续选择；重规划不重建信念不回写置信度
+func TestB3ReactPoolEmptyReplans(t *testing.T) {
+	first := agent.PlanDecision{
+		Hypotheses: []core.Hypothesis{
+			{ID: "h_1", Statement: "方向一", Confidence: 0.5},
+			{ID: "h_2", Statement: "方向二", Confidence: 0.5},
+		},
+		Actions: []agent.ActionProposal{
+			{Name: "probe-a", Argv: []string{"get", "aaa"}, Purpose: "探针", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.8, 0.2}, {0.1, 0.9}}},
+		},
+	}
+	second := agent.PlanDecision{
+		Hypotheses: []core.Hypothesis{
+			{ID: "h_3", Statement: "新方向", Confidence: 0.6},
+			{ID: "h_1", Statement: "方向一", Confidence: 0.1},
+		},
+		Actions: []agent.ActionProposal{
+			// probe-a 已执行：重提议应被过滤；probe-c/probe-d 是新动作
+			// （留菜单余量让声明足够发生在菜单未空时）
+			{Name: "probe-a", Argv: []string{"get", "aaa"}, Purpose: "探针", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.8, 0.2}, {0.1, 0.9}}},
+			{Name: "probe-c", Argv: []string{"get", "ccc"}, Purpose: "新探针", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.9, 0.1}, {0.1, 0.9}}},
+			{Name: "probe-d", Argv: []string{"get", "ddd"}, Purpose: "新探针二", Cost: 1,
+				Outcomes: []string{"crash", "running"}, Matrix: [][]float64{{0.9, 0.1}, {0.1, 0.9}}},
+		},
+	}
+	// FakeDecisionPlanner.WithNextDecision 生效于下一次调用（含首调），随后回落
+	// 构造模板——要「首调返回 first、重规划返回 second」需反转构造
+	decision := agenttest.NewFakeDecisionPlanner(second)
+	decision.WithNextDecision(first)
+	fk := agenttest.NewFakeVerifier([]core.Verdict{{
+		ID: "v_1", HypothesisID: "h_3", Result: core.VerdictSupported, Reason: "新方向成立",
+	}})
+	verifier := &recordingVerifier{FakeVerifier: fk}
+	executor := &scriptedExecutor{script: map[string]string{
+		"aaa": "无信号", "ccc": "CrashLoopBackOff 出现",
+	}}
+	selector := agenttest.NewFakeReActSelector(
+		agent.ReActChoice{ActionName: "probe-a", Reason: "唯一动作"},
+		agent.ReActChoice{ActionName: "probe-c", Reason: "重规划后的新动作"},
+		agent.ReActChoice{Sufficient: true, Reason: "已收敛"},
+	)
+	orch := newB3Orchestrator(t, decision, verifier, executor, selector)
+
+	outcome, err := orch.Execute(context.Background(), core.Run{ID: "run_1", Question: "q"})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if outcome.Report == nil {
+		t.Fatalf("expected report after replan")
+	}
+	if got := orch.LastRunStats().AcquireExit; got != "supported" {
+		t.Errorf("exit = %q, want supported", got)
+	}
+	if calls := decision.Calls; calls != 2 {
+		t.Errorf("plan calls = %d, want 2 (initial + replan)", calls)
+	}
+	// 重规划合并：旧假设保留（列表合并），Confidence 不被重写（h_2 仍 0.5）
+	seen := verifier.SeenStatements
+	if !strings.Contains(strings.Join(seen, ";"), "方向二") {
+		t.Errorf("old hypothesis dropped on B3 replan: seen = %v", seen)
+	}
+	for _, c := range verifier.SeenConfidence {
+		if c < 0 || c > 1 {
+			t.Errorf("confidence out of range: %v", verifier.SeenConfidence)
+		}
+	}
+}
+
+// B3 分派防御：未注入选择器明确失败，不静默回退
+func TestB3ReactRequiresSelector(t *testing.T) {
+	parser := agenttest.NewFakeParser(core.Query{ID: "query_1", Goal: "q",
+		Nodes: []core.Node{{ID: "node_1", Type: "resource", Text: "demo-api"}}})
+	resolver := agenttest.NewFakeResolver(nil)
+	planner := agenttest.NewFakePlanner(agent.Plan{})
+	verifier := agenttest.NewFakeVerifier(nil)
+	reporter := agenttest.NewFakeReporter(core.Report{})
+	orch := agent.NewOrchestrator(parser, resolver, planner,
+		&scriptedExecutor{}, verifier, reporter, core.NewFactory())
+	orch.SetAcquireMethod(agent.AcquireMethodB3React)
+	orch.SetDecisionPlanner(agenttest.NewFakeDecisionPlanner(twoHypothesisDecision()))
+	orch.SetInvestigateMaxRounds(2)
+
+	_, err := orch.Execute(context.Background(), core.Run{ID: "run_1", Question: "q"})
+	if err == nil || !strings.Contains(err.Error(), "ReAct selector") {
+		t.Fatalf("err = %v, want ReAct selector required", err)
 	}
 }

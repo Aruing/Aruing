@@ -200,6 +200,7 @@ func probeDepsOf(stack *sessionStack) eval.ProbeDeps {
 				Rounds: s.InvestigateRounds,
 				Exit:   s.AcquireExit,
 				Gap:    s.AcquireGap,
+				Trace:  convertDecisionTrace(s.DecisionTrace),
 			}
 		},
 		Ledger: stack.ledger,
