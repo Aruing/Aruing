@@ -150,24 +150,86 @@ type RubricRow struct {
 	Verdict string `json:"verdict"`
 }
 
-// SampleRubric 从记录的 (结论 × 引用) 对里固定种子抽 n 行，生成③层评分表
-// 结论无引用或记录为空时返回空表；种子固定保证抽样可复现
-func SampleRubric(rec RunRecord, n int, seed int64) []RubricRow {
-	var pairs []RubricRow
-	summaries := make(map[string]string, len(rec.ToolCalls))
-	for _, tc := range rec.ToolCalls {
-		summaries[tc.EvidenceID] = tc.Summary
+// ③层评分三值口径：证据是否支持结论（裁决 #6：LLM 辅助评与人工评共用同一取值域）
+const (
+	// VerdictSupports 证据摘要明确支持结论
+	VerdictSupports = "supports"
+	// VerdictPartial 证据部分支持或相关性不足以下定论
+	VerdictPartial = "partial"
+	// VerdictNotSupports 证据与结论矛盾或无关
+	VerdictNotSupports = "not_supports"
+	// VerdictError LLM 辅助评失败行的占位（重试耗尽；非评判值，不进一致率分母）
+	VerdictError = "error"
+)
+
+// NormalizeVerdict 规范化③层评分：容忍首尾空白，仅接受三值口径，其余报错
+func NormalizeVerdict(s string) (string, error) {
+	v := strings.TrimSpace(s)
+	switch v {
+	case VerdictSupports, VerdictPartial, VerdictNotSupports:
+		return v, nil
 	}
-	for i, c := range rec.RootCauses {
-		for _, id := range c.EvidenceIDs {
-			pairs = append(pairs, RubricRow{
-				ConclusionIdx: i,
-				Reason:        c.Reason,
-				EvidenceID:    id,
-				Summary:       summaries[id],
-			})
+	return "", fmt.Errorf("invalid rubric verdict %q (want supports/partial/not_supports)", s)
+}
+
+// Agreement 两组同长度已回填 rubric 的逐行一致计数
+// 任一侧 verdict 为 error 的行不计入分母（非评判值）；未回填或非法值报错
+func Agreement(a, b []RubricRow) (agree int, total int, err error) {
+	if len(a) != len(b) {
+		return 0, 0, fmt.Errorf("rubric length mismatch: %d vs %d", len(a), len(b))
+	}
+	for i := range a {
+		skip := false
+		va, ea := NormalizeVerdict(a[i].Verdict)
+		if ea != nil {
+			// error 是失败占位非非法输入：跳过该行，不当报错
+			if strings.TrimSpace(a[i].Verdict) != VerdictError {
+				return 0, 0, fmt.Errorf("row %d (A): %w", i, ea)
+			}
+			skip = true
+		}
+		vb, eb := NormalizeVerdict(b[i].Verdict)
+		if eb != nil {
+			if strings.TrimSpace(b[i].Verdict) != VerdictError {
+				return 0, 0, fmt.Errorf("row %d (B): %w", i, eb)
+			}
+			skip = true
+		}
+		if skip {
+			continue
+		}
+		total++
+		if va == vb {
+			agree++
 		}
 	}
+	return agree, total, nil
+}
+
+// collectRubricPairs 收集一批记录的全部 (结论 × 引用证据) 对，供逐记录与全池化抽样共用
+func collectRubricPairs(recs []RunRecord) []RubricRow {
+	var pairs []RubricRow
+	for _, rec := range recs {
+		summaries := make(map[string]string, len(rec.ToolCalls))
+		for _, tc := range rec.ToolCalls {
+			summaries[tc.EvidenceID] = tc.Summary
+		}
+		for i, c := range rec.RootCauses {
+			for _, id := range c.EvidenceIDs {
+				pairs = append(pairs, RubricRow{
+					ConclusionIdx: i,
+					Reason:        c.Reason,
+					EvidenceID:    id,
+					Summary:       summaries[id],
+				})
+			}
+		}
+	}
+	return pairs
+}
+
+// sampleRubricRows 池化后固定种子抽 n 行（n 超对数时全取；种子固定保证可复现）
+func sampleRubricRows(pairs []RubricRow, n int, seed int64) []RubricRow {
 	if n <= 0 || len(pairs) == 0 {
 		return nil
 	}
@@ -177,6 +239,18 @@ func SampleRubric(rec RunRecord, n int, seed int64) []RubricRow {
 		n = len(pairs)
 	}
 	return pairs[:n]
+}
+
+// SampleRubric 从单记录的 (结论 × 引用) 对里固定种子抽 n 行，生成③层评分表
+// 结论无引用或记录为空时返回空表（逐记录口径，与历史行为一致）
+func SampleRubric(rec RunRecord, n int, seed int64) []RubricRow {
+	return sampleRubricRows(collectRubricPairs([]RunRecord{rec}), n, seed)
+}
+
+// SampleRubricTotal 全记录池化后固定种子抽 n 行（裁决 #6 全局抽样口径）：
+// 跨记录合并全部对再洗牌，避免逐记录抽样在大批量记录下行数超采
+func SampleRubricTotal(recs []RunRecord, n int, seed int64) []RubricRow {
+	return sampleRubricRows(collectRubricPairs(recs), n, seed)
 }
 
 // RenderRubricMarkdown 把抽样表渲染成人读 markdown（评分作业界面）
