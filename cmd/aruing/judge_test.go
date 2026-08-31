@@ -222,3 +222,12 @@ func TestRunJudgeRubricLLMRequiresConfig(t *testing.T) {
 		t.Fatalf("无 LLM 配置应明确报错，得：%v", err)
 	}
 }
+
+// --rubric-llm 不带 --sample-total：组合非法启动期明确报错，不静默落到普通判分
+func TestRunJudgeRubricLLMRequiresSampleTotal(t *testing.T) {
+	recPath, scenario := writeJudgeFixture(t)
+	err := runJudge([]string{"--run-json", recPath, "--scenario", scenario, "--rubric-llm"}, &bytes.Buffer{}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "sample-total") {
+		t.Fatalf("--rubric-llm 缺 --sample-total 应报错，得：%v", err)
+	}
+}

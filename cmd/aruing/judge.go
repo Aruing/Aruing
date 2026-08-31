@@ -60,6 +60,10 @@ func runJudge(args []string, stdout, stderr io.Writer) error {
 		fs.Usage()
 		return fmt.Errorf("judge requires --run-json and --scenario")
 	}
+	// flag 组合前置校验：避免 --rubric-llm 被静默忽略后落到普通判分（用户误以为已跑 LLM 辅助评）
+	if *rubricLLM && *sampleTotal <= 0 {
+		return fmt.Errorf("--rubric-llm requires --sample-total N (LLM-assisted scoring applies to the sampled rubric)")
+	}
 
 	gt, gtErr := eval.LoadGroundTruth(*scenario)
 	if gtErr != nil {
