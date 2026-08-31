@@ -49,6 +49,10 @@ func TestNewReranker(t *testing.T) {
 	if !strings.Contains(f.seen.System, "rows") {
 		t.Fatalf("系统提示应来自 rerank.md（go:embed）")
 	}
+	// 请求带 rerank 标签：token 记账落独立桶（统一实验批批②实跑曾全部落 unknown）
+	if f.seen.Label != "rerank" {
+		t.Fatalf("rerank 请求应带 Label=rerank，得 %q", f.seen.Label)
+	}
 }
 
 // 重排器错误路径：非法输出与空选集都明确报错（渲染层标注失败，不静默回退）
