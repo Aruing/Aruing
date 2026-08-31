@@ -2,11 +2,13 @@ package eval
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/llm"
 	"github.com/Aruing/Aruing/internal/session"
 	"github.com/Aruing/Aruing/internal/store"
 )
@@ -176,6 +178,30 @@ func TestRunProbeSessionDepsValidation(t *testing.T) {
 	}
 	if _, err := RunProbeSession(context.Background(), ProbeDeps{Ledger: store.NewMemoryRunLedger()}, ProbeRunOptions{SessionID: "s"}, spec, script); err == nil {
 		t.Fatal("missing Turn must error")
+	}
+}
+
+// 记录 token 键规范化：组装边界把 llm 侧大写键用量映射为记录族小写 in/out
+// （统一实验批批③实跑曾因大写键使 sweep CSV 联结全 0；schema 收敛后旧档由读取侧双键兼容）
+func TestProbeSessionRecordTokensLowercaseKeys(t *testing.T) {
+	rec := ProbeSessionRecord{SchemaVersion: SchemaVersion, SessionID: "s"}
+	rec.Tokens = toTokenUsage(map[string]llm.UsageTotals{
+		"tower": {PromptTokens: 433998, CompletionTokens: 39819},
+	})
+	// 序列化往返后接小写键结构：若仍是 llm 大写键，此处解不出数值
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got struct {
+		Tokens map[string]TokenUsage `json:"tokens"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	u, ok := got.Tokens["tower"]
+	if !ok || u.In != 433998 || u.Out != 39819 {
+		t.Fatalf("token usage not normalized to in/out: %+v", got.Tokens)
 	}
 }
 

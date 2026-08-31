@@ -94,8 +94,9 @@ type ProbeSessionRecord struct {
 	Diagnoses []DiagnoseTurnInfo `json:"diagnoses"`
 	// 逐探针结果（答案 + 展开后期望 + 状态；命中判定归 judge）
 	Probes []ProbeEntry `json:"probes"`
-	// 全会话按角色聚合的 token 用量（累计口径；内嵌 RunRecord 不再单拆）
-	Tokens map[string]llm.UsageTotals `json:"tokens"`
+	// 全会话按角色聚合的 token 用量（累计口径；内嵌 RunRecord 不再单拆；键与 RunRecord 同族小写 in/out，
+	// 历史批档曾为 llm.UsageTotals 大写键，读取侧双键兼容）
+	Tokens map[string]TokenUsage `json:"tokens"`
 	// 端到端耗时（毫秒）
 	WallTimeMS int64 `json:"wall_time_ms"`
 }
@@ -198,7 +199,7 @@ func RunProbeSession(
 		rec.TurnsExecuted = i + 1
 		rec.WallTimeMS = time.Since(start).Milliseconds()
 		if deps.Tokens != nil {
-			rec.Tokens = deps.Tokens()
+			rec.Tokens = toTokenUsage(deps.Tokens())
 		}
 		return rec, fmt.Errorf("probe session turn %d (%s): %w", i, t.Kind, err)
 	}
@@ -256,9 +257,22 @@ func RunProbeSession(
 	rec.Completed = true
 	rec.WallTimeMS = time.Since(start).Milliseconds()
 	if deps.Tokens != nil {
-		rec.Tokens = deps.Tokens()
+		rec.Tokens = toTokenUsage(deps.Tokens())
 	}
 	return rec, nil
+}
+
+// toTokenUsage 把 llm 侧 tracker 的用量映射为记录族统一的 TokenUsage（小写 in/out）
+// deps 注入签名保持 llm 类型不动，schema 收敛在组装边界完成
+func toTokenUsage(m map[string]llm.UsageTotals) map[string]TokenUsage {
+	if m == nil {
+		return nil
+	}
+	out := make(map[string]TokenUsage, len(m))
+	for label, t := range m {
+		out[label] = TokenUsage{In: t.PromptTokens, Out: t.CompletionTokens}
+	}
+	return out
 }
 
 // buildDiagnoseInfo 组装单次穿插诊断的内嵌 RunRecord

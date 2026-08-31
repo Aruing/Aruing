@@ -152,7 +152,8 @@ for jf in sorted(glob.glob(os.path.join(out, "judge-*.json"))):
             "no_diagnosis": j.get("no_diagnosis", 0),
             "no_facts": j.get("no_facts", 0),
             "tokens_total": sum(
-                (t or {}).get("in", 0) + (t or {}).get("out", 0)
+                (t or {}).get("in", (t or {}).get("PromptTokens", 0))
+                + (t or {}).get("out", (t or {}).get("CompletionTokens", 0))
                 for t in (rec.get("tokens", {}) or {}).values()),
             "wall_time_ms": rec.get("wall_time_ms", 0),
         })
