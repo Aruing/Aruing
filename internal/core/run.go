@@ -103,6 +103,11 @@ type Hypothesis struct {
 	// 如果猜想成立，通常应该观察到的信号列表
 	ExpectedSignals []string `json:"expectedSignals,omitempty"`
 
+	// 猜想当前可信度，[0, 1]；语义随写入方界定：决策规划写入先验，
+	// 取证决策循环写入贝叶斯后验（Evidence 之上的聚合视图，非替代）
+	// 零值表示写入方尚未给可信度，消费方自行决定回退口径（如均匀先验）
+	Confidence float64 `json:"confidence,omitempty"`
+
 	// 猜想创建时间
 	CreatedAt time.Time `json:"createdAt"`
 }

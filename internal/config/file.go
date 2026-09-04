@@ -32,7 +32,10 @@ func LoadFile(path string) (Config, error) {
 			KubectlPath:         strings.TrimSpace(fc.Tools.KubectlPath),
 			AllowDiagnosticExec: fc.Tools.AllowDiagnosticExec,
 			MaxStdoutBytes:      fc.Tools.MaxStdoutBytes,
+			Projection:          fc.Tools.Projection,
 		},
+		// 编排侧取证决策段整段带入（照 TUI 漏拷教训：全部段都在此拷贝）
+		Agent: fc.Agent,
 		// TUI 段同样从文件带入：此前漏拷导致 config 文件里的 tui.* 全部静默失效
 		// （只有 env 覆盖路径生效）；theme/mode/theme_file 一并修复
 		TUI: TUI{

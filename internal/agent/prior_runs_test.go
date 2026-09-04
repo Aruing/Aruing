@@ -12,80 +12,9 @@ import (
 	"github.com/Aruing/Aruing/internal/store"
 )
 
-// 账本记录映射为既往运行详情，含结论与证据编号与摘要
-func TestBuildPriorRunDetails(t *testing.T) {
-	records := []session.DiagnosticRecord{{
-		RunID:     "run_1",
-		SessionID: "sess_1",
-		Question:  "demo-api 挂了",
-		Report: core.Report{
-			Title:   "镜像拉取失败",
-			Summary: "ImagePullBackOff",
-			Conclusions: []core.Conclusion{{
-				Result:      core.VerdictSupported,
-				Reason:      "事件含 Failed to pull image",
-				EvidenceIDs: []string{"e_1"},
-			}},
-			Suggestions: []string{"检查镜像仓库凭证"},
-		},
-		Evidence: []core.Evidence{{
-			ID:       "e_1",
-			ToolName: "k8s",
-			Summary:  "events: ImagePullBackOff",
-			Raw:      json.RawMessage(`{"stdout":"Failed to pull image"}`),
-		}},
-	}}
-
-	details := buildPriorRunDetails(records, 8_000)
-	if len(details) != 1 {
-		t.Fatalf("len: %d", len(details))
-	}
-	d := details[0]
-	if d.RunID != "run_1" || d.Title != "镜像拉取失败" {
-		t.Fatalf("detail: %+v", d)
-	}
-	if len(d.Conclusions) != 1 || d.Conclusions[0].EvidenceIDs[0] != "e_1" {
-		t.Fatalf("conclusions: %+v", d.Conclusions)
-	}
-	if len(d.Evidence) != 1 || d.Evidence[0].ID != "e_1" {
-		t.Fatalf("evidence: %+v", d.Evidence)
-	}
-	if d.Evidence[0].RawTruncated || !strings.Contains(string(d.Evidence[0].Raw), "Failed to pull") {
-		t.Fatalf("raw should stay full: trunc=%v raw=%s", d.Evidence[0].RawTruncated, d.Evidence[0].Raw)
-	}
-}
-
-// 多证据共享预算时优先保新；旧条截断/占位
-func TestBuildPriorRunDetailsRawBudget(t *testing.T) {
-	oldMark := "OLD_PRIOR_RAW"
-	newMark := "NEW_PRIOR_RAW"
-	oldRaw := json.RawMessage(`{"stdout":"` + oldMark + strings.Repeat("o", 200) + `"}`)
-	newRaw := json.RawMessage(`{"stdout":"` + newMark + strings.Repeat("n", 200) + `"}`)
-	records := []session.DiagnosticRecord{{
-		RunID:  "run_old",
-		Report: core.Report{Summary: "old"},
-		Evidence: []core.Evidence{{
-			ID: "e_old", Summary: "old", Raw: append(json.RawMessage(nil), oldRaw...),
-		}},
-	}, {
-		RunID:  "run_new",
-		Report: core.Report{Summary: "new"},
-		Evidence: []core.Evidence{{
-			ID: "e_new", Summary: "new", Raw: append(json.RawMessage(nil), newRaw...),
-		}},
-	}}
-
-	details := buildPriorRunDetails(records, 60)
-	if details[1].Evidence[0].RawTruncated || string(details[1].Evidence[0].Raw) != string(newRaw) {
-		t.Fatalf("newest run evidence must stay full: trunc=%v", details[1].Evidence[0].RawTruncated)
-	}
-	if !details[0].Evidence[0].RawTruncated {
-		t.Fatal("oldest run evidence must yield under tight budget")
-	}
-}
-
-// 台账有先前运行时用户载荷含先前详情；解释追问直接回复且不调执行
-func TestTowerPriorRunDetailsFromLedger(t *testing.T) {
+// 台账有先前运行时用户载荷含 R 层索引卡：编号与摘要在场、raw 不在场；
+// 解释追问直接回复且不调执行
+func TestTowerPriorRunCardsFromLedger(t *testing.T) {
 	ctx := context.Background()
 	ledger := store.NewMemoryRunLedger()
 	rec := session.DiagnosticRecord{
@@ -126,7 +55,7 @@ func TestTowerPriorRunDetailsFromLedger(t *testing.T) {
 				sawUser = m.Content
 			}
 		}
-		writeChatCompletion(w, `{"action":"reply","content":"依据 e_pull：Failed to pull image，上次判定镜像问题","question":""}`)
+		writeChatCompletion(w, `{"action":"reply","content":"依据 e_pull 的事件摘要，上次判定镜像问题","question":""}`)
 	})
 	exec := &fakeRunExecutor{}
 	tower, err := NewTowerResponder(client, newTestFactory(t), exec, ledger, nil, nil, nil)
@@ -159,13 +88,14 @@ func TestTowerPriorRunDetailsFromLedger(t *testing.T) {
 	if !strings.Contains(sawUser, "prior_run_details") {
 		t.Fatalf("payload missing prior_run_details: %s", sawUser)
 	}
-	if !strings.Contains(sawUser, "e_pull") || !strings.Contains(sawUser, "Failed to pull") {
-		t.Fatalf("payload should include evidence points: %s", sawUser)
+	// 卡面语义：编号与摘要在场；raw（深细节）不在场，归回灌与 evidence.read
+	if !strings.Contains(sawUser, "e_pull") || !strings.Contains(sawUser, "ImagePullBackOff") {
+		t.Fatalf("payload should include card fields: %s", sawUser)
 	}
-	if !strings.Contains(sawUser, "ImagePullBackOff") {
-		t.Fatalf("payload should include report summary: %s", sawUser)
+	if strings.Contains(sawUser, "Failed to pull image quay.io/demo") {
+		t.Fatalf("cards must not carry evidence raw: %s", sawUser)
 	}
-	if !strings.Contains(out.Content, "e_pull") && !strings.Contains(out.Content, "pull") {
+	if !strings.Contains(out.Content, "e_pull") {
 		t.Fatalf("reply should cite evidence: %q", out.Content)
 	}
 }

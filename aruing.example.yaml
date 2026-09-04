@@ -32,6 +32,18 @@ tools:
     # Uniform coverage weights (ablation); default rarity-weighted (log2)
     uniform_weight: false
 
+# Orchestrator-side switches (experiment arms must be configured explicitly).
+# Memory assembly for `aruing chat` history injection:
+#   ours (default) | d1-last-n | d2-flat-summary (pure baselines for memory
+#   experiments: no index cards, no rehydration; d1 keeps only the last N
+#   messages). Unknown values fail at startup.
+# Env: ARUING_AGENT_MEMORY_METHOD / ARUING_AGENT_MEMORY_LAST_N
+agent:
+  memory:
+    method: ""
+    # D1 window size in messages; 0 = default 20
+    last_n: 0
+
 # Terminal UI for `aruing chat`: theme dark | light | auto (auto detects terminal
 # background), mode inline | app (inline = scrollback-style chat, app = fullscreen).
 # Env: ARUING_TUI_THEME / ARUING_TUI_MODE; CLI: --ui inline|app overrides mode.

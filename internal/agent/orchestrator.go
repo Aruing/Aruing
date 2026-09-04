@@ -28,8 +28,77 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aruing/Aruing/internal/agent/acquire"
 	"github.com/Aruing/Aruing/internal/core"
 )
+
+// 决策循环缺角色/缺能力的防御错误口径
+var (
+	// ours 方法未注入决策规划器（装配层应前置校验，运行期兑底明确失败不静默回退 B1）
+	errDecisionPlannerRequired = errors.New("acquire loop requires a decision planner")
+	// ours 方法的验证器未实现强度判定能力接口
+	errStrengthJudgeRequired = errors.New("acquire loop requires a verifier with JudgeStrength")
+	// b3-react 方法未注入 ReAct 选择器（装配层应前置校验，运行期兑底）
+	errReActSelectorRequired = errors.New("acquire loop (b3-react) requires an LLM ReAct selector")
+)
+
+// 调查阶段取证决策方法开关（config agent.acquire.method 的解析结果）
+type AcquireMethod int
+
+const (
+	// B1 基线：旧 investigateLoop 固定顺序全量串行（零改动保真现实现口径）。
+	// 作为零值：裸编排器（未注入决策角色）默认行为与历史一致；产品装配层
+	// 经 SetAcquireMethod 注入 config 解析结果（config 空 = ours，见 ParseAcquireMethod）
+	AcquireMethodB1Serial AcquireMethod = iota
+	// Ours 决策循环（产品默认）：a* ← argmax EIG/c 序贯取证 + MSPRT 停止
+	AcquireMethodOurs
+	// B2 实验臂：种子随机选择——复用 Ours 决策循环全部机制只换选择策略
+	// （对照口径「其余一切同构」；种子经 config agent.acquire.seed 可复现）
+	AcquireMethodB2Random
+	// B4 实验臂：恒选最低成本动作——同上复用，只换选择策略（并列取索引小）
+	AcquireMethodB4Cheapest
+	// B3 实验臂：ReAct 式 LLM 自由决策（统一实验批强对照，业界 agent 现状
+	// 代表）——复用决策循环骨架，每轮一次 LLM 选择调用，无贝叶斯更新、无
+	// EIG、无 MSPRT；无显式信念状态正是对照点。LLM 声明足够 → 正式 Verify
+	// （不回写 Confidence）；选择器经 SetReActSelector 注入
+	AcquireMethodB3React
+)
+
+// 解析方法名（config 口径）：空或 "ours" → Ours（产品默认）；"b1-serial" → B1；
+// "b2-random" / "b4-cheapest" / "b3-react" → 实验臂（复用决策循环只换选择策略）；
+// 其余报错（启动明确失败）。注意与编排零值的区别：未显式配置的裸编排器走 B1
+func ParseAcquireMethod(name string) (AcquireMethod, error) {
+	switch strings.TrimSpace(strings.ToLower(name)) {
+	case "", "ours":
+		return AcquireMethodOurs, nil
+	case "b1-serial":
+		return AcquireMethodB1Serial, nil
+	case "b2-random":
+		return AcquireMethodB2Random, nil
+	case "b4-cheapest":
+		return AcquireMethodB4Cheapest, nil
+	case "b3-react":
+		return AcquireMethodB3React, nil
+	default:
+		return 0, fmt.Errorf("unknown agent.acquire.method %q (want ours, b1-serial, b2-random, b4-cheapest or b3-react)", name)
+	}
+}
+
+// 方法名展示（进度与日志用）
+func (m AcquireMethod) String() string {
+	switch m {
+	case AcquireMethodB1Serial:
+		return "b1-serial"
+	case AcquireMethodB2Random:
+		return "b2-random"
+	case AcquireMethodB4Cheapest:
+		return "b4-cheapest"
+	case AcquireMethodB3React:
+		return "b3-react"
+	default:
+		return "ours"
+	}
+}
 
 // 描述编排器理解原始问题所需的最小能力
 type parser interface {
@@ -87,6 +156,20 @@ type taskExecutor interface {
 type verifier interface {
 	// 根据用户问题、猜想、任务和实际证据返回判断列表
 	Verify(context.Context, core.Query, []core.Hypothesis, []core.Task, []core.Evidence) ([]core.Verdict, error)
+}
+
+// 取证决策循环的强度判定能力（可选能力接口，照 SuspendedRunner 模式）
+// 验证器兼职提供：对单条证据逐假设给出 (d,s)；未实现时 ours 方法装配期报错
+type strengthJudge interface {
+	// 对给定证据与假设列表返回逐假设强度判定（顺序与输入假设一致）
+	JudgeStrength(context.Context, core.Evidence, []core.Hypothesis) ([]StrengthJudgement, error)
+}
+
+// 取证决策循环的决策规划能力（可选注入，ours 方法必需）
+// 与旧 planner 并行：产出带先验假设 + 动作提议 + 判别矩阵的决策素材
+type decisionPlanner interface {
+	// 根据问题结构、目标与已有证据返回决策规划
+	PlanDecision(context.Context, PlanState) (PlanDecision, error)
 }
 
 // 描述编排器生成最终用户输出所需的最小能力
@@ -152,6 +235,28 @@ type InvestigateState struct {
 	MaxRounds int
 	// 用户澄清的累积答复（Resume 注入）
 	Clarifications []string
+	// 取证决策循环状态（ours 路径专用；B1 路径为 nil 不参与）
+	// 挂起快照整体携带，Resume 后信念与动作池连续
+	Acquire *AcquireState
+	// 已收集的决策轨迹（观测非进度，但随快照携带）：ask 挂起时存入，Resume
+	// 段继续累积——否则恢复段的 defer 会用局部轨迹覆盖，挂起前历史丢失
+	// （pr-agent #134 R2）；挂起轮在恢复段重跑，轮号可重复，按发生序保留
+	Trace []DecisionTraceEntry
+}
+
+// 取证决策循环的跨轮状态（ours 路径）
+//
+// 信念与假设列表索引对齐（Hypotheses 由循环外层持有，本结构只存信念与动作）；
+// 挂起时整体进快照，Resume 续跑不重规划不丢进度
+type AcquireState struct {
+	// 当前信念（与循环内 hypotheses 索引对齐）
+	Belief acquire.Belief
+	// 未执行的候选动作池（已执行/已挂起的按名移出）
+	Actions []ActionProposal
+	// 已执行过的动作名（重规划后去重，不重复执行同名动作）
+	Executed []string
+	// 待答复的问用户动作（挂起时非 nil；Resume 后按答复归类更新并清空）
+	Asked *ActionProposal
 }
 
 // 保存完整假闭环所需的角色和执行依赖
@@ -176,6 +281,16 @@ type Orchestrator struct {
 	// 调查阶段规划轮数预算，零值表示使用默认调查轮次上限
 	// 默认一轮，与早期单轮行为等价；调高并改多轮提示词后才真正迭代
 	investigateMaxRounds int
+	// 调查阶段取证决策方法；零值 = ours（产品默认），B1 / B2 / B4 经 config 显式切换
+	acquireMethod AcquireMethod
+	// B2 实验臂的随机种子（种子随机选择可复现用）；其余方法不读
+	acquireSeed int64
+	// 取证决策参数（α/P*/A/τ/δ/质量下限）；零值由 acquire 包取默认
+	acquireOptions acquire.Options
+	// 决策规划器（ours 方法必需）；B1 路径不读
+	decisionPlanner decisionPlanner
+	// B3 ReAct 选择器（b3-react 方法必需）；其余方法不读，未注入时 b3 分派明确失败
+	reactSelector reactSelector
 	// 是否启用集群侦察；装配层在集群工具注册后开启，避免无集群环境（假实现或持续集成）产生噪音
 	// 关闭时侦察直接返回空，不进入证据链、不打印失败
 	reconEnabled bool
@@ -195,6 +310,45 @@ type Orchestrator struct {
 type RunStats struct {
 	// 调查循环已开始的轮数（挂起后 Resume 续跑会覆盖为本段循环的轮数）
 	InvestigateRounds int
+	// 取证决策循环出口（决策循环路径：ours / b2-random / b4-cheapest）：
+	// supported / insufficient；b1-serial 路径为空
+	AcquireExit string
+	// insufficient 出口的缺口说明（平台还是预算尽）；#18 明确失败可观测
+	AcquireGap string
+	// 逐轮决策轨迹（决策循环路径：ours / b2 / b4 / b3-react；b1-serial 臂为
+	// 空）。只读观测，不参与编排决策；评测记录（decision_trace）消费。
+	// 挂起恢复跨段累积（快照携带前段轨迹；挂起轮重跑致轮号可重复，按发生序）
+	DecisionTrace []DecisionTraceEntry
+}
+
+// DecisionTraceEntry 决策轨迹的一轮快照（RunStats.DecisionTrace 元素）
+//
+// 冻结裁决 7：ours / b2 / b4 臂逐轮记候选 EIG/c 得分、实际选择与信念前后
+// 对比；B3 臂同结构但无得分与信念列，改存 LLM 选择理由原文——ours 有数字、
+// B3 只有直觉，两列对照即案例研究本体
+// 零行为影响：轨迹只随 lastStats 透出，不进任何编排决策
+type DecisionTraceEntry struct {
+	// 轮次（1 起，已开始的调查轮）
+	Round int `json:"round"`
+	// 本轮选中的动作名；B3 声明足够轮为空
+	Chosen string `json:"chosen"`
+	// 候选动作的 EIG/c 得分（ours 口径；B2/B4 覆盖选择但得分照记）；B3 臂为空
+	Scores []ActionScore `json:"scores,omitempty"`
+	// 本轮决策前的信念后验；B3 臂为空
+	BeliefBefore []float64 `json:"belief_before,omitempty"`
+	// 本轮更新后的信念后验（挂起轮与前像相等）；B3 臂为空
+	BeliefAfter []float64 `json:"belief_after,omitempty"`
+	// B3 选择器的判断理由原文
+	Reason string `json:"reason,omitempty"`
+	// B3 声明证据足够（声明轮为真；零证据声明不采纳仍继续取证，见 #5 同门注释）
+	Sufficient bool `json:"sufficient,omitempty"`
+}
+
+// ActionScore 轨迹得分列：候选动作名与其 EIG/c 得分
+// 非有限得分封顶为最大有限值（JSON 无 Inf 表示；观测语义不变——仍是支配级得分）
+type ActionScore struct {
+	Name  string  `json:"name"`
+	Score float64 `json:"score"`
 }
 
 // 绑定完整闭环所需依赖并创建编排器
@@ -266,6 +420,47 @@ func (o *Orchestrator) SetReconEnabled(enabled bool) {
 		return
 	}
 	o.reconEnabled = enabled
+}
+
+// 设置调查阶段取证决策方法；仅装配层与测试在创建后调用
+// 与其他 setter 同约定：仅作用于后续执行，不影响进行中的循环
+func (o *Orchestrator) SetAcquireMethod(method AcquireMethod) {
+	if o == nil {
+		return
+	}
+	o.acquireMethod = method
+}
+
+// 设置取证决策参数；零值字段由 acquire 包在消费侧取默认
+func (o *Orchestrator) SetAcquireOptions(opts acquire.Options) {
+	if o == nil {
+		return
+	}
+	o.acquireOptions = opts
+}
+
+// 设置选择策略随机种子（b2-random 实验臂可复现用）；其余方法不读
+func (o *Orchestrator) SetAcquireSeed(seed int64) {
+	if o == nil {
+		return
+	}
+	o.acquireSeed = seed
+}
+
+// 注入决策规划器（ours 方法必需）；B1 路径不读，未注入时 ours 分派明确失败
+func (o *Orchestrator) SetDecisionPlanner(p decisionPlanner) {
+	if o == nil {
+		return
+	}
+	o.decisionPlanner = p
+}
+
+// 注入 B3 ReAct 选择器（b3-react 方法必需）；其余方法不读，未注入时 b3 分派明确失败
+func (o *Orchestrator) SetReActSelector(s reactSelector) {
+	if o == nil {
+		return
+	}
+	o.reactSelector = s
 }
 
 // 向进度输出写一行；输出为空时跳过
@@ -434,9 +629,22 @@ func (o *Orchestrator) continueFromInvestigate(
 		clusterResources = recon.resources
 	}
 
-	// 调查阶段为编排可见循环：计划、执行、验证，证据不足时带历史证据再计划
-	// 澄清挂起时保存快照返回 Suspension；调查任务与澄清互斥由循环校验
-	evidence, verdicts, clarify, paused, err := o.investigateLoop(ctx, query, seed, clusterResources)
+	// 调查阶段为编排可见循环：按方法分派——B1 走旧串行循环（零改保真），
+	// 其余（ours 产品默认 / b2-random / b4-cheapest 实验臂）走取证决策循环
+	// （实验臂复用全部机制只换选择策略，对照口径「其余一切同构」）
+	// 两循环同签名同返回，澄清挂起/报告路径共用
+	var (
+		evidence []core.Evidence
+		verdicts []core.Verdict
+		clarify  *ClarifyRequest
+		paused   InvestigateState
+		err      error
+	)
+	if o.acquireMethod != AcquireMethodB1Serial {
+		evidence, verdicts, clarify, paused, err = o.acquireLoop(ctx, query, seed, clusterResources)
+	} else {
+		evidence, verdicts, clarify, paused, err = o.investigateLoop(ctx, query, seed, clusterResources)
+	}
 	if err != nil {
 		return core.Outcome{}, err
 	}
@@ -532,7 +740,7 @@ func cloneResolveState(state ResolveState) ResolveState {
 
 // 复制调查状态中的切片字段，避免挂起快照与进行中状态共享底层数组
 func cloneInvestigateState(state InvestigateState) InvestigateState {
-	return InvestigateState{
+	cloned := InvestigateState{
 		Targets:        slices.Clone(state.Targets),
 		Hypotheses:     slices.Clone(state.Hypotheses),
 		Tasks:          slices.Clone(state.Tasks),
@@ -542,6 +750,20 @@ func cloneInvestigateState(state InvestigateState) InvestigateState {
 		MaxRounds:      state.MaxRounds,
 		Clarifications: slices.Clone(state.Clarifications),
 	}
+	if len(state.Trace) > 0 {
+		cloned.Trace = make([]DecisionTraceEntry, len(state.Trace))
+		copy(cloned.Trace, state.Trace)
+		for i := range cloned.Trace {
+			cloned.Trace[i].Scores = slices.Clone(cloned.Trace[i].Scores)
+			cloned.Trace[i].BeliefBefore = slices.Clone(cloned.Trace[i].BeliefBefore)
+			cloned.Trace[i].BeliefAfter = slices.Clone(cloned.Trace[i].BeliefAfter)
+		}
+	}
+	if state.Acquire != nil {
+		acq := cloneAcquireState(*state.Acquire)
+		cloned.Acquire = &acq
+	}
+	return cloned
 }
 
 // 把侦察证据插入到证据链的定位块之后、调查块之前（按发生时间顺序）
@@ -583,11 +805,13 @@ func (o *Orchestrator) investigateLoop(
 	}
 
 	state := seed
-	// 只读统计：本段循环已开始的轮数，任何返回路径都落进 lastStats（评测观测用）
+	// 只读统计：本段循环已开始的轮数，任何返回路径都落进 lastStats（评测观测用）；
+	// 决策轨迹属决策循环路径，B1 恒空（防同编排器跨方法残留旧观测）
 	started := seed.Round
 	defer func() {
 		o.mu.Lock()
 		o.lastStats.InvestigateRounds = started - seed.Round
+		o.lastStats.DecisionTrace = nil
 		o.mu.Unlock()
 	}()
 	hypotheses := slices.Clone(seed.Hypotheses)

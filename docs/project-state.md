@@ -1,10 +1,16 @@
 # 项目当前状态
 
-> 最后更新：2026-08-29（**0.2.0 版本远景已定稿**（笔记 `plan/version/0.2.0.md`）：完备不脆弱的证据型诊断助手；节奏改小版本递增 0.1.x，评测基建与代表性投影算法优先，持久化随 0.1.4+ / 0.2.0 收口前交付（排序依据见笔记 `plan/version/0.2.0.md`）。`0.1.0` 已发布（v0.1.0 tag，2026-08-20））
+> 最后更新：2026-08-31（**0.1.2 + 0.1.3 完成：统一实验批三批跑数全绿后关闭双里程碑**。批① eval-sweep 300 单元 / 批② 下游端到端 48 单元 / 批③ 探针 36 会话两波全部跑完（模型 deepseek-v4-flash 全程同批），③层抽样 76 条 LLM 辅助评 + 20 条人工一致率 0.70；收尾装置修复 #136/#137/#138 已并；随 v0.1.3 单 tag 发布（release notes 含 0.1.2 全部增量）。实验数据与钉板记录在笔记仓 `gproject/中期/实验数据/0.1.2-0.1.3-统一批/`，遗留问题见笔记仓 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）
 
 ## 当前阶段
 
-**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 远景已定稿**（2026-08-21，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）。三大支柱：持久化（地基）、记忆管理（信任分层记忆 + 按需回灌）、工具 I/O（预算约束下的代表性投影）。**版本节奏**：废止 beta 里程碑，0.1.1 / 0.1.2 … 每个小版本 = 一个可用正式实现（完成即打 tag 发布），0.2.0 收口含全部增量；里程碑归档三层（`plan/archive/0.2.0/0.1.x/`）。首个里程碑 `0.1.1`（代表性投影升级 + 评测基建）设计待起草；其后 0.1.2 主动取证决策模块、0.1.3 分层记忆组装；持久化随 0.1.4+ / 0.2.0 收口前交付（排序依据见笔记 `plan/version/0.2.0.md`）。
+**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 三创新点版本全部交付**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）+ 毕业论文三创新点载体（动机与排序依据在笔记仓）。**版本节奏**：小版本递增，每个 0.1.x = 一个可用正式实现：`0.1.1`（创新点二·代表性投影）✅ v0.1.1 已发布；`0.1.2`（创新点一·主动取证决策）✅ done 2026-08-31；`0.1.3`（创新点三·分层记忆）✅ done 2026-08-31，随 **v0.1.3 单 tag** 一并发布（0.1.2 不独立发版，发布裁决 2026-08-30）；`0.1.4+` 持久化 / 0.2.0 收口前交付。三创新点均已「形式化 + 实现 + 同装置对比数据」齐备，实验数据归档笔记仓 `gproject/中期/实验数据/`（0.1.1 主实验 + 0.1.2-0.1.3 统一实验批含钉板 README）；plan 已归档 `plan/archive/0.2.0/{0.1.2,0.1.3}/`。
+
+**`0.1.3` / 分层记忆组装（信任分层记忆 + 按需回灌）✅ 完成**（2026-08-31 关闭；#129 C1 压缩出口地址无损机械校验 / #130 tier-aware 组装器 + `agent.memory.method` 实验臂开关 / #131 分层检索回灌（λ₁ 确定性寻址 + λ₂ LLM 兑底 + 证据 raw 预览）/ #132 探针实验装置（`aruing probe` + `judge --probe` + `make probe-sweep`））。完成标志 10（探针真跑数）：批③ 36 会话两波全绿，长会话事实回忆 **ours 0.83 vs last-N 0.57 vs 平铺摘要 0.35**，久远证据链回溯（须回灌才能答的探针）**6/6 vs 2/6 vs 0/6**；判分出图 + ③层抽样（LLM 辅助评零 error、人工一致率 0.70）随批归档。完成标志 11（归档发布）：plan 归档 + v0.1.3 tag。
+
+**`0.1.2` / 主动取证决策（贝叶斯信念 + EIG + MSPRT）✅ 完成**（2026-08-31 关闭；#119 acquire 纯函数内核 / #122 决策输出结构 / #124 决策循环接线（`agent.acquire.method`，b1-serial 零改保真基线）/ #126 实验矩阵基建（b2-random / b4-cheapest 臂 + eval-sweep）/ #134 b3-react 强对照臂 + 决策轨迹插桩）。完成标志 7（真 LLM smoke）：试点批 chat ×2（含 ask 挂起-恢复）+ probe 冒烟全过；完成标志 8（实验数据）：批① 300 单元全绿——ours 完成率全预算 0.92–1.00 稳定、b3-react 随预算衰减至 0.42（选择器问用户挂起，合法出口非错误率）、决策轨迹全量落盘可复现。不独立发版随 v0.1.3 交付。
+
+**`0.1.1` / 代表性投影升级 + 评测基建：✅ 已发布**（2026-08-29，v0.1.1 tag）。三步交付：①加权贪心代表性投影（覆盖 + T² 目标、头尾锚预置、基数折算 CELF、knapsack 对照变体）与同二进制方法开关 `tools.projection.method`（fast/greedy/greedy-knapsack/full/head-tail/uniform/llm-rerank；C4 llm-rerank 为实验对照臂须显式配置且装配重排器，产品默认 fast 不变）（#112）；②评测基建（场景 `ground_truth` 四元组、`run --eval-json` 成功/挂起/失败三路径全记、`judge` 判分子命令 ①②层全自动 + ③层抽样、llm 用量按角色记账、参数化大表生成器固定种子可复现）（#114）；③`make bench` 机械主实验（矩阵 N×预算×根因位置×种子×方法遍历 → CSV + 矩阵快照 + 出图脚本；random/simplestat 消融臂 bench 侧注入不进 config）（#116）。core / agent / Orchestrator 全程零改（#15–#17）。map-reduce 两遍分片裁决后移 0.1.4（arc Step 4）；C4 / 下游诊断 LLM 端到端矩阵为可选实验，可与 0.1.2 冒烟同批授权跑。plan 已归档至笔记 `plan/archive/0.2.0/0.1.1/`。
 
 **`0.1.0` / 可追问的诊断助手：✅ 已发布**（2026-08-20，v0.1.0 tag）。版本文档已退役至笔记 `plan/archive/0.1.0/0.1.0.md`（版本归档总览）。发布管线（beta22）首次实战闭环：production 分支模型 + tag 驱动 GoReleaser 发版 + 一行安装（curl/irm）+ `aruing connect` 配置向导 + `aruing update` 自更新 + `go install github.com/Aruing/Aruing/cmd/aruing@v0.1.0` 渠道。
 
@@ -95,6 +101,18 @@
 | beta22-6 | aruing connect 配置向导 | ✅ | #102+#105：交互向导（隐藏输入/预读竞态修复）+ 连通测试 + SaveLLM 原子写（0600 临时文件 rename）+ 未知段保留 |
 | beta22-7 | aruing update 自更新 | ✅ | #103+#105：minio/selfupdate + stable 直链 302 取 tag + 版本方向防降级 + checksums 校验 + 解包替换 + npm 来源检测；rc1→0.1.0 真升级验收 |
 | beta18 | 工程效能与质量反射 | ✅ | #79/#81/#83/#84/#85 收尾/自检/纪律/反思 skills + cases 协议 + smoke-all；产品代码零改 |
+| 0.1.3-4 | 探针实验装置 | ✅ | #132；eval 侧探针装置（probe.yaml 规格 + 种子脚本生成器：问答/诊断 3–5 间隔 + 尾部探针；from_ledger 期望展开 kth_run_pods / kth_run_commands，k=-1 末次，判分侧纯①层包含）+ 函数注入 ProbeRunner 组装会话级记录（探针轮无 Run，与 RunRecord 并列；逐诊断内嵌完整 RunRecord）+ judge --probe（no_diagnosis / no_facts 不进分母单列）+ `aruing probe` 子命令（chat 同源 wiring，--dry-run 零 LLM）+ `make probe-sweep`（2 场景 × 3 方法 × 2 轮数 × 3 重复 = 36 会话，DRYRUN 干跑）+ 两场景 probe.yaml；agent 侧 `TowerResponder.LastMemoryStats` 只读观测（定位层 / λ₂ 调用 / 回灌条目数）；真跑数推迟统一实验批 |
+| 统一实验批 | 三批跑数 + ③层 | ✅ | 2026-08-31；批① 300 单元（4 道按场景）/ 批② 48 单元（4 投影臂）/ 批③ 36 会话两波；deepseek-v4-flash 同模型；断点续跑 + manifest + 预注册预期核对；③层 76 条 LLM 辅助评 + 一致率 0.70；数据归档笔记仓 gproject（含钉板 README：sanity 口径修正、断崖 2 点不可判、成本实账 ~67.5M、事故记录） |
+| 收尾装置修复 | eval/cmd/scripts | ✅ | #136 probe 记录 token 键规范化 + sweep 双键兼容；#137 reranker Label；#138 judge ③层装置（--sample-total/--rubric-llm/--agree）；pr-agent R1 采纳 1 条（flag 组合静默忽略→前置报错） |
+| 0.1.3-3 | 分层检索回灌 | ✅ | #131；λ₁ `locateByAddress` 确定性寻址每轮必跑（ID 族正则 + 会话级资源名词典 `buildEntityDict`：诊断账本证据 CommandView/Summary 机械抽 DNS-1123 token，flag/镜像/选择器噪声不进词典）∩ 单元地址集（消息 = 正文地址 + RunID；证据 = e_ 编号 + 词典实体），锚点类 recall = 1；λ₂ `llmLocateRange` 原样兑底（λ₁ 空 + 视图压缩丢细节 + 语义指涉时一次）；证据命中必回灌 raw 预览（`mode=evidence` 合成条目并入 `rehydrated_messages`，idx=-1、C1 保地址），消息命中仅视图丢细节时回灌原文；迭代口径 = 轮内单遍、预算不足预览跨轮收敛（定理 1 对齐）；退役 `ruleLocateRange`/`relevanceScore` 族；白话走查 60 轮 3 诊断入单测；core/session/tools/config 零改 |
+| 0.1.3-2 | tier-aware 组装器 + 记忆方法开关 | ✅ | #130；`internal/agent` 新增 `memory_cards.go`（R 层索引卡：`buildMemoryCards`，字段钳 c_max=200、不带 raw、地址不钳；κ₂ 接口预留占位）+ `assembler.go`（`assembleTieredView` ours：R 锁定 + W 最近 w 轮 LRU + C 中段压缩每段过 C1，预算 R 先取满；`assembleLastN`/`assembleFlatSummary` D1/D2 纯对照臂）；Respond 按 `agent.memory.method` 分派（config `Agent.Memory` method+last_n，env ARUING_AGENT_MEMORY_*，未知值启动报错；D1/D2 无卡片无回灌）；`buildPriorRunDetails` 退役（ours 下 prior_run_details 由带 raw 深材料改为卡片，深细节归回灌/evidence.read）；payload 契约与 prompt 零改 |
+| 0.1.3-1 | C1 机械校验（压缩出口地址无损） | ✅ | #129；`internal/agent` 新增 `addrcheck.go`：ID 族正则（Factory 全部前缀）抽取 + `ensureAddrCoverage` 缺号以 `[addr_refs]` 行补附（幂等；词典实体参数留面、无权威词典前传 nil）；接线全部有损变换出口——`truncateContentPreview` / `foldLine` / `forceCompactMark` 内联（签名不变，复用路径自动覆盖含 beta7 回灌窗）+ L2 checkpoint 落库正文机械兑底（不信任模型 run_ids，RunID 字段纳入比对源）；footer 计入既有预算估算；core / session / tools / config 零改 |
+| 0.1.2-1 | acquire 决策计算内核 | ✅ | #119（含 6 轮 pr-agent 评审：前 5 条真缺陷按根因修复——Action 封闭不变量 + Options 全参数域校验；第 6 轮 1.5 条采纳 1 条证伪钉板）； `internal/agent/acquire` 纯函数包（零接线零依赖）：对数域贝叶斯更新 + EIG（bit）+ argmax EIG/c + MSPRT 三出口 + 强度更新 ℓ = 2^(α·d·s)（对数线性，思考文档 §3.4 随走查修正）+ §7 数值算例复算单测（EIG=0.71 bit / 后验 0.902/0.988 / 两次动作收敛）；core/编排零改 |
+| 0.1.2-2 | Planner 决策输出结构与 prompt 改造 | ✅ | #122；`core.Hypothesis.Confidence`（[0,1] 单字段，语义随写入方：决策规划写先验 / 决策循环写后验；architecture 数据表同步）+ `agent.PlanDecision` / `ActionProposal` / `StrengthJudgement`（动作级容错：非法动作丢弃并计数，全坏才报错；问用户成本固定 10）+ `LLMDecisionPlanner`（prompt `planner-decision.md`，{{TOOL_SPECS}} 注入，计划级违规重试）+ `LLMVerifier.JudgeStrength`（prompt `strength.md`，逐假设恰好一条 (d,s)，Verify 原语义不动）+ agenttest `FakeDecisionPlanner` / `FakeVerifier.JudgeStrength`（关键词表回放）；prompt 示例契约测试；旧 planner.md / LLMPlanner / investigateLoop 零改（B1 保真）；零编排接线（步骤 3） |
+| 0.1.2-3 | 取证决策循环接线 | ✅ | #124；`acquireLoop`（ours 路径）与旧 `investigateLoop` 并行分派（`SetAcquireMethod`，config `agent.acquire.method` 空 = ours，b1-serial 零改保真）：argmax EIG/c 选择 → 动作映射 Task 全经 Dispatcher（#16）→ 机械归类优先（Summary 唯一命中）/ 零多命中走 JudgeStrength 强度更新 → MSPRT 三出口（supported → 正式 Verify + 后验回写 Confidence；refuted → abduction 重规划旧假设保留压低；insufficient → 平台/预算尽带缺口进 LastRunStats）→ 问用户统一建模（高成本动作，复用 investigate clarify 挂起，Resume 答复按结果类别归类更新，决策状态随 InvestigateState.Acquire 进快照）；config `agent.acquire` 段（method + 全套参数，env 覆盖）+ 装配层校验（未知 method / 缺角色启动报错）；顺手修存量 bug：LoadFile 此前漏拷 Tools.Projection（YAML 投影配置从未生效，beta20 TUI 同族）；agenttest 假实现端到端 + 三出口 + ask 挂起恢复 + 分派防御测试 |
+| 0.1.2-4 | 实验矩阵基建（选择策略实验臂 + eval record 扩展 + eval-sweep 驱动器） | ✅ | #126；`agent.acquire.method` 枚举扩 `b2-random`（种子随机：(seed,信念) 哈希纯函数可复现，种子 config `agent.acquire.seed`）/ `b4-cheapest`（argmin cost 并列取索引小）——两臂复用 acquireLoop 全部机制只换选择策略（修订步骤 3 裁决 1：实验须走 run 真路径，config 是唯一开关面）；`RunRecord` 增 acquire_method / acquire_max_rounds / acquire_seed / acquire_exit / acquire_gap（schema v1 向后兼容加字段；judge 结果透传 method/K/实测 rounds 供分组）；`scripts/eval-sweep.sh` + `make eval-sweep`（4 场景 × 4 方法 × 5 K × 3 重复 = 240 单元；DRYRUN 干跑核对、逐场景独立 kind 集群 KUBECONFIG、单元失败不中断全量报告、逐场景 judge 汇总 → CSV 联结观测量）；`bench-plot.py --mode acquire`（实测 rounds 预算曲线 + 名义 K 均值±std 汇总表）；真跑数与 smoke 待授权（完成标志 7/8） |
+| 试点装置修复 | judge ①层故障特征词 + sweep 脚本 bash3.2 兼容 | ✅ | 试点批（2026-08-31，授权①）发现：①层纯资源名匹配在 crashloop 类场景系统性低估（结论述故障机制不复述资源名，实测 1/10）——ground_truth 增可选 fault_signature，①hit = 资源名 OR 特征词任一命中，已落盘记录离线重判免重跑（试点 20 单元重判 18/20，完成单元 18/18）；两 sweep 脚本汇总行 `$skipped）` 变量紧跟全角字符在 macOS bash 3.2 + set -u 下误报 unbound（#133 同族），花括号修复；另记录：LLM 瞬态失败率 5%（重试耗尽型），裁决按纪律接受不剔除 |
+| 0.1.2-5 | B3 ReAct 对比臂 + 决策轨迹插桩（统一实验批前置） | ✅ | #134；`agent.acquire.method` 枚举扩 `b3-react`（ReAct 式 LLM 自由决策强对照：`LLMReActSelector` 每轮一次选择调用，prompt `react-select.md`，信息面与 ours 同构只少数学层（同菜单/成本/假设证据摘要，不喂矩阵与后验）；无贝叶斯/EIG/MSPRT，声明足够 → 正式 Verify 不回写 `Confidence`、预算尽/动作空间平台 → insufficient；复用 acquireLoop 骨架：池尽重规划（假设列表合并不重建信念）/ ask 挂起（答复进澄清累积不归类）/ 出口管线同构；装配层缺选择器启动报错）；决策轨迹插桩：`RunStats.DecisionTrace` 逐轮快照（ours/b2/b4 臂候选 EIG/c 得分 + 选择 + 信念前后，B3 臂选择与理由原文；`Selection.Scores` 只读观测列；非有限得分封顶）+ `RunRecord` 可选 `decision_trace`（schema v1 兼容，b1-serial 臂为空；eval 镜像结构经 cmd 桥接转换）+ probe 诊断内嵌记录同构携带；eval-sweep METHODS 加 b3-react（4×5×5×3=300 单元，DRYRUN 核对）；跑数随统一实验批 |
 | 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ✅ | #116；`eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化）；`internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
@@ -105,58 +123,16 @@
 
 ## 下一步
 
-**下一项**：`0.1.1` 步骤 4（map-reduce 两遍分片）——Pass 1 全局列频次扫描 → 分片独立投影（片内异常判定用全局基准）→ Reduce 归并；时间紧可裁决后移 0.1.4。其后收口：C4 / 下游诊断 LLM 端到端矩阵（维护者环境或授权跑，`run --eval-json` × 方法 × 3 重复）→ 完成标志全绿 → tag `v0.1.1` → 归档 `plan/archive/0.2.0/0.1.1/`。机械主实验数据已随步骤 3 产出（2400 单元 CSV + 位置 × 命中率图 + 消融表）。排序依据见笔记 `plan/version/0.2.0.md`。
+**下一项**：**待定**（0.1.2/0.1.3 关闭后候选窗口重开；v0.1.3 发布流程收尾中——production PR → tag → publish）。三创新点实验数据已齐备，维护者中期答辩后的排期为准。
 
-**0.2.0 候选**（0.1.1 之后；远景与排序依据见笔记 `plan/version/0.2.0.md`）：
+**候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）：
 
-1. **主动取证决策（0.1.2）**：调查循环内证据信息增益（EIG）/ 贝叶斯信念 / 序贯检验停止准则决策模块（新包，编排侧）
-2. **分层记忆组装（0.1.3）**：信任分层记忆 + 按需回灌（beta7 回灌雏形升格），长会话跨压缩追问不失忆
-3. **持久化 + 落盘页式（0.1.4+ / 收口前）**：Session / Message / RunLedger / Evidence / 挂起 Run 落盘 + 超 `MaxStdoutBytes` 落盘分页（arc 遗留缺口）
-4. **benchmark 升格（延后）**：kind 场景 harness → 可复现评测基准（0.1.1 评测基建之上扩场景）；产品完备（流式 / TUI L4 / npm 子包 / `/` 运行时命令）
+1. **持久化 + 落盘页式（0.1.4）**：Session / Message / RunLedger / Evidence / 挂起 Run 落盘，重启全量恢复；超 `MaxStdoutBytes` 落盘分页（arc《工具输出导航》遗留缺口）；+ map-reduce 两遍分片（arc Step 4，片内异常判定用 Pass 1 全局基准）
+2. **论文期实验扩点**：断崖曲线 100/200 轮（20/50 两点不可判的钉板结论）；synthesis 类探针短板的产品侧跟进
+3. **benchmark 升格**：kind 场景 harness → 可复现评测基准（0.1.1 评测基建之上扩场景）
+4. **产品完备（降位）**：npm 平台子包（beta22 遗留）/ 流式 / TUI L4 / `/` 运行时命令
 
-**版本节奏**（0.2.0 起）：废止 beta 里程碑；0.1.1 / 0.1.2 … 每个小版本 = 一个可用正式实现，完成即打 tag 发布；0.2.0 收口（含全部增量）；里程碑归档三层（`plan/archive/0.2.0/0.1.x/`）。
-
-**发布运维备忘**（0.1.0 起生效）：发布 = main 快照分支 → PR to production（15 项检查）→ merge commit 合并 → production 打 `v*` tag → draft Release 人工 publish；流程固化在 `CONTRIBUTING.md` Releasing 段。用户升级路径：`aruing update`（脚本安装）/ `npm update -g aruing`（npm 安装，待 npm 渠道上线）。
-
-**arc《工具输出导航》延后步骤**（详见 `plan/arc/tool-output-navigation.md`）：
-
-- Step **3a** 大表中段可读 → **`0.1.0-beta12`（done，#66）**
-- Step **3b** 证据导航 / 巨输出载波 → **`0.1.0-beta13`（done 主段，#67+#68）**；非表格输出的页式内存变体（行级兜底）→ **`0.1.0-beta16`（done，#77）**；logs 时间游标 → **`0.1.0-beta17`（done，#78）**；落盘页式（超 `MaxStdoutBytes` 留存）→ `0.1.4+`（随持久化）
-- Step 4 map-reduce → `0.1.1`（时间紧可后移；两遍分片，片内异常判定用 Pass 1 全局基准）
-- Step 5 子 agent 分治（0.2+，看余量再定，#15/#17）
-
-**已完成、勿再当候选**：配置文件化（beta8）、`waiting_user` / 澄清挂起（beta9）、场景 harness（beta10）、结构化工具输出 L0–L2（beta11）、L3 腿 A 大表中段可读（beta12）、L3 腿 B 普适证据导航（beta13）、非表格行级分页（beta16）、logs 时间游标（beta17）。
-
-已确认（beta5–9 交付后仍有效）：
-
-1. 入口 `Session.Turn`；**Tower** 每轮必经；诊断 = escalate → Orchestrator
-2. Run = 正式证据链；**进程内 `RunLedger` 为 Report/Evidence 读回权威源**
-3. 扩展能力/工具，禁止 core 意图枚举
-4. **`Task.RunID` 可空**：基线 tool 经同一 Dispatcher；空 RunID 不得当 Verdict 证据
-5. **CLI**：`aruing chat` + `run`；均须 LLM；进程内 MemoryStore + MemoryRunLedger
-6. **配置**：可选 YAML + env 覆盖 + `--config`；`config.Config` 为 wiring 唯一入口
-7. **#18**：Store / Ledger 进程内可全量；注入触顶用压缩，禁止 last-N
-8. **深解 / 回灌**：`prior_run_details`；`rehydrated_messages`
-9. **挂起 / 恢复**：`Suspension`（通用，`Stage` 留位）；`Outcome` 三态；`Resume` 重跑（非 checkpoint）；挂起态进程内、退出即丢；澄清次数不限（#18），触顶明确失败
-
-阶段计划与设计推理记录在笔记 `arui-note/aruing/plan/`（活跃）与 `plan/archive/`（已关）。
-
-已落地要点（beta2–13 摘要）：
-
-1. **#4a/#4b～#8 / R-1**：Policy + 可选 k8s；LLM 角色链；config env；Markdown CLI
-2. **beta3**：`investigateLoop` + 工具失败容错 + 报告证据明细
-3. **beta4**：Verifier 拿 Query、定位证据复用、集群侦察、反思 prompt、DiagnosticPolicy
-4. **beta5**：Session/Turn；Tower reply/call_tool/escalate；`aruing chat`；prior + L0–L2 + checkpoint
-5. **beta5-fix-1/2**：观察 Raw 预算；基线 recon + 证据纪律 + 触顶 escalate
-6. **beta6**：`RunLedger` + `prior_run_details` 深解
-7. **beta6-fix-1**：空响应/JSON 可恢复重试（#58）
-8. **beta7**：压缩后按范围回灌（#59）
-9. **beta8**：YAML 配置文件 + 路径链 + env 覆盖；CLI 去假闭环（#61/#62）
-10. **beta9**：`Suspension`/`Outcome` 通用挂起抽象；resolve clarify 端到端；`Execute`→`Outcome` + `Resume`/`FindSuspended`；`SuspendedRunner` + `session.Resume` + `ModeClarify`；Tower 入口挂起恢复优先
-11. **beta10**：`scenarios/` + `scripts/` + `lab-*` 可复现 kind harness；以 `chat` 验收为主
-12. **beta11**：`projectSummary` 表格投影（文本表 + JSON Table + fallback）；`Evidence.Summary` 从无用占位升为可导航 L0/L1/L2；`Raw` 不可变；narrow-first `ToolSpec.Description`
-13. **beta12**：大表 PCA 异常段 + 取值覆盖段（one-hot + PCA + Hotelling T²）；引入 gonum；core/agent 零改；arc Step 3a
-14. **beta13**：`internal/tools/summary`；`Slicer` + `evidence.read` + 轮内 `ObservationIndex`；k8s 表格 Slicer；`MaxStdoutBytes` 配置；arc Step 3b 主段
+**版本节奏**（0.2.0 起）：小版本递增，完成即打 tag；0.2.0 收口（含全部增量）；归档三层（`plan/archive/0.2.0/0.1.x/`）。
 
 ## 编排与多轮
 

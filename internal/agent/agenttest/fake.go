@@ -236,9 +236,12 @@ func (p *FakePlanner) Plan(ctx context.Context, state agent.PlanState) (agent.Pl
 }
 
 // 可复用的假判断器，始终返回构造时给定的结论模板
+// 可选挂强度判定脚本：挂 StrengthRules 后 JudgeStrength 按关键词表回放 (d,s)
 type FakeVerifier struct {
 	// 固定判断结果模板（按次克隆）
 	verdicts []core.Verdict
+	// 强度判定脚本表；空表时 JudgeStrength 对全部假设回放无关 (0, 0)
+	StrengthRules []StrengthRule
 }
 
 // 使用固定判断模板创建可重复使用的假判断器

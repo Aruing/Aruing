@@ -72,6 +72,36 @@ func TestJudgeRootCause(t *testing.T) {
 	}
 }
 
+// 判分①特征词面（试点装置修复）：模型结论常述故障机制不复述资源名，
+// 特征词与资源名任一命中即根因命中；空特征词列表退回纯资源名口径
+func TestJudgeRootCauseFaultSignature(t *testing.T) {
+	gt := GroundTruth{ResourceType: "deployment", ResourceName: "demo-api", Namespace: "demo",
+		FaultType: "bad-image-crashloop", FaultSignature: []string{"ImagePullBackOff", "this-tag-does-not-exist"}}
+
+	// 结论只述故障机制不点资源名（试点实测形态）：特征词命中
+	mech := RunRecord{RunID: "r1", RootCauses: []RootCauseEntry{
+		{Result: "supported", Reason: "容器处于 imagepullbackoff，镜像 nginx:this-tag-does-not-exist-aruing 拉取失败"},
+	}}
+	if res := JudgeRecord(mech, gt); !res.RootCauseHit {
+		t.Fatalf("特征词应命中（大小写归一）：%+v", res)
+	}
+
+	// 无关故障迷感词不命中：说了 crashloop 家族外的机制且无资源名
+	miss := RunRecord{RunID: "r2", RootCauses: []RootCauseEntry{
+		{Result: "supported", Reason: "节点磁盘压力导致驱逐"},
+	}}
+	if res := JudgeRecord(miss, gt); res.RootCauseHit {
+		t.Fatalf("无关机制不应命中：%+v", res)
+	}
+
+	// 空特征词列表 = 旧口径（纯资源名）：机制描述不命中
+	legacy := gt
+	legacy.FaultSignature = nil
+	if res := JudgeRecord(mech, legacy); res.RootCauseHit {
+		t.Fatalf("空特征词应退回纯资源名口径不命中：%+v", res)
+	}
+}
+
 // 判分②：引用编号必须存在于本次证据链
 func TestJudgeCitations(t *testing.T) {
 	rec := RunRecord{
@@ -163,5 +193,76 @@ func TestRenderRubricMarkdownSanitize(t *testing.T) {
 	}
 	if !utf8.ValidString(md) {
 		t.Fatal("渲染产物应是合法 UTF-8（截断不得切断多字节字符）")
+	}
+}
+
+// 全局池化抽样：多记录合并抽 n 行、固定种子可复现；n 超对数全取
+func TestSampleRubricTotal(t *testing.T) {
+	mk := func(id string) RunRecord {
+		return RunRecord{
+			RunID: id,
+			RootCauses: []RootCauseEntry{
+				{Result: "supported", Reason: id + " 的结论", EvidenceIDs: []string{"ev_" + id}},
+			},
+			ToolCalls: []ToolCallEntry{{EvidenceID: "ev_" + id, Tool: "k8s", Summary: "s-" + id}},
+		}
+	}
+	recs := []RunRecord{mk("a"), mk("b"), mk("c")}
+
+	first := SampleRubricTotal(recs, 2, 7)
+	if len(first) != 2 {
+		t.Fatalf("应抽 2 行，得 %d", len(first))
+	}
+	// 同种子可复现（行序与内容一致）
+	again := SampleRubricTotal(recs, 2, 7)
+	if len(again) != len(first) {
+		t.Fatalf("重复抽样行数不一致：%d vs %d", len(again), len(first))
+	}
+	for i := range first {
+		if first[i].EvidenceID != again[i].EvidenceID {
+			t.Fatalf("固定种子应可复现：row %d %s vs %s", i, first[i].EvidenceID, again[i].EvidenceID)
+		}
+	}
+	// n 超对数全取（3 记录各 1 对）
+	if all := SampleRubricTotal(recs, 10, 7); len(all) != 3 {
+		t.Fatalf("n 超对数应全取 3，得 %d", len(all))
+	}
+}
+
+// 一致率：逐行严格相等；error 行跳过分母；长度不等 / 未回填报错
+func TestAgreement(t *testing.T) {
+	a := []RubricRow{
+		{Verdict: VerdictSupports}, {Verdict: VerdictPartial},
+		{Verdict: VerdictNotSupports}, {Verdict: VerdictError},
+	}
+	b := []RubricRow{
+		{Verdict: " supports "}, {Verdict: VerdictNotSupports}, // 前者空白容忍后相等
+		{Verdict: VerdictNotSupports}, {Verdict: VerdictSupports}, // 对侧非 error 也跳过该行
+	}
+	agree, total, err := Agreement(a, b)
+	if err != nil {
+		t.Fatalf("agreement: %v", err)
+	}
+	if agree != 2 || total != 3 {
+		t.Fatalf("应 2/3（error 行跳过），得 %d/%d", agree, total)
+	}
+
+	if _, _, err := Agreement(a, a[:2]); err == nil {
+		t.Fatal("长度不等应报错")
+	}
+	if _, _, err := Agreement([]RubricRow{{Verdict: ""}}, []RubricRow{{Verdict: VerdictSupports}}); err == nil {
+		t.Fatal("未回填行应报错")
+	}
+}
+
+// 三值口径规范化：容忍首尾空白，其余报错
+func TestNormalizeVerdict(t *testing.T) {
+	for _, ok := range []string{"supports", "partial", "not_supports", "  supports\t"} {
+		if _, err := NormalizeVerdict(ok); err != nil {
+			t.Fatalf("%q 应合法：%v", ok, err)
+		}
+	}
+	if _, err := NormalizeVerdict("支持"); err == nil {
+		t.Fatal("非三值应报错")
 	}
 }

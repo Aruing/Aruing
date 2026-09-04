@@ -6,6 +6,10 @@
   2. budget-curves.png      —— 预算-命中率曲线（按表大小 N 分面）
   3. ablation.md            —— 消融对比表（greedy vs random / simplestat / knapsack）
 
+另两个模式：
+  --mode acquire —— 创新点一实验矩阵图（acquire-budget-curves.png + acquire-summary.md）
+  --mode probe   —— 创新点三探针实验图（probe-cliff.png 能力断崖曲线 + probe-summary.md）
+
 只读 CSV（--csv，默认 bench/results/projection-bench.csv），不重算判分。
 依赖 matplotlib（本地 venv 跑，不进 CI）：
   python3 -m venv .venv && .venv/bin/pip install matplotlib && .venv/bin/python scripts/bench-plot.py
@@ -24,6 +28,10 @@ import matplotlib.pyplot as plt
 # 主对比方法展示序（消融臂不进主图，另出消融表）
 MAIN_METHODS = ["full", "greedy", "fast", "greedy-knapsack", "head-tail", "uniform"]
 ABLATION_METHODS = ["greedy", "random", "simplestat", "greedy-knapsack"]
+# 创新点一（acquire 模式）：取证决策实验臂展示序，ours 置首突出主方法
+ACQUIRE_METHODS = ["ours", "b1-serial", "b2-random", "b4-cheapest", "b3-react"]
+# 创新点三（probe 模式）：记忆组装实验臂展示序（B3 落地后 acquire 序另有 b3-react）
+PROBE_METHODS = ["ours", "d1-last-n", "d2-flat-summary"]
 
 
 def load_rows(path):
@@ -115,16 +123,161 @@ def write_ablation(rows, out_dir):
     return path
 
 
+def plot_acquire_budget(rows, out_dir):
+    """创新点一：预算-准确率曲线（x = 实测 rounds，按场景分面，series = 方法）。"""
+    scenarios = sorted({r["scenario"] for r in rows})
+    fig, axes = plt.subplots(1, len(scenarios), figsize=(5 * len(scenarios), 4), squeeze=False)
+    for ax, scn in zip(axes[0], scenarios):
+        sub = [r for r in rows if r["scenario"] == scn]
+        for m in ACQUIRE_METHODS:
+            pts = defaultdict(lambda: [0, 0])
+            for r in sub:
+                if r["method"] != m:
+                    continue
+                x = int(r["rounds"])
+                pts[x][0] += int(r["root_cause_hit"] in (True, 1, "1", "true"))
+                pts[x][1] += 1
+            xs = sorted(pts)
+            if not xs:
+                continue
+            ax.plot(xs, [pts[x][0] / pts[x][1] for x in xs], marker="o", label=m)
+        ax.set_title(scn)
+        ax.set_xlabel("rounds (measured)")
+        ax.set_ylabel("hit rate")
+        ax.set_ylim(-0.05, 1.05)
+        ax.legend(fontsize=8)
+    fig.suptitle("Root-cause hit rate vs investigation budget")
+    fig.tight_layout()
+    path = os.path.join(out_dir, "acquire-budget-curves.png")
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
+def write_acquire_summary(rows, out_dir):
+    """创新点一汇总表：方法 × 名义 K 的命中率均值±std（初版统计口径）。"""
+    import statistics
+
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r["method"], int(r["k"]))].append(int(r["root_cause_hit"] in (True, 1, "1", "true")))
+    ks = sorted({k for _, k in groups})
+    lines = ["# Acquire sweep summary (mean±std of hit, by nominal K)", "",
+             "| method | " + " | ".join(f"K={k}" for k in ks) + " |",
+             "| --- | " + " | ".join("---" for _ in ks) + " |"]
+    for m in ACQUIRE_METHODS:
+        cells = []
+        for k in ks:
+            hits = groups.get((m, k), [])
+            if not hits:
+                cells.append("-")
+            elif len(hits) < 2:
+                cells.append(f"{hits[0]:.3f}")
+            else:
+                cells.append(f"{statistics.mean(hits):.3f}±{statistics.stdev(hits):.3f}")
+        lines.append(f"| {m} | " + " | ".join(cells) + " |")
+    path = os.path.join(out_dir, "acquire-summary.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
+def _probe_rate(r):
+    """探针成功率转 float；judge 对空分母可能落空串/None，返回 nan。"""
+    try:
+        return float(r.get("success_rate", ""))
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def plot_probe_cliff(rows, out_dir):
+    """杀手图④：能力断崖曲线（x = 会话轮数，y = 探针成功率，series = 记忆方法）。"""
+    import statistics
+
+    lens = sorted({int(float(r["rounds"])) for r in rows})
+    fig, ax = plt.subplots(figsize=(8, 5))
+    for m in PROBE_METHODS:
+        by_len = defaultdict(list)
+        for r in rows:
+            if r["method"] != m:
+                continue
+            v = _probe_rate(r)
+            if v == v:  # 过滤 nan
+                by_len[int(float(r["rounds"]))].append(v)
+        xs = [n for n in lens if by_len.get(n)]
+        if not xs:
+            continue
+        ys = [statistics.mean(by_len[n]) for n in xs]
+        es = [statistics.stdev(by_len[n]) if len(by_len[n]) > 1 else 0.0 for n in xs]
+        ax.errorbar(xs, ys, yerr=es, marker="o", capsize=4, label=m)
+    ax.set_xlabel("session rounds")
+    ax.set_ylabel("probe success rate")
+    ax.set_ylim(-0.05, 1.05)
+    ax.set_xticks(lens)
+    ax.set_title("Probe success rate vs session length")
+    ax.legend()
+    fig.tight_layout()
+    path = os.path.join(out_dir, "probe-cliff.png")
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
+def write_probe_summary(rows, out_dir):
+    """创新点三汇总表：方法 × 轮数（成功率均值±std / 探针分母 / 诊断完成 / 单会话 token）。"""
+    import statistics
+
+    groups = defaultdict(list)
+    for r in rows:
+        groups[(r["method"], int(float(r["rounds"])))].append(r)
+    lens = sorted({n for _, n in groups})
+    lines = ["# Probe sweep summary", "",
+             "| method | rounds | success rate | probes scored/total | diagnose completed | tokens/session |",
+             "| --- | --- | --- | --- | --- | --- |"]
+    for m in PROBE_METHODS:
+        for n in lens:
+            sub = groups.get((m, n), [])
+            if not sub:
+                continue
+            rates = [v for v in (_probe_rate(r) for r in sub) if v == v]
+            if not rates:
+                cell = "-"
+            elif len(rates) < 2:
+                cell = f"{rates[0]:.3f}"
+            else:
+                cell = f"{statistics.mean(rates):.3f}±{statistics.stdev(rates):.3f}"
+            scored = sum(int(r.get("probe_scored", 0) or 0) for r in sub)
+            total = sum(int(r.get("probe_total", 0) or 0) for r in sub)
+            dcomp = sum(int(r.get("diagnose_completed", 0) or 0) for r in sub)
+            dtot = sum(int(r.get("diagnose_total", 0) or 0) for r in sub)
+            toks = sum(int(r.get("tokens_total", 0) or 0) for r in sub) // len(sub)
+            lines.append(f"| {m} | {n} | {cell} | {scored}/{total} | {dcomp}/{dtot} | {toks} |")
+    path = os.path.join(out_dir, "probe-summary.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--csv", default=os.path.join("bench", "results", "projection-bench.csv"))
     ap.add_argument("--out-dir", default=os.path.join("bench", "results", "plots"))
+    ap.add_argument("--mode", choices=["projection", "acquire", "probe"], default="projection",
+                    help="projection = 0.1.1 机械 bench 图；acquire = 0.1.2 实验矩阵图；probe = 0.1.3 探针断崖曲线")
     args = ap.parse_args()
 
     rows = load_rows(args.csv)
     if not rows:
         raise SystemExit(f"no rows in {args.csv}")
     os.makedirs(args.out_dir, exist_ok=True)
+    if args.mode == "acquire":
+        for p in (plot_acquire_budget(rows, args.out_dir), write_acquire_summary(rows, args.out_dir)):
+            print(p)
+        return
+    if args.mode == "probe":
+        for p in (plot_probe_cliff(rows, args.out_dir), write_probe_summary(rows, args.out_dir)):
+            print(p)
+        return
     for p in (plot_position(rows, args.out_dir), plot_budget(rows, args.out_dir), write_ablation(rows, args.out_dir)):
         print(p)
 

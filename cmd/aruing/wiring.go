@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/agent/acquire"
 	"github.com/Aruing/Aruing/internal/config"
 	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/llm"
@@ -42,6 +43,14 @@ type orchestratorRoles struct {
 	}
 	reporter interface {
 		Report(context.Context, core.Run, []core.Verdict, []core.Evidence) (core.Report, error)
+	}
+	// 决策规划器（ours 取证决策循环必需）；产品路径始终构建
+	decision interface {
+		PlanDecision(context.Context, agent.PlanState) (agent.PlanDecision, error)
+	}
+	// B3 ReAct 选择器（b3-react 实验臂必需）；产品路径始终构建
+	react interface {
+		SelectAction(context.Context, agent.ReActSelectRequest) (agent.ReActChoice, error)
 	}
 }
 
@@ -165,14 +174,42 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 		factory,
 	)
 	configureOrchestrator(orch, toolsGraph.reconEnabled, progress)
+	// 取证决策方法与参数注入（config 空 = ours）；未知方法启动即错
+	if err := configureAcquire(orch, cfg, roles); err != nil {
+		return nil, nil, err
+	}
 	// 具体客户端实现用量记账；按可选接口断言，适配器未实现时安静降级
 	tracker, _ := client.(llm.UsageTracker)
 	return orch, tracker, nil
 }
 
+// 会话栈全量句柄：探针实验装置等评测侧消费（读账本 / 记忆观测量 / 编排统计）
+// chat 路径只用 Service，probe 路径要全部句柄
+type sessionStack struct {
+	// 会话服务（Turn 入口）
+	service *session.Service
+	// 基线塔（LastMemoryStats 探针观测量）
+	tower *agent.TowerResponder
+	// 编排器（LastRunStats 逐诊断统计）
+	orch *agent.Orchestrator
+	// 诊断账本（内嵌 RunRecord 组装与 from_ledger 展开的权威源）
+	ledger session.RunLedger
+	// token 用量跟踪器（适配器未实现时为 nil）
+	tracker llm.UsageTracker
+}
+
 // 组装多轮对话会话栈：内存存储、诊断账本与基线塔
 // 无大模型配置时硬失败
 func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Writer) (*session.Service, error) {
+	st, err := newSessionStackFull(factory, cfg, progress)
+	if err != nil {
+		return nil, err
+	}
+	return st.service, nil
+}
+
+// 组装会话栈全量句柄（newSessionStack 的全量形态）
+func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.Writer) (*sessionStack, error) {
 	if err := config.ValidateLLM(cfg); err != nil {
 		return nil, err
 	}
@@ -204,6 +241,9 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 		factory,
 	)
 	configureOrchestrator(orch, toolsGraph.reconEnabled, progress)
+	if acqErr := configureAcquire(orch, cfg, roles); acqErr != nil {
+		return nil, acqErr
+	}
 
 	ledger := store.NewMemoryRunLedger()
 	tower, err := agent.NewTowerResponder(
@@ -218,11 +258,29 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 	if err != nil {
 		return nil, fmt.Errorf("build tower: %w", err)
 	}
+	if memErr := configureMemory(tower, cfg); memErr != nil {
+		return nil, memErr
+	}
 	if cfg.Debug {
 		tower.SetProgress(progress)
 	}
+	// tower 用角色标签客户端包装，token 记账归口到同一底层客户端适配器
+	tracker, _ := client.(llm.UsageTracker)
+	return &sessionStack{
+		service: session.NewService(store.NewMemoryStore(), factory, tower),
+		tower:   tower,
+		orch:    orch,
+		ledger:  ledger,
+		tracker: tracker,
+	}, nil
+}
 
-	return session.NewService(store.NewMemoryStore(), factory, tower), nil
+// 配置记忆组装：方法解析失败启动即错（不静默回落）；实验臂须显式配置，产品默认 ours
+func configureMemory(tower *agent.TowerResponder, cfg config.Config) error {
+	if err := tower.SetMemoryMethod(cfg.Agent.Memory.Method, cfg.Agent.Memory.LastN); err != nil {
+		return fmt.Errorf("agent.memory.method: %w", err)
+	}
+	return nil
 }
 
 // 用大模型客户端组装五角色；工具规格与调度器同源
@@ -248,12 +306,24 @@ func buildLLMRoles(client llm.Client, factory *core.Factory, specs []tools.ToolS
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm reporter: %w", err)
 	}
+	// 决策规划器（ours 取证决策循环）：与规划器同源工具规格，标签独立记账
+	decision, err := agent.NewLLMDecisionPlanner(llm.NewLabelingClient(client, "decision-planner"), factory, specs)
+	if err != nil {
+		return orchestratorRoles{}, fmt.Errorf("build llm decision planner: %w", err)
+	}
+	// B3 ReAct 选择器（b3-react 实验臂）：标签独立记账，未配置 b3-react 时不被调用
+	react, err := agent.NewLLMReActSelector(llm.NewLabelingClient(client, "react-select"))
+	if err != nil {
+		return orchestratorRoles{}, fmt.Errorf("build llm react selector: %w", err)
+	}
 	return orchestratorRoles{
 		parser:   parser,
 		resolver: resolver,
 		planner:  planner,
 		verifier: verifier,
 		reporter: reporter,
+		decision: decision,
+		react:    react,
 	}, nil
 }
 
@@ -262,4 +332,43 @@ func configureOrchestrator(orch *agent.Orchestrator, reconEnabled bool, progress
 	orch.SetInvestigateMaxRounds(productionInvestigateMaxRounds)
 	orch.SetReconEnabled(reconEnabled)
 	orch.SetProgress(progress)
+}
+
+// 配置取证决策循环：方法解析失败启动即错（不静默回落）；决策循环路径（ours 与
+// b2-random / b4-cheapest 实验臂）注入决策规划器与参数；B1 路径不读这些角色
+// 验证器已实现强度判定（LLM 验证器与假实现均实现）；缺角色防御留给编排运行期兑底
+func configureAcquire(orch *agent.Orchestrator, cfg config.Config, roles orchestratorRoles) error {
+	method, err := agent.ParseAcquireMethod(cfg.Agent.Acquire.Method)
+	if err != nil {
+		return fmt.Errorf("agent.acquire.method: %w", err)
+	}
+	if method != agent.AcquireMethodB1Serial && roles.decision == nil {
+		return fmt.Errorf("agent.acquire.method: %s requires a decision planner", method)
+	}
+	// b3-react 另需选择器（冻结裁决 4：缺角色启动报错，先例 0.1.2-3）
+	if method == agent.AcquireMethodB3React && roles.react == nil {
+		return fmt.Errorf("agent.acquire.method: b3-react requires an LLM ReAct selector")
+	}
+	orch.SetAcquireMethod(method)
+	// 轮数预算显式配置时覆盖生产默认（两循环同口径，实验扫预算用）
+	if cfg.Agent.Acquire.MaxRounds > 0 {
+		orch.SetInvestigateMaxRounds(cfg.Agent.Acquire.MaxRounds)
+	}
+	// 种子仅 b2-random 实验臂消费；无条件透传（选不中选择策略是循环内的事）
+	orch.SetAcquireSeed(cfg.Agent.Acquire.Seed)
+	orch.SetAcquireOptions(acquire.Options{
+		Alpha:     cfg.Agent.Acquire.Alpha,
+		PStar:     cfg.Agent.Acquire.PStar,
+		A:         cfg.Agent.Acquire.A,
+		Tau:       cfg.Agent.Acquire.Tau,
+		Delta:     cfg.Agent.Acquire.Delta,
+		MassFloor: cfg.Agent.Acquire.MassFloor,
+	})
+	if roles.decision != nil {
+		orch.SetDecisionPlanner(roles.decision)
+	}
+	if roles.react != nil {
+		orch.SetReActSelector(roles.react)
+	}
+	return nil
 }

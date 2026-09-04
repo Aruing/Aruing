@@ -36,7 +36,7 @@ func NewReranker(client llm.Client) summary.RerankFunc {
 			fmt.Fprintf(&b, "#%d  %s\n", i, strings.Join(r, "  "))
 		}
 		var out rerankOutput
-		if err := client.GenerateJSON(context.Background(), llm.Request{System: rerankPrompt, User: b.String()}, &out); err != nil {
+		if err := client.GenerateJSON(context.Background(), llm.Request{Label: "rerank", System: rerankPrompt, User: b.String()}, &out); err != nil {
 			return nil, fmt.Errorf("rerank llm: %w", err)
 		}
 		if len(out.Rows) == 0 {

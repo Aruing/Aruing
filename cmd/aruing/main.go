@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Aruing/Aruing/internal/agent"
 	"github.com/Aruing/Aruing/internal/config"
 	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/eval"
@@ -50,6 +51,7 @@ Commands:
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
   judge            Score eval records against scenario ground truth
   bench            Run the mechanical projection benchmark (no LLM, no cluster)
+  probe            Drive one scripted long session with tail probes (experiment rig)
 
 Configuration (file then env, env wins):
   --config PATH            config YAML (or ARUING_CONFIG)
@@ -106,6 +108,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runJudge(args[1:], stdout, stderr)
 	case "bench":
 		return runBench(args[1:], stdout, stderr)
+	case "probe":
+		return runProbe(args[1:], stdout, stderr)
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s", args[0], usage)
 	}
@@ -201,10 +205,25 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		if tracker != nil {
 			tokens = tracker.UsageSnapshot()
 		}
+		stats := orchestrator.LastRunStats()
+		// 规范化方法名入记录（空串与 "ours" 归一，实验分组无歧义）；
+		// 解析在此不会失败（newOrchestrator 已在启动时校验过同一配置）
+		method := cfg.Agent.Acquire.Method
+		if m, perr := agent.ParseAcquireMethod(method); perr == nil {
+			method = m.String()
+		}
 		rec := eval.BuildRunRecord(
 			run.ID, question, cfg.LLM.Model, cfg.Tools.Projection.Method,
+			eval.AcquireRecordInfo{
+				Method:    method,
+				MaxRounds: cfg.Agent.Acquire.MaxRounds,
+				Seed:      cfg.Agent.Acquire.Seed,
+				Exit:      stats.AcquireExit,
+				Gap:       stats.AcquireGap,
+				Trace:     convertDecisionTrace(stats.DecisionTrace),
+			},
 			completed, errMsg, report, evidence,
-			tokens, orchestrator.LastRunStats().InvestigateRounds, time.Since(start),
+			tokens, stats.InvestigateRounds, time.Since(start),
 		)
 		if werr := writeEvalRecord(*evalJSON, rec); werr != nil {
 			fmt.Fprintf(stderr, "写评测记录失败 %s：%v\n", *evalJSON, werr)
@@ -249,6 +268,29 @@ func writeEvalRecord(path string, rec eval.RunRecord) error {
 		return fmt.Errorf("marshal eval record: %w", err)
 	}
 	return os.WriteFile(path, append(raw, '\n'), 0o644)
+}
+
+// 决策轨迹桥接（agent 只读观测 → eval 记录侧镜像结构）：eval 不 import agent，
+// 与 DiagnoseStats / AcquireRecordInfo 同先例；得分封顶已在编排侧完成，此处纯拷贝
+func convertDecisionTrace(in []agent.DecisionTraceEntry) []eval.DecisionTraceEntry {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]eval.DecisionTraceEntry, len(in))
+	for i, e := range in {
+		out[i] = eval.DecisionTraceEntry{
+			Round:        e.Round,
+			Chosen:       e.Chosen,
+			BeliefBefore: append([]float64(nil), e.BeliefBefore...),
+			BeliefAfter:  append([]float64(nil), e.BeliefAfter...),
+			Reason:       e.Reason,
+			Sufficient:   e.Sufficient,
+		}
+		for _, s := range e.Scores {
+			out[i].Scores = append(out[i].Scores, eval.ActionScore{Name: s.Name, Score: s.Score})
+		}
+	}
+	return out
 }
 
 // 多轮入口：会话轮次加基线塔；无位置参数进入交互式 TUI

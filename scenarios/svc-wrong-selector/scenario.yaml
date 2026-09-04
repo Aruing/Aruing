@@ -8,3 +8,4 @@ ground_truth:
   resource_name: demo-web
   namespace: demo
   fault_type: selector-mismatch
+  fault_signature: [demo-web-typo, selector, 选择器]

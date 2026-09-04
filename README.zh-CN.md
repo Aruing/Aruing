@@ -24,7 +24,7 @@
 
 ## 当前阶段
 
-**`0.1.0` —— 可用的诊断助手。** 真集群 + 真 LLM 端到端可用：交互式终端对话（行内 / 全屏双模式）、主题定制、证据导航（含时间窗切片）、歧义提问的澄清挂起与恢复。分发经 GitHub Releases：一行安装（curl / irm）、`aruing connect` 首次配置大模型、`aruing update` 升级、`go install` 源码 tag 渠道。
+**`0.1.3` —— 证据信息增益驱动的取证决策 + 分层记忆。** 调查阶段由取证决策循环驱动（贝叶斯信念、EIG 排序动作选择、MSPRT 序贯停止——`agent.acquire.method` 可在同一二进制内切 ReAct / 随机 / 最低成本 / 串行基线臂），长会话采用信任分层记忆视图：诊断与证据索引卡常驻可寻址、近期轮次原文保留、中段历史预算内压缩、分层检索按需回灌证据 raw 预览（`agent.memory.method` 可切 last-N / 平铺摘要基线臂）。评测栈新增探针装置（`aruing probe`，20/50 轮脚本化长会话 + 尾部探针）、③层全池化抽样 + LLM 辅助评 + 人工一致率（`judge --sample-total/--rubric-llm/--agree`）与矩阵驱动器（`make eval-sweep` / `make probe-sweep`，含断点续跑与 manifest）。0.1.0–0.1.1 的能力全部保留：真集群 + 真 LLM 诊断、交互式终端对话、证据导航、澄清挂起与恢复、代表性投影、一行安装与自更新。
 
 尚未构建（计划 0.2+）：npm 分发、磁盘持久化（会话进程内、退出即丢）、流式响应、带审批的写工具、多集群、Web UI。路线图见 [`docs/project-state.md`](docs/project-state.md)。
 

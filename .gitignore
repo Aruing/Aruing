@@ -47,3 +47,12 @@ go.work.sum
 # macOS noise
 .DS_Store
 .benchvenv/
+
+# python 出图脚本缓存
+__pycache__/
+
+# 本地实验出图 venv（bench-plot.py matplotlib，见 scripts/bench-plot.py 头注释）
+.venv/
+
+# 实验数据不进公开仓（归档到笔记仓 gproject/中期/实验数据/）
+eval/results/
