@@ -28,6 +28,8 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 Not yet built (planned 0.2+): npm distribution, disk persistence (sessions are in-memory and lost on exit), streaming responses, write tools with approval, multi-cluster, Web UI. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
+Shipped in release [`v0.1.3`](https://github.com/Aruing/Aruing/releases/tag/v0.1.3) (2026-09-05; notes cover the 0.1.2 acquire-loop increments too).
+
 ⚠️ Only simple trials / testing are supported right now — not production-ready.
 
 ## Core data flow
