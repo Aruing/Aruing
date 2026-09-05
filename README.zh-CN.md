@@ -28,6 +28,8 @@
 
 尚未构建（计划 0.2+）：npm 分发、磁盘持久化（会话进程内、退出即丢）、流式响应、带审批的写工具、多集群、Web UI。路线图见 [`docs/project-state.md`](docs/project-state.md)。
 
+已随 [`v0.1.3`](https://github.com/Aruing/Aruing/releases/tag/v0.1.3) 发布（2026-09-05；release notes 含 0.1.2 取证决策全部增量）。
+
 ⚠️ 当前仅支持简单试用 / 测试——未达生产可用。
 
 ## 核心数据流
