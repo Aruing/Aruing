@@ -281,8 +281,11 @@ func ExpandExpectations(
 	}
 	groups := make([][]string, 0, len(q.Expect))
 	for _, g := range q.Expect {
-		if g.Literal != "" {
-			groups = append(groups, []string{g.Literal})
+		// 与规格校验（hasLiteral）同口径 Trim（pr-agent R1 采纳）：字面量首尾空白
+		// 在 Contains 判分下永不命中（假阴性）；Trim 后为空的条目必带 from_ledger
+		// （校验期 exactly-one 已拦），落到下方账本展开
+		if lit := strings.TrimSpace(g.Literal); lit != "" {
+			groups = append(groups, []string{lit})
 			continue
 		}
 		k := g.FromLedger.K
