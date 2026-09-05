@@ -226,6 +226,22 @@ func TestExpandExpectations(t *testing.T) {
 	}
 }
 
+// 字面量首尾空白在展开侧与规格校验同口径 Trim（pr-agent R1 采纳）：
+// Contains 判分下未 Trim 的带空白字面量永不命中（假阴性）
+func TestExpandExpectationsTrimsLiteral(t *testing.T) {
+	spec := ProbeSpec{Probes: []ProbeQuestion{{
+		ID: "p1", Question: "q",
+		Expect: []ExpectGroup{{Literal: "  demo-api  "}},
+	}}}
+	groups, status, err := ExpandExpectations(spec.Probes, "p1", nil, "")
+	if err != nil || status != ExpectExpanded {
+		t.Fatalf("expand: status=%s err=%v", status, err)
+	}
+	if len(groups) != 1 || groups[0][0] != "demo-api" {
+		t.Fatalf("groups = %v, want [[demo-api]]", groups)
+	}
+}
+
 // 命令类规则展开：第 k 次诊断全部命令视图各为一候选串
 func TestExpandExpectationsCommands(t *testing.T) {
 	spec := ProbeSpec{

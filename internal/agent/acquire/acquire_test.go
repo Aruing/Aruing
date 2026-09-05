@@ -582,7 +582,10 @@ func TestExtremeAlphaMassOverflow(t *testing.T) {
 }
 
 // 亚正常成本（pr-agent 六轮验证）：近零成本按成本归一语义支配全部候选、
-// 并列时确定性取先者、得分恒不为 NaN——设计行为钉板
+// 并列时确定性取先者、得分恒不为 NaN——设计行为钉板。
+// NaN 不允许（NaN>x 恒 false 破坏支配级比较）；+Inf 允许（EIG/亚正常成本可
+// 上溢但不影响比较语义，轨迹出口 actionScores 对非有限得分封顶）——断言只拒
+// NaN 的口径依据（pr-agent R1 证伪 IsInf 断言）
 func TestSubnormalCostSemantics(t *testing.T) {
 	b, _ := NewBelief([]float64{0.4, 0.4, 0.2})
 	good := mustAction(t, "good", []string{"x", "y"}, [][]float64{{.99, .01}, {.01, .99}, {.5, .5}}, 1)
