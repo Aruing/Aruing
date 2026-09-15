@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/Aruing/Aruing/internal/agent"
@@ -198,7 +199,7 @@ type sessionStack struct {
 	tracker llm.UsageTracker
 }
 
-// 组装多轮对话会话栈：内存存储、诊断账本与基线塔
+// 组装多轮对话会话栈：存储按数据目录分派（产品路径磁盘默认）、诊断账本与基线塔
 // 无大模型配置时硬失败
 func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Writer) (*session.Service, error) {
 	st, err := newSessionStackFull(factory, cfg, progress)
@@ -206,6 +207,23 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 		return nil, err
 	}
 	return st.service, nil
+}
+
+// 按数据目录分派存储实现：空 → 内存（仅测试与编程式装配），非空 → 磁盘。
+// 磁盘实现打开即建目录（0700）并扫索引；产品路径的 DataDir 由加载链填默认，永不空
+func openStores(ctx context.Context, dataDir string) (session.Store, session.RunLedger, error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return store.NewMemoryStore(), store.NewMemoryRunLedger(), nil
+	}
+	st, err := store.NewDiskStore(ctx, dataDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	ledger, err := store.NewDiskRunLedger(ctx, dataDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return st, ledger, nil
 }
 
 // 组装会话栈全量句柄（newSessionStack 的全量形态）
@@ -245,7 +263,10 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 		return nil, acqErr
 	}
 
-	ledger := store.NewMemoryRunLedger()
+	st, ledger, err := openStores(context.Background(), cfg.Storage.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("open stores %s: %w", cfg.Storage.DataDir, err)
+	}
 	tower, err := agent.NewTowerResponder(
 		llm.NewLabelingClient(client, "tower"),
 		factory,
@@ -267,7 +288,7 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 	// tower 用角色标签客户端包装，token 记账归口到同一底层客户端适配器
 	tracker, _ := client.(llm.UsageTracker)
 	return &sessionStack{
-		service: session.NewService(store.NewMemoryStore(), factory, tower),
+		service: session.NewService(st, factory, tower),
 		tower:   tower,
 		orch:    orch,
 		ledger:  ledger,

@@ -1,10 +1,10 @@
 # 项目当前状态
 
-> 最后更新：2026-09-05（**v0.1.3 已发布**——收尾 docs #139/#140 → production PR #141 → tag → publish 全链走完，release notes 含 0.1.2 全部增量；#142 pr-agent #141 评审跟进修复。实验数据与钉板记录在笔记仓 `gproject/中期/实验数据/0.1.2-0.1.3-统一批/`，遗留问题见笔记仓 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）
+> 最后更新：2026-09-15（0.1.4 persistence 步骤 1 实现中：磁盘存储地基 + run 统一进会话）；前值 2026-09-05（**v0.1.3 已发布**——收尾 docs #139/#140 → production PR #141 → tag → publish 全链走完，release notes 含 0.1.2 全部增量；#142 pr-agent #141 评审跟进修复。实验数据与钉板记录在笔记仓 `gproject/中期/实验数据/0.1.2-0.1.3-统一批/`，遗留问题见笔记仓 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）
 
 ## 当前阶段
 
-**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 三创新点版本全部交付**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）+ 毕业论文三创新点载体（动机与排序依据在笔记仓）。**版本节奏**：小版本递增，每个 0.1.x = 一个可用正式实现：`0.1.1`（创新点二·代表性投影）✅ v0.1.1 已发布；`0.1.2`（创新点一·主动取证决策）✅ done 2026-08-31；`0.1.3`（创新点三·分层记忆）✅ done 2026-08-31，随 **v0.1.3 单 tag** 一并发布（0.1.2 不独立发版，发布裁决 2026-08-30）；`0.1.4`（产品完备批：持久化 + 流式 + map-reduce）🚧 已立项 2026-09-10（plan 见笔记 `plan/0.1.4/`，未开工）。三创新点均已「形式化 + 实现 + 同装置对比数据」齐备，实验数据归档笔记仓 `gproject/中期/实验数据/`（0.1.1 主实验 + 0.1.2-0.1.3 统一实验批含钉板 README）；plan 已归档 `plan/archive/0.2.0/{0.1.2,0.1.3}/`。
+**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 三创新点版本全部交付**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）+ 毕业论文三创新点载体（动机与排序依据在笔记仓）。**版本节奏**：小版本递增，每个 0.1.x = 一个可用正式实现：`0.1.1`（创新点二·代表性投影）✅ v0.1.1 已发布；`0.1.2`（创新点一·主动取证决策）✅ done 2026-08-31；`0.1.3`（创新点三·分层记忆）✅ done 2026-08-31，随 **v0.1.3 单 tag** 一并发布（0.1.2 不独立发版，发布裁决 2026-08-30）；`0.1.4`（产品完备批：持久化 + 流式 + map-reduce）🚧 进行中：persistence 步骤 1（磁盘存储地基）已实现待评审（2026-09-10 立项，plan 见笔记 `plan/0.1.4/`）。三创新点均已「形式化 + 实现 + 同装置对比数据」齐备，实验数据归档笔记仓 `gproject/中期/实验数据/`（0.1.1 主实验 + 0.1.2-0.1.3 统一实验批含钉板 README）；plan 已归档 `plan/archive/0.2.0/{0.1.2,0.1.3}/`。
 
 **`0.1.3` / 分层记忆组装（信任分层记忆 + 按需回灌）✅ 完成**（2026-08-31 关闭；#129 C1 压缩出口地址无损机械校验 / #130 tier-aware 组装器 + `agent.memory.method` 实验臂开关 / #131 分层检索回灌（λ₁ 确定性寻址 + λ₂ LLM 兑底 + 证据 raw 预览）/ #132 探针实验装置（`aruing probe` + `judge --probe` + `make probe-sweep`））。完成标志 10（探针真跑数）：批③ 36 会话两波全绿，长会话事实回忆 **ours 0.83 vs last-N 0.57 vs 平铺摘要 0.35**，久远证据链回溯（须回灌才能答的探针）**6/6 vs 2/6 vs 0/6**；判分出图 + ③层抽样（LLM 辅助评零 error、人工一致率 0.70）随批归档。完成标志 11（归档发布）✅：plan 归档 + v0.1.3 已发布（2026-09-05，#141 → tag → publish）。
 
@@ -116,6 +116,7 @@
 | 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ✅ | #116；`eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化）；`internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
+| 0.1.4-1 | 磁盘存储地基（会话单元目录 + run 统一进会话） | ⏳ | 分支 feat/0.1.4-persistence-disk-store；`DiskStore`/`DiskRunLedger`（per-session 目录：session.jsonl type 开放 entry 流 + runs/ 每诊断一 JSON tmp+rename 原子写；惰性打开；末尾半行容忍中间坏行报错；UpdatedAt 推导）+ `storage.data_dir`（默认 ~/.aruing/data，probe 覆盖 tmp）+ `--data-dir` + `RespondOutput/TurnResult.Evidence` 透传；run 经 Diagnose 应答器统一进会话（Run.SessionID 必填，chat --session 可续聊） |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -123,7 +124,7 @@
 
 ## 下一步
 
-**下一项**：**0.1.4 已立项待开工**（2026-09-10 产品完备批：持久化 / 流式 / map-reduce 三功能目录，plan 见笔记 `plan/0.1.4/`）。步骤排序与开工由维护者裁决（中期答辩后排期）。
+**下一项**：**0.1.4 persistence 步骤 1（磁盘存储地基）评审合并**（分支 feat/0.1.4-persistence-disk-store；设计见笔记 `plan/0.1.4/persistence/2026-9-10-disk-store.md` 已冻结）。后续步骤：挂起快照持久化（`suspended/`）→ 超巨输出 spill（`spool/`）→ `aruing sessions`；streaming / map-reduce 并行排期由维护者裁决。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`；0.1.4 已立项三项不再列此处）：
 

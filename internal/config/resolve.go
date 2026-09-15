@@ -22,6 +22,8 @@ type ResolveOptions struct {
 	SystemPath string
 	// 查询环境变量；空则使用进程环境
 	LookupEnv func(string) (string, bool)
+	// 用户主目录；空则取系统用户主目录（数据目录默认值解析用）
+	UserHomeDir string
 	// 判断路径是否存在；空则使用真实文件系统
 	Stat func(string) (fs.FileInfo, error)
 }
@@ -138,6 +140,20 @@ func LoadResolvedWith(explicit string, opt ResolveOptions) (Config, string, erro
 	}
 
 	cfg = MergeEnvLookup(cfg, lookup)
+	// 数据目录空值填默认（home 直下，与 ~/.aruing/bin 安装族同根）。
+	// 产品路径（run / chat）从此永远磁盘；probe 在命令层覆盖为进程级临时目录。
+	// 解析失败明确报错：不静默退化为内存存储违反「不中断是默认」
+	if strings.TrimSpace(cfg.Storage.DataDir) == "" {
+		home := opt.UserHomeDir
+		if home == "" {
+			var err error
+			home, err = os.UserHomeDir()
+			if err != nil {
+				return Config{}, path, fmt.Errorf("resolve data dir: %w", err)
+			}
+		}
+		cfg.Storage.DataDir = filepath.Join(home, ".aruing", "data")
+	}
 	if err := ValidateLLM(cfg); err != nil {
 		return cfg, path, err
 	}
