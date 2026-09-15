@@ -162,6 +162,53 @@ func TestDiskStoreCorruptLineHandling(t *testing.T) {
 		}
 	})
 
+	// 容忍的半行必须在追加前从盘上截掉：否则新行把半行顶成中间行，
+	// 下次重开整个会话拒载（pr-agent #145 R2 发现的毒化路径）
+	t.Run("append after truncated tail survives reload", func(t *testing.T) {
+		root := t.TempDir()
+		s, _ := store.NewDiskStore(ctx, root)
+		newDiskSessionWithMessages(t, s, "sess_p", "u1", "a1")
+		path := filepath.Join(root, "sess_p", "session.jsonl")
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			t.Fatalf("open append: %v", err)
+		}
+		if _, wErr := f.WriteString(`{"type":"message","data":{"id":"x`); wErr != nil {
+			t.Fatalf("write half line: %v", wErr)
+		}
+		f.Close()
+
+		// 重开后追加新消息（半行应被截掉，新行接在干净末尾）
+		reopened, err := store.NewDiskStore(ctx, root)
+		if err != nil {
+			t.Fatalf("reopen: %v", err)
+		}
+		msg := &session.Message{
+			ID:        "sess_p-m2",
+			SessionID: "sess_p",
+			Role:      session.RoleUser,
+			Content:   "after crash",
+			CreatedAt: diskNow.Add(3 * time.Minute),
+		}
+		err = reopened.AppendMessage(ctx, msg)
+		if err != nil {
+			t.Fatalf("append: %v", err)
+		}
+
+		// 再重开：会话仍可加载，旧两条 + 新一条，半行不存在
+		again, err := store.NewDiskStore(ctx, root)
+		if err != nil {
+			t.Fatalf("reopen again: %v", err)
+		}
+		msgs, err := again.ListMessages(ctx, "sess_p")
+		if err != nil {
+			t.Fatalf("list after poison check: %v", err)
+		}
+		if len(msgs) != 3 || msgs[2].Content != "after crash" {
+			t.Fatalf("want 3 messages with new tail, got %+v", msgs)
+		}
+	})
+
 	t.Run("middle corrupt line errors", func(t *testing.T) {
 		root := t.TempDir()
 		s, _ := store.NewDiskStore(ctx, root)

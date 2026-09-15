@@ -8,7 +8,8 @@ package store
 // 写路径为内存更新加 O_APPEND 追加一行（无 bufio，写即落）。
 //
 // 崩溃语义：进程被杀（OS 存活）不丢已完成行；断电残留的末尾半行在加载时
-// 跳过并警告，中间坏行启动报错并指明文件与行号（#18 损坏明确失败）。
+// 跳过警告并在接受追加前截掉（否则半行被新行顶成中间行，整个会话按坏行拒载）；
+// 中间坏行启动报错并指明文件与行号（#18 损坏明确失败）。
 // 会话最近活跃时间不落盘，由最后条目时间推导（零冗余行）。
 
 import (
@@ -252,7 +253,9 @@ func (s *DiskStore) sessionPath(id string) string {
 	return filepath.Join(s.sessionDir(id), sessionFileName)
 }
 
-// 加载或复用已打开的会话（调用方持锁）；已知但未加载时读文件建索引
+// 加载或复用已打开的会话（调用方持锁）；已知但未加载时读文件建索引。
+// 加载时若容忍了末尾半行，先截掉再接受追加：半行一旦被新行顶成中间行，
+// 整个会话将按坏行拒载
 func (s *DiskStore) loadLocked(id string) (*sessionHandle, error) {
 	if id == "" {
 		return nil, session.ErrSessionNotFound
@@ -263,13 +266,19 @@ func (s *DiskStore) loadLocked(id string) (*sessionHandle, error) {
 	if _, ok := s.known[id]; !ok {
 		return nil, session.ErrSessionNotFound
 	}
-	h, err := readSessionFile(s.sessionPath(id), id)
+	h, truncateAt, err := readSessionFile(s.sessionPath(id), id)
 	if err != nil {
 		return nil, err
 	}
 	file, err := os.OpenFile(s.sessionPath(id), os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open session file for append %s: %w", s.sessionPath(id), err)
+	}
+	if truncateAt >= 0 {
+		if err := file.Truncate(truncateAt); err != nil {
+			file.Close()
+			return nil, fmt.Errorf("truncate tolerated tail %s: %w", s.sessionPath(id), err)
+		}
 	}
 	h.file = file
 	s.open[id] = h
@@ -284,81 +293,95 @@ func (h *sessionHandle) lastActivityLocked() time.Time {
 	return h.header.CreatedAt
 }
 
+// 会话文件中的一行：裁剪后的正文与该行在文件中的起始字节偏移
+// （偏移用于定位容忍半行的截断点）
+type sessionLine struct {
+	data   []byte
+	offset int64
+}
+
 // 读取并解析会话文件：首行会话头必须完整且归属正确；条目逐行解析，
-// 未知种类跳过；末行解析失败按断电残留半行容忍跳过，其余坏行报错
-func readSessionFile(path, wantID string) (*sessionHandle, error) {
+// 未知种类跳过；末行解析失败按断电残留半行容忍跳过（返回该行偏移作为
+// 截断点，调用方在接受追加前截掉，避免半行被顶成中间行），其余坏行报错。
+// 无容忍半行时截断点返回 -1
+func readSessionFile(path, wantID string) (*sessionHandle, int64, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, session.ErrSessionNotFound
+			return nil, -1, session.ErrSessionNotFound
 		}
-		return nil, fmt.Errorf("read session file %s: %w", path, err)
+		return nil, -1, fmt.Errorf("read session file %s: %w", path, err)
 	}
 	// 断电可能只落了目录项与空文件：会话创建未完成，按不存在处理
 	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, session.ErrSessionNotFound
+		return nil, -1, session.ErrSessionNotFound
 	}
 	lines := splitSessionLines(data)
 	if len(lines) == 0 {
-		return nil, fmt.Errorf("session file %s: no header line", path)
+		return nil, -1, fmt.Errorf("session file %s: no header line", path)
 	}
 
 	var header diskSessionHeader
-	if err := json.Unmarshal(lines[0], &header); err != nil {
-		return nil, fmt.Errorf("session file %s:1: parse header: %w", path, err)
+	if err := json.Unmarshal(lines[0].data, &header); err != nil {
+		return nil, -1, fmt.Errorf("session file %s:1: parse header: %w", path, err)
 	}
 	if header.Type != diskEntrySession {
-		return nil, fmt.Errorf("session file %s:1: first line is not a session header", path)
+		return nil, -1, fmt.Errorf("session file %s:1: first line is not a session header", path)
 	}
 	if header.ID != wantID {
-		return nil, fmt.Errorf("session file %s: header id %q does not match directory %q", path, header.ID, wantID)
+		return nil, -1, fmt.Errorf("session file %s: header id %q does not match directory %q", path, header.ID, wantID)
 	}
 	if header.V > diskFormatVersion {
-		return nil, fmt.Errorf("session file %s: format version %d is newer than supported %d; upgrade aruing", path, header.V, diskFormatVersion)
+		return nil, -1, fmt.Errorf("session file %s: format version %d is newer than supported %d; upgrade aruing", path, header.V, diskFormatVersion)
 	}
 
+	truncateAt := int64(-1)
 	h := &sessionHandle{header: header}
 	for i := 1; i < len(lines); i++ {
 		line := lines[i]
 		var env diskEntry
-		if err := json.Unmarshal(line, &env); err != nil {
-			// 末行解析失败：断电残留半行的典型形态，容忍跳过（数据丢失但不损坏）
+		if err := json.Unmarshal(line.data, &env); err != nil {
+			// 末行解析失败：断电残留半行的典型形态，容忍跳过（数据丢失但不损坏）；
+			// 截断点交给调用方，追加前把半行从盘上清掉
 			if i == len(lines)-1 {
 				fmt.Fprintf(os.Stderr, "warn: %s:%d: truncated tail line skipped: %v\n", path, i+1, err)
+				truncateAt = line.offset
 				continue
 			}
-			return nil, fmt.Errorf("session file %s:%d: %w", path, i+1, err)
+			return nil, -1, fmt.Errorf("session file %s:%d: %w", path, i+1, err)
 		}
 		switch env.Type {
 		case diskEntryMessage:
 			var msg session.Message
 			if err := json.Unmarshal(env.Data, &msg); err != nil {
-				return nil, fmt.Errorf("session file %s:%d: parse message: %w", path, i+1, err)
+				return nil, -1, fmt.Errorf("session file %s:%d: parse message: %w", path, i+1, err)
 			}
 			if msg.SessionID != wantID {
-				return nil, fmt.Errorf("session file %s:%d: message session %q does not match %q", path, i+1, msg.SessionID, wantID)
+				return nil, -1, fmt.Errorf("session file %s:%d: message session %q does not match %q", path, i+1, msg.SessionID, wantID)
 			}
 			h.messages = append(h.messages, msg)
 		case diskEntrySession:
 			// 会话头只允许出现在首行；重复视为损坏
-			return nil, fmt.Errorf("session file %s:%d: duplicate session header", path, i+1)
+			return nil, -1, fmt.Errorf("session file %s:%d: duplicate session header", path, i+1)
 		default:
 			// 未知种类跳过：新版本写入的条目不阻断旧进程加载（前向兼容）
 		}
 	}
-	return h, nil
+	return h, truncateAt, nil
 }
 
-// 按换行切分行并去除行尾回车与首尾空白；尾部空行不入结果
-func splitSessionLines(data []byte) [][]byte {
+// 按换行切分行并去首尾空白（含回车）；空行不入结果，行携带起始偏移
+func splitSessionLines(data []byte) []sessionLine {
 	raw := bytes.Split(data, []byte("\n"))
-	lines := make([][]byte, 0, len(raw))
+	lines := make([]sessionLine, 0, len(raw))
+	var off int64
 	for _, l := range raw {
-		trimmed := bytes.TrimSpace(bytes.TrimSuffix(l, []byte("\r")))
-		if len(trimmed) == 0 {
-			continue
+		chunk := int64(len(l)) + 1 // 含被切掉的换行符（末段无换行时多算一字节，仅影响末段偏移不被使用）
+		trimmed := bytes.TrimSpace(l)
+		if len(trimmed) > 0 {
+			lines = append(lines, sessionLine{data: trimmed, offset: off})
 		}
-		lines = append(lines, trimmed)
+		off += chunk
 	}
 	return lines
 }
