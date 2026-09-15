@@ -169,14 +169,16 @@ lab-list:
 
 # 对场景集群跑 aruing chat：KUBECONFIG 已在同一行 shell 注入，无需手动 export。
 # NAME=必填；MSG=可选（填了=单轮诊断，不填=进交互式多轮）。须先 make build 与 lab-up。
+# DATA_DIR=可选（默认 scenarios/.data/<NAME>：跨次调用稳定，杀进程重开可续聊；不污染用户数据目录）。
+# SESSION=可选（续聊指定会话，与 DATA_DIR 配合验证跨进程恢复）。
 lab-chat:
 	@test -n "$(NAME)" || { echo "NAME= required (known: make lab-list)"; exit 1; }
 	@test -f scenarios/.kube/$(NAME).yaml || { echo "first: make lab-up NAME=$(NAME)"; exit 1; }
 	@test -x ./bin/aruing || { echo "first: make build"; exit 1; }
 ifneq ($(strip $(MSG)),)
-	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat "$(MSG)"
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat --data-dir $(if $(DATA_DIR),$(DATA_DIR),scenarios/.data/$(NAME)) $(if $(SESSION),--session $(SESSION),) "$(MSG)"
 else
-	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat
+	KUBECONFIG=$$PWD/scenarios/.kube/$(NAME).yaml ./bin/aruing chat --data-dir $(if $(DATA_DIR),$(DATA_DIR),scenarios/.data/$(NAME)) $(if $(SESSION),--session $(SESSION),)
 endif
 
 # 对场景集群跑任意 kubectl：KUBECONFIG 已注入。NAME=必填，CMD=kubectl 参数。

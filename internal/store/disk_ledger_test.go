@@ -125,6 +125,33 @@ func TestDiskRunLedgerRejectsEmptySession(t *testing.T) {
 	}
 }
 
+// 同运行编号换会话写入按接线错误拒绝：旧会话目录会残留记录文件，
+// 放行会在下次启动扫描时被判跨会话重复而拒启
+func TestDiskRunLedgerRejectsCrossSessionOverwrite(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	l, _ := store.NewDiskRunLedger(ctx, root)
+	if err := l.Put(ctx, newDiskRecord("run_1", "sess_a")); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	err := l.Put(ctx, newDiskRecord("run_1", "sess_b"))
+	if err == nil || !strings.Contains(err.Error(), "cross-session") {
+		t.Fatalf("want cross-session error, got %v", err)
+	}
+	// 拒绝发生在写入前：原记录仍可读回，且新会话目录无残留文件
+	if _, err := l.Get(ctx, "run_1"); err != nil {
+		t.Fatalf("get after reject: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, "sess_b", "runs", "run_1.json")); statErr == nil {
+		t.Fatal("rejected write must not leave a file in session b")
+	}
+	// 拒绝后重开仍能干净启动（无跨会话重复）
+	if _, err := store.NewDiskRunLedger(ctx, root); err != nil {
+		t.Fatalf("reopen after reject: %v", err)
+	}
+}
+
 // 记录文件临时残留不进索引；读回是深拷贝（改动 Raw 不影响再读）
 func TestDiskRunLedgerTmpResidueAndIsolation(t *testing.T) {
 	ctx := context.Background()

@@ -41,8 +41,10 @@ go.work.sum
 /skills-lock.json
 
 # Scenario harness: ephemeral kind kubeconfigs (written by scripts/scenario-up.sh)
+# and lab-chat session data (default --data-dir target)
 /scenarios/.kube/
 /scenarios/.smoke/
+/scenarios/.data/
 
 # macOS noise
 .DS_Store

@@ -64,7 +64,8 @@ func NewDiskRunLedger(ctx context.Context, root string) (*DiskRunLedger, error) 
 }
 
 // 写入或覆盖一条诊断记录：临时文件写全后 rename 原子替换；
-// 同运行编号覆盖不改变会话内首现序（镜像内存实现）
+// 同运行编号覆盖不改变会话内首现序（镜像内存实现）；
+// 同运行编号换会话重写视为接线错误（旧会话目录会残留记录文件，重启扫描将判跨会话重复）
 func (l *DiskRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -75,6 +76,11 @@ func (l *DiskRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord) e
 	if rec.SessionID == "" {
 		// run 与 chat 统一为会话模型后必填；空值是调用方接线错误，明确失败
 		return fmt.Errorf("run record requires a session id (run and chat both create sessions)")
+	}
+	// 换会话重写同一运行会在旧会话目录留下孤儿文件，本次进程内读回一致、
+	// 下次启动扫描却会判跨会话重复而拒绝打开；在写入前拦截
+	if prev, exists := l.byRun[rec.RunID]; exists && prev != rec.SessionID {
+		return fmt.Errorf("run %s already recorded in session %s, refusing cross-session overwrite into %s", rec.RunID, prev, rec.SessionID)
 	}
 
 	l.mu.Lock()
