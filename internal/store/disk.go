@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -362,14 +363,38 @@ func splitSessionLines(data []byte) [][]byte {
 	return lines
 }
 
-// 追加写一行 JSON（值自带换行）；无缓冲直写，写返回即入页缓存
-func writeJSONLine(file *os.File, v any) error {
+// 行写入的最小写面：*os.File 即满足；拆出接口为测试注入短写故障
+type lineWriter interface {
+	Write(p []byte) (int, error)
+	Seek(offset int64, whence int) (int64, error)
+	Truncate(size int64) error
+}
+
+// 追加写一行 JSON（值自带换行）；无缓冲直写，写返回即入页缓存。
+// 写失败或短写时把文件截断回写前末尾：半行一旦被后续追加顶成中间行，
+// 整个会话将按坏行拒载（#18），必须就地清掉；截断也失败时保留残迹，
+// 加载侧按末尾半行容忍处理
+func writeJSONLine(w lineWriter, v any) error {
 	line, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("marshal json line: %w", err)
 	}
-	if _, err := file.Write(append(line, '\n')); err != nil {
-		return fmt.Errorf("write line: %w", err)
+	// 记录写前末尾：追加模式下 Seek 只取大小，不改写位置
+	end, err := w.Seek(0, io.SeekEnd)
+	if err != nil {
+		return fmt.Errorf("seek end: %w", err)
 	}
-	return nil
+	buf := append(line, '\n')
+	n, err := w.Write(buf)
+	if err == nil && n == len(buf) {
+		return nil
+	}
+	if err == nil {
+		err = fmt.Errorf("short write: %d of %d bytes", n, len(buf))
+	}
+	// 回滚到写前末尾，保证半行不入盘；回滚失败与写错误一并报出
+	if trErr := w.Truncate(end); trErr != nil {
+		return fmt.Errorf("write line: %w; rollback truncate: %w", err, trErr)
+	}
+	return fmt.Errorf("write line: %w", err)
 }

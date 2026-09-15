@@ -3,9 +3,11 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Aruing/Aruing/internal/core"
@@ -183,6 +185,66 @@ func TestDiskRunLedgerTmpResidueAndIsolation(t *testing.T) {
 	again, _ := reopened.Get(ctx, "run_1")
 	if again.Evidence[0].Raw[0] == 'X' {
 		t.Fatal("raw isolation broken")
+	}
+}
+
+// 并发同号不同会话写入：恰一个胜出（判重在锁内），重开无跨会话重复；
+// 未修锁前此测试在 -race 下报数据竞争
+func TestDiskRunLedgerConcurrentPutSameRun(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	l, _ := store.NewDiskRunLedger(ctx, root)
+
+	const n = 8
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	wins := 0
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			err := l.Put(ctx, newDiskRecord("run_race", fmt.Sprintf("sess_%d", i)))
+			mu.Lock()
+			if err == nil {
+				wins++
+			}
+			mu.Unlock()
+		}(i)
+	}
+	wg.Wait()
+	if wins != 1 {
+		t.Fatalf("want exactly 1 winner, got %d", wins)
+	}
+	if _, err := store.NewDiskRunLedger(ctx, root); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+}
+
+// 记录内容的会话归属与所在目录不符视为损坏（文件被挪动或写错位置）
+func TestDiskRunLedgerSessionOwnershipMismatch(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	// 手造内容归属 sess_other、却放在 sess_a 目录的记录
+	dir := filepath.Join(root, "sess_a", "runs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	data, err := json.Marshal(newDiskRecord("run_m", "sess_other"))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "run_m.json"), data, 0o600)
+	if err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	l, err := store.NewDiskRunLedger(ctx, root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	_, err = l.Get(ctx, "run_m")
+	if err == nil || !strings.Contains(err.Error(), "does not match directory") {
+		t.Fatalf("want ownership error, got %v", err)
 	}
 }
 

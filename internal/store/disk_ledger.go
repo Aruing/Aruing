@@ -78,13 +78,14 @@ func (l *DiskRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord) e
 		return fmt.Errorf("run record requires a session id (run and chat both create sessions)")
 	}
 	// 换会话重写同一运行会在旧会话目录留下孤儿文件，本次进程内读回一致、
-	// 下次启动扫描却会判跨会话重复而拒绝打开；在写入前拦截
+	// 下次启动扫描却会判跨会话重复而拒绝打开；在写入前拦截。
+	// 判重读 byRun 必须在锁内：锁外读既是数据竞争，也拦不住并发同号双写
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
 	if prev, exists := l.byRun[rec.RunID]; exists && prev != rec.SessionID {
 		return fmt.Errorf("run %s already recorded in session %s, refusing cross-session overwrite into %s", rec.RunID, prev, rec.SessionID)
 	}
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
 
 	if err := l.writeRecordLocked(rec); err != nil {
 		return err
@@ -227,6 +228,10 @@ func (l *DiskRunLedger) readLocked(runID string) (session.DiagnosticRecord, erro
 	}
 	if rec.RunID != runID {
 		return session.DiagnosticRecord{}, fmt.Errorf("run record %s: content id %q does not match file name", l.recordPath(sessionID, runID), rec.RunID)
+	}
+	// 目录即会话归属：内容会话与目录不符视为损坏（文件被挪动或写错位置）
+	if rec.SessionID != sessionID {
+		return session.DiagnosticRecord{}, fmt.Errorf("run record %s: content session %q does not match directory %q", l.recordPath(sessionID, runID), rec.SessionID, sessionID)
 	}
 	return cloneDiagnosticRecord(rec), nil
 }
