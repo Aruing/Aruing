@@ -330,6 +330,66 @@ func TestDiskStoreLazyOpen(t *testing.T) {
 	}
 }
 
+// 编号含路径成分时读路径不可达：known 集合来自目录基名扫描，越界编号
+// 在构造任何文件路径前即判未找到，数据根内外都不产生文件或目录
+// （评审「--session 用户输入可路径穿越」声称的证伪钉板）
+func TestDiskStoreTraversalIDsUnreachable(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+
+	s, err := store.NewDiskStore(ctx, root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for _, id := range []string{"../../escape", "..", "sub/../../escape"} {
+		if _, err := s.GetSession(ctx, id); !errors.Is(err, session.ErrSessionNotFound) {
+			t.Fatalf("get %q: want not found, got %v", id, err)
+		}
+		if _, err := s.ListMessages(ctx, id); !errors.Is(err, session.ErrSessionNotFound) {
+			t.Fatalf("list %q: want not found, got %v", id, err)
+		}
+		msg := &session.Message{ID: "msg_x", SessionID: id, Role: session.RoleUser, Content: "c", CreatedAt: diskNow}
+		if err := s.AppendMessage(ctx, msg); !errors.Is(err, session.ErrSessionNotFound) {
+			t.Fatalf("append %q: want not found, got %v", id, err)
+		}
+	}
+	// 逃逸目标与数据根内均无痕迹
+	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("escape path created outside data root")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("data root should stay empty, entries=%d err=%v", len(entries), err)
+	}
+}
+
+// 写入口拒绝含路径成分的编号：读路径已被索引门槛挡住（见穿越不可达测试），
+// 此处收口写路径，防止未来调用方把外部字符串直接当编号传入越出数据根
+func TestDiskStoreCreateSessionRejectsPathComponentID(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+
+	s, err := store.NewDiskStore(ctx, root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	for _, id := range []string{"../../escape", "..", "sub/../../escape"} {
+		err := s.CreateSession(ctx, &session.Session{ID: id, CreatedAt: diskNow, UpdatedAt: diskNow})
+		if err == nil || !strings.Contains(err.Error(), "path components") {
+			t.Fatalf("create %q: want path component rejection, got %v", id, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("escape path created outside data root")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("data root should stay empty, entries=%d err=%v", len(entries), err)
+	}
+}
+
 // 空文件按会话未创建处理（断电只落了目录项与空文件的形态）
 func TestDiskStoreEmptyFileAsMissing(t *testing.T) {
 	ctx := context.Background()
@@ -347,6 +407,34 @@ func TestDiskStoreEmptyFileAsMissing(t *testing.T) {
 	}
 	if _, err := reopened.GetSession(ctx, "sess_x"); !errors.Is(err, session.ErrSessionNotFound) {
 		t.Fatalf("want not found for empty file, got %v", err)
+	}
+}
+
+// 创建失败或断电中断残留的空壳会话目录按未创建读取；同号再建报已存在。
+// 编号由 Factory 发放（UUIDv7），产品调用链中不存在同号重试，空壳只作为
+// 孤儿目录留存、读取不可见（评审「同号编号永久卡死」声称的证伪钉板）
+func TestDiskStoreHuskRecreate(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	// 模拟头部写入失败/断电中断后的残留：目录在、会话文件为空
+	husk := filepath.Join(root, "sess_x")
+	if err := os.MkdirAll(husk, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(husk, "session.jsonl"), nil, 0o600); err != nil {
+		t.Fatalf("touch: %v", err)
+	}
+
+	s, err := store.NewDiskStore(ctx, root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := s.GetSession(ctx, "sess_x"); !errors.Is(err, session.ErrSessionNotFound) {
+		t.Fatalf("husk should read as missing, got %v", err)
+	}
+	err = s.CreateSession(ctx, &session.Session{ID: "sess_x", CreatedAt: diskNow, UpdatedAt: diskNow})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("want duplicate error, got %v", err)
 	}
 }
 

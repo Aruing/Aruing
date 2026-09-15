@@ -78,6 +78,13 @@ func (l *DiskRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord) e
 		// run 与 chat 统一为会话模型后必填；空值是调用方接线错误，明确失败
 		return fmt.Errorf("run record requires a session id (run and chat both create sessions)")
 	}
+	// 编号在存储层直接充当目录与文件名，含路径成分即拒绝（同会话侧防御）
+	if err := checkStorageID(rec.RunID); err != nil {
+		return err
+	}
+	if err := checkStorageID(rec.SessionID); err != nil {
+		return err
+	}
 	// 换会话重写同一运行会在旧会话目录留下孤儿文件，本次进程内读回一致、
 	// 下次启动扫描却会判跨会话重复而拒绝打开；在写入前拦截。
 	// 判重读 byRun 必须在锁内：锁外读既是数据竞争，也拦不住并发同号双写

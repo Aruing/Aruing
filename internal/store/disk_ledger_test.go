@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -245,6 +246,58 @@ func TestDiskRunLedgerSessionOwnershipMismatch(t *testing.T) {
 	_, err = l.Get(ctx, "run_m")
 	if err == nil || !strings.Contains(err.Error(), "does not match directory") {
 		t.Fatalf("want ownership error, got %v", err)
+	}
+}
+
+// 编号含路径成分时账本读路径不可达：索引键来自文件名扫描（基名不含
+// 路径成分），越界编号在构造文件路径前即判未找到，根外不产生任何文件
+// （评审路径穿越声称账本侧的证伪钉板）
+func TestDiskRunLedgerTraversalIDsUnreachable(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+
+	l, err := store.NewDiskRunLedger(ctx, root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := l.Get(ctx, "../../escape"); !errors.Is(err, session.ErrRunNotFound) {
+		t.Fatalf("get: want not found, got %v", err)
+	}
+	if recs, err := l.ListBySession(ctx, "../escape"); err != nil || len(recs) != 0 {
+		t.Fatalf("list: want empty, got %d err=%v", len(recs), err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("escape path created outside data root")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("data root should stay empty, entries=%d err=%v", len(entries), err)
+	}
+}
+
+// 写入口拒绝含路径成分的运行与会话编号（读侧由索引门槛挡住，同会话侧防御）
+func TestDiskRunLedgerPutRejectsPathComponentID(t *testing.T) {
+	ctx := context.Background()
+	base := t.TempDir()
+	root := filepath.Join(base, "data")
+
+	l, err := store.NewDiskRunLedger(ctx, root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := l.Put(ctx, newDiskRecord("../escape", "sess_a")); err == nil || !strings.Contains(err.Error(), "path components") {
+		t.Fatalf("put traversal run id: want rejection, got %v", err)
+	}
+	if err := l.Put(ctx, newDiskRecord("run_1", "../../escape")); err == nil || !strings.Contains(err.Error(), "path components") {
+		t.Fatalf("put traversal session id: want rejection, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("escape path created outside data root")
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("data root should stay empty, entries=%d err=%v", len(entries), err)
 	}
 }
 

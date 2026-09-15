@@ -20,6 +20,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -111,6 +112,9 @@ func (s *DiskStore) CreateSession(ctx context.Context, sess *session.Session) er
 	}
 	if sess.ID == "" {
 		return fmt.Errorf("session id is required")
+	}
+	if err := checkStorageID(sess.ID); err != nil {
+		return err
 	}
 
 	s.mu.Lock()
@@ -388,6 +392,16 @@ func splitSessionLines(data []byte) []sessionLine {
 		off += chunk
 	}
 	return lines
+}
+
+// 校验存储编号可安全充当目录名与文件名成分：含路径分隔符或点段（./..）
+// 的编号按调用方接线错误拒绝，防止越出数据根。读路径由启动扫描的索引
+// 门槛天然挡住越界编号，此处收口写路径，为未来直接受纳外部编号的功能兜底
+func checkStorageID(id string) error {
+	if id == "." || id == ".." || strings.ContainsAny(id, `/\`) {
+		return fmt.Errorf("storage id %q contains path components", id)
+	}
+	return nil
 }
 
 // 行写入的最小写面：*os.File 即满足；拆出接口为测试注入短写故障
