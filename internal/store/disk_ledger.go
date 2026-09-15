@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -209,7 +210,9 @@ func (l *DiskRunLedger) writeRecordLocked(rec session.DiagnosticRecord) error {
 	}
 	// 落盘后再替换：延迟分配文件系统上 rename 可能先于数据块持久化，
 	// 断电后出现空/半记录，违背「旧文件或完整新文件」承诺。
-	// 每诊断仅一次写入，Sync 代价可忽略（会话逐行追加不 fsync 是另一裁决）
+	// rename 后还须同步父目录：目录项不落盘时断电可丢替换本身，
+	// 数据块已持久但记录消失，同样违背承诺。每诊断仅一次写入，
+	// 两次 Sync 代价可忽略（会话逐行追加不 fsync 是另一裁决）
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return fmt.Errorf("sync temp run record: %w", err)
@@ -221,7 +224,25 @@ func (l *DiskRunLedger) writeRecordLocked(rec session.DiagnosticRecord) error {
 	if err := os.Rename(tmpName, target); err != nil {
 		return fmt.Errorf("replace run record %s: %w", target, err)
 	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("sync runs dir %s: %w", dir, err)
+	}
 	return nil
+}
+
+// 同步目录使刚完成的 rename 目录项落盘（POSIX 上 rename 原子但不持久）。
+// Windows 上目录句柄不可写、Sync 恒报拒绝访问，且 NTFS 元数据日志保证
+// rename 原子性，按平台跳过
+func syncDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
 
 // 按索引定位并读回记录拷贝（调用方持锁）；文件内容归属不匹配视为损坏
