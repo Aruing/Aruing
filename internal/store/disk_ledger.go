@@ -1,8 +1,9 @@
 package store
 
 // 正式诊断账本的磁盘存储：每个诊断记录一个 JSON 文件，按会话目录归组
-// （runs/<sessionId>/<runId>.json）。写入走同目录临时文件加 rename 原子替换，
-// 断电时旧文件与完整新文件二选一，不存在半截形态；残留临时文件加载时忽略。
+// （runs/<sessionId>/<runId>.json）。写入走同目录临时文件写全、Sync 落盘
+// 后 rename 原子替换，断电时旧文件与完整新文件二选一，不存在半截形态；
+// 残留临时文件加载时忽略。
 //
 // 打开时只扫描各会话 runs/ 子目录的文件名建 runID → 会话目录索引，不读文件
 // 正文（Get 时才读）。按会话列出的顺序取目录名字典序（runID 为 UUIDv7，字典
@@ -198,6 +199,13 @@ func (l *DiskRunLedger) writeRecordLocked(rec session.DiagnosticRecord) error {
 	if _, err := tmp.Write(append(data, '\n')); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write temp run record: %w", err)
+	}
+	// 落盘后再替换：延迟分配文件系统上 rename 可能先于数据块持久化，
+	// 断电后出现空/半记录，违背「旧文件或完整新文件」承诺。
+	// 每诊断仅一次写入，Sync 代价可忽略（会话逐行追加不 fsync 是另一裁决）
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("sync temp run record: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp run record: %w", err)

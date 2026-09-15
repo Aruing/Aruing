@@ -293,17 +293,19 @@ func (h *sessionHandle) lastActivityLocked() time.Time {
 	return h.header.CreatedAt
 }
 
-// 会话文件中的一行：裁剪后的正文与该行在文件中的起始字节偏移
-// （偏移用于定位容忍半行的截断点）
+// 会话文件中的一行：裁剪后的正文、该行在文件中的起始字节偏移与
+// 行尾是否紧跟换行符（撕裂写不会落盘末尾换行，无换行的末行才是
+// 崩溃残迹；带换行的坏行是真损坏，见 readSessionFile）
 type sessionLine struct {
-	data   []byte
-	offset int64
+	data       []byte
+	offset     int64
+	terminated bool
 }
 
 // 读取并解析会话文件：首行会话头必须完整且归属正确；条目逐行解析，
-// 未知种类跳过；末行解析失败按断电残留半行容忍跳过（返回该行偏移作为
-// 截断点，调用方在接受追加前截掉，避免半行被顶成中间行），其余坏行报错。
-// 无容忍半行时截断点返回 -1
+// 未知种类跳过；末行解析失败且无换行按断电撕裂容忍跳过（返回该行偏移作
+// 截断点，调用方在接受追加前截掉，避免半行被顶成中间行）；带换行的坏行
+// 与中间坏行一样报错（真损坏不静默丢，#18）。无容忍半行时截断点返回 -1
 func readSessionFile(path, wantID string) (*sessionHandle, int64, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -341,9 +343,10 @@ func readSessionFile(path, wantID string) (*sessionHandle, int64, error) {
 		line := lines[i]
 		var env diskEntry
 		if err := json.Unmarshal(line.data, &env); err != nil {
-			// 末行解析失败：断电残留半行的典型形态，容忍跳过（数据丢失但不损坏）；
-			// 截断点交给调用方，追加前把半行从盘上清掉
-			if i == len(lines)-1 {
+			// 末行且无换行：断电撕裂写的形态（换行是单次写的末字节，撕裂不会落盘），
+			// 容忍跳过（数据丢失但不损坏）；截断点交给调用方，追加前把半行从盘上清掉。
+			// 带换行的末行解析失败是真损坏，按中间坏行同样报错（#18）
+			if i == len(lines)-1 && !line.terminated {
 				fmt.Fprintf(os.Stderr, "warn: %s:%d: truncated tail line skipped: %v\n", path, i+1, err)
 				truncateAt = line.offset
 				continue
@@ -370,16 +373,17 @@ func readSessionFile(path, wantID string) (*sessionHandle, int64, error) {
 	return h, truncateAt, nil
 }
 
-// 按换行切分行并去首尾空白（含回车）；空行不入结果，行携带起始偏移
+// 按换行切分行并去首尾空白（含回车）；空行不入结果，行携带起始偏移与
+// 行尾是否换行（末段无换行时其偏移不被使用）
 func splitSessionLines(data []byte) []sessionLine {
 	raw := bytes.Split(data, []byte("\n"))
 	lines := make([]sessionLine, 0, len(raw))
 	var off int64
-	for _, l := range raw {
-		chunk := int64(len(l)) + 1 // 含被切掉的换行符（末段无换行时多算一字节，仅影响末段偏移不被使用）
+	for j, l := range raw {
+		chunk := int64(len(l)) + 1 // 含被切掉的换行符
 		trimmed := bytes.TrimSpace(l)
 		if len(trimmed) > 0 {
-			lines = append(lines, sessionLine{data: trimmed, offset: off})
+			lines = append(lines, sessionLine{data: trimmed, offset: off, terminated: j < len(raw)-1})
 		}
 		off += chunk
 	}

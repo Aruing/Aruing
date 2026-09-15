@@ -162,6 +162,35 @@ func TestDiskStoreCorruptLineHandling(t *testing.T) {
 		}
 	})
 
+	// 完整（带换行）但损坏的末行：非断电撕裂形态（撕裂不会落盘末尾换行），
+	// 按真损坏报错，不得静默跳过后截掉（#18，pr-agent #145 R3 发现）
+	t.Run("corrupt complete tail line errors", func(t *testing.T) {
+		root := t.TempDir()
+		s, _ := store.NewDiskStore(ctx, root)
+		newDiskSessionWithMessages(t, s, "sess_c", "u1")
+		path := filepath.Join(root, "sess_c", "session.jsonl")
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			t.Fatalf("open append: %v", err)
+		}
+		if _, wErr := f.WriteString("{broken" + "\n"); wErr != nil {
+			t.Fatalf("write corrupt line: %v", wErr)
+		}
+		f.Close()
+
+		reopened, err := store.NewDiskStore(ctx, root)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		_, err = reopened.ListMessages(ctx, "sess_c")
+		if err == nil {
+			t.Fatal("want error on corrupt complete tail line")
+		}
+		if !strings.Contains(err.Error(), "session.jsonl:3") {
+			t.Fatalf("error should name file and line, got: %v", err)
+		}
+	})
+
 	// 容忍的半行必须在追加前从盘上截掉：否则新行把半行顶成中间行，
 	// 下次重开整个会话拒载（pr-agent #145 R2 发现的毒化路径）
 	t.Run("append after truncated tail survives reload", func(t *testing.T) {
