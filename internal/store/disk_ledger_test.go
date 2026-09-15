@@ -261,13 +261,13 @@ func TestDiskRunLedgerTraversalIDsUnreachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if _, err := l.Get(ctx, "../../escape"); !errors.Is(err, session.ErrRunNotFound) {
-		t.Fatalf("get: want not found, got %v", err)
+	if _, getErr := l.Get(ctx, "../../escape"); !errors.Is(getErr, session.ErrRunNotFound) {
+		t.Fatalf("get: want not found, got %v", getErr)
 	}
-	if recs, err := l.ListBySession(ctx, "../escape"); err != nil || len(recs) != 0 {
-		t.Fatalf("list: want empty, got %d err=%v", len(recs), err)
+	if recs, listErr := l.ListBySession(ctx, "../escape"); listErr != nil || len(recs) != 0 {
+		t.Fatalf("list: want empty, got %d err=%v", len(recs), listErr)
 	}
-	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+	if _, statErr := os.Stat(filepath.Join(base, "escape")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("escape path created outside data root")
 	}
 	entries, err := os.ReadDir(root)
@@ -286,13 +286,13 @@ func TestDiskRunLedgerPutRejectsPathComponentID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := l.Put(ctx, newDiskRecord("../escape", "sess_a")); err == nil || !strings.Contains(err.Error(), "path components") {
-		t.Fatalf("put traversal run id: want rejection, got %v", err)
+	if putErr := l.Put(ctx, newDiskRecord("../escape", "sess_a")); putErr == nil || !strings.Contains(putErr.Error(), "path components") {
+		t.Fatalf("put traversal run id: want rejection, got %v", putErr)
 	}
-	if err := l.Put(ctx, newDiskRecord("run_1", "../../escape")); err == nil || !strings.Contains(err.Error(), "path components") {
-		t.Fatalf("put traversal session id: want rejection, got %v", err)
+	if putErr := l.Put(ctx, newDiskRecord("run_1", "../../escape")); putErr == nil || !strings.Contains(putErr.Error(), "path components") {
+		t.Fatalf("put traversal session id: want rejection, got %v", putErr)
 	}
-	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+	if _, statErr := os.Stat(filepath.Join(base, "escape")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("escape path created outside data root")
 	}
 	entries, err := os.ReadDir(root)

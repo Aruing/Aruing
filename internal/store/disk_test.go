@@ -343,19 +343,19 @@ func TestDiskStoreTraversalIDsUnreachable(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	for _, id := range []string{"../../escape", "..", "sub/../../escape"} {
-		if _, err := s.GetSession(ctx, id); !errors.Is(err, session.ErrSessionNotFound) {
-			t.Fatalf("get %q: want not found, got %v", id, err)
+		if _, getErr := s.GetSession(ctx, id); !errors.Is(getErr, session.ErrSessionNotFound) {
+			t.Fatalf("get %q: want not found, got %v", id, getErr)
 		}
-		if _, err := s.ListMessages(ctx, id); !errors.Is(err, session.ErrSessionNotFound) {
-			t.Fatalf("list %q: want not found, got %v", id, err)
+		if _, listErr := s.ListMessages(ctx, id); !errors.Is(listErr, session.ErrSessionNotFound) {
+			t.Fatalf("list %q: want not found, got %v", id, listErr)
 		}
 		msg := &session.Message{ID: "msg_x", SessionID: id, Role: session.RoleUser, Content: "c", CreatedAt: diskNow}
-		if err := s.AppendMessage(ctx, msg); !errors.Is(err, session.ErrSessionNotFound) {
-			t.Fatalf("append %q: want not found, got %v", id, err)
+		if appErr := s.AppendMessage(ctx, msg); !errors.Is(appErr, session.ErrSessionNotFound) {
+			t.Fatalf("append %q: want not found, got %v", id, appErr)
 		}
 	}
 	// 逃逸目标与数据根内均无痕迹
-	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+	if _, statErr := os.Stat(filepath.Join(base, "escape")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("escape path created outside data root")
 	}
 	entries, err := os.ReadDir(root)
@@ -376,12 +376,12 @@ func TestDiskStoreCreateSessionRejectsPathComponentID(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	for _, id := range []string{"../../escape", "..", "sub/../../escape"} {
-		err := s.CreateSession(ctx, &session.Session{ID: id, CreatedAt: diskNow, UpdatedAt: diskNow})
-		if err == nil || !strings.Contains(err.Error(), "path components") {
-			t.Fatalf("create %q: want path component rejection, got %v", id, err)
+		createErr := s.CreateSession(ctx, &session.Session{ID: id, CreatedAt: diskNow, UpdatedAt: diskNow})
+		if createErr == nil || !strings.Contains(createErr.Error(), "path components") {
+			t.Fatalf("create %q: want path component rejection, got %v", id, createErr)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(base, "escape")); !errors.Is(err, os.ErrNotExist) {
+	if _, statErr := os.Stat(filepath.Join(base, "escape")); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("escape path created outside data root")
 	}
 	entries, err := os.ReadDir(root)
@@ -429,8 +429,8 @@ func TestDiskStoreHuskRecreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if _, err := s.GetSession(ctx, "sess_x"); !errors.Is(err, session.ErrSessionNotFound) {
-		t.Fatalf("husk should read as missing, got %v", err)
+	if _, getErr := s.GetSession(ctx, "sess_x"); !errors.Is(getErr, session.ErrSessionNotFound) {
+		t.Fatalf("husk should read as missing, got %v", getErr)
 	}
 	err = s.CreateSession(ctx, &session.Session{ID: "sess_x", CreatedAt: diskNow, UpdatedAt: diskNow})
 	if err == nil || !strings.Contains(err.Error(), "already exists") {
