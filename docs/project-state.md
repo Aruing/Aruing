@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-09-15（0.1.4 persistence 步骤 1 实现中：磁盘存储地基 + run 统一进会话）；前值 2026-09-05（**v0.1.3 已发布**——收尾 docs #139/#140 → production PR #141 → tag → publish 全链走完，release notes 含 0.1.2 全部增量；#142 pr-agent #141 评审跟进修复。实验数据与钉板记录在笔记仓 `gproject/中期/实验数据/0.1.2-0.1.3-统一批/`，遗留问题见笔记仓 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）
+> 最后更新：2026-09-16（PR #145 已合并 → feat/0.1.4-persistence：0.1.4 persistence 步骤 1 磁盘存储地基 + run 统一进会话交付）；前值 2026-09-15（步骤 1 实现中）
 
 ## 当前阶段
 
@@ -116,7 +116,7 @@
 | 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ✅ | #116；`eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化）；`internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
-| 0.1.4-1 | 磁盘存储地基（会话单元目录 + run 统一进会话） | ⏳ | 分支 feat/0.1.4-persistence-disk-store；`DiskStore`/`DiskRunLedger`（per-session 目录：session.jsonl type 开放 entry 流 + runs/ 每诊断一 JSON tmp+rename 原子写；惰性打开；末尾半行容忍中间坏行报错；UpdatedAt 推导）+ `storage.data_dir`（默认 ~/.aruing/data，probe 覆盖 tmp）+ `--data-dir` + `RespondOutput/TurnResult.Evidence` 透传；run 经 Diagnose 应答器统一进会话（Run.SessionID 必填，chat --session 可续聊） |
+| 0.1.4-1 | 磁盘存储地基（会话单元目录 + run 统一进会话） | ✅ | PR #145（merge 6e7edfb → feat/0.1.4-persistence）；`DiskStore`/`DiskRunLedger`（per-session 目录：session.jsonl type 开放 entry 流 + runs/ 每诊断一 JSON tmp+rename 原子写（文件与父目录 fsync）；惰性打开；末行无换行残迹容忍（解析失败截断 / 可解析补行）中间坏行报错；写入口拒绝路径成分编号；UpdatedAt 推导）+ `storage.data_dir`（默认 ~/.aruing/data，probe 覆盖 tmp）+ `--data-dir` + `RespondOutput/TurnResult.Evidence` 透传；run 经 Diagnose 应答器统一进会话（Run.SessionID 必填，chat --session 可续聊） |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -124,7 +124,7 @@
 
 ## 下一步
 
-**下一项**：**0.1.4 persistence 步骤 1（磁盘存储地基）评审合并**（分支 feat/0.1.4-persistence-disk-store；设计见笔记 `plan/0.1.4/persistence/2026-9-10-disk-store.md` 已冻结）。后续步骤：挂起快照持久化（`suspended/`）→ 超巨输出 spill（`spool/`）→ `aruing sessions`；streaming / map-reduce 并行排期由维护者裁决。
+**下一项**：**0.1.4 persistence 步骤 2：挂起快照持久化**（`suspended/` 子目录 + agent 导出 `SuspensionSnapshot`；顺带补 `DiskStore.Close` 生命周期，消化 P2-3）。后续步骤：超巨输出 spill（`spool/`）→ `aruing sessions`；streaming / map-reduce 并行排期由维护者裁决。注：步骤 1 合并前 smoke（lab-chat 首跑 → SESSION= 重开续聊）未执行，补跑或随版本收尾 `make smoke-all` 兜底由维护者裁决。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`；0.1.4 已立项三项不再列此处）：
 
