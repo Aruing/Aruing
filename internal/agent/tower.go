@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/Aruing/Aruing/internal/core"
@@ -73,6 +74,10 @@ type TowerResponder struct {
 	memoryOpts memoryOptions
 	// 最近一轮 Respond 的记忆观测量（只读统计，探针实验记录消费；不影响行为）
 	lastMemStats MemoryTurnStats
+	// 可选挂起快照存储：挂起落盘与跨进程恢复；空时行为与进程内形态一致
+	suspensions session.SuspensionStore
+	// 已警告过降级的会话（同会话同进程只提示一次，避免每轮重复刷屏）
+	suspensionWarned map[string]struct{}
 }
 
 // 单轮记忆组装与分层检索的观测统计（只读副本；评测侧消费，不影响应答行为）
@@ -91,6 +96,90 @@ type MemoryTurnStats struct {
 	RehydratedEvidence int
 	// 本轮注入视图时的历史消息条数
 	HistTurns int
+}
+
+// 可选注入挂起快照存储：挂起落盘 + 跨进程恢复；不注入时行为与进程内形态一致
+func (t *TowerResponder) SetSuspensionStore(store session.SuspensionStore) {
+	t.suspensions = store
+}
+
+// 自盘恢复会话挂起：读盘 → 账本守卫 → 导入进程内索引；返回恢复的运行编号（无则空串）
+// 数据层失败（读盘 / 导入校验，含坏 JSON 与版本偏差）降级为无挂起：警告一次、
+// 文件保留，本轮走正常应答（#18 可恢复路径）；执行器未实现导入能力属
+// 接线不完整（编程错误），返回错误由轮次明确失败
+func (t *TowerResponder) restoreSuspendedFromDisk(ctx context.Context, sessionID string) (string, error) {
+	if t.suspensions == nil {
+		return "", nil
+	}
+	runID, payload, found, err := t.suspensions.GetSuspension(ctx, sessionID)
+	if err != nil {
+		t.warnSuspensionOnce(sessionID, "读取挂起快照失败，本轮按无挂起继续（文件保留，可检查数据目录）: %v", err)
+		return "", nil
+	}
+	if !found {
+		return "", nil
+	}
+	// 账本守卫：快照对应的运行已完成（恢复完成落账后来不及删文件的崩溃残留）
+	// → 删文件走正常轮，不重复消费已完成诊断
+	switch rec, gerr := t.ledger.Get(ctx, runID); {
+	case gerr == nil && rec.RunID == runID:
+		t.progressf("tower: stale suspension %s already completed, clearing", runID)
+		if cerr := session.ClearSuspension(ctx, t.suspensions, sessionID); cerr != nil {
+			t.warnSuspensionOnce(sessionID, "清理已完成挂起快照失败: %v", cerr)
+		}
+		return "", nil
+	case errors.Is(gerr, session.ErrRunNotFound):
+		// 未完成，继续导入恢复
+	default:
+		// 账本读失败：无法排除已完成，保守降级等下轮重试
+		t.warnSuspensionOnce(sessionID, "读取诊断账本失败，本轮按无挂起继续: %v", gerr)
+		return "", nil
+	}
+	importer, ok := t.executor.(session.SuspendImporter)
+	if !ok {
+		return "", fmt.Errorf("tower: executor %T cannot import suspended snapshots (incomplete wiring)", t.executor)
+	}
+	if ierr := importer.ImportSuspended(payload); ierr != nil {
+		t.warnSuspensionOnce(sessionID, "导入挂起快照失败，本轮按无挂起继续（文件保留）: %v", ierr)
+		return "", nil
+	}
+	t.progressf("tower: restored suspended run=%s from disk", runID)
+	return runID, nil
+}
+
+// 轮末按应答出口收口挂起快照文件：澄清挂起 → 覆盖落盘；诊断完成 → 清理
+// 持久化失败不毁轮（长进程内存仍有快照）：警告降级，不阻断应答返回
+func (t *TowerResponder) settleSuspensionAfterOutcome(ctx context.Context, sessionID string, out session.RespondOutput) {
+	if t.suspensions == nil {
+		return
+	}
+	switch out.Mode {
+	case session.ModeClarify:
+		if err := session.PersistSuspension(ctx, t.executor, t.suspensions, sessionID, out.RunID); err != nil {
+			t.warnSuspensionOnce(sessionID, "挂起快照落盘失败，重启后将丢失该挂起: %v", err)
+		}
+	case session.ModeDiagnostic:
+		if err := session.ClearSuspension(ctx, t.suspensions, sessionID); err != nil {
+			t.warnSuspensionOnce(sessionID, "清理挂起快照失败: %v", err)
+		}
+	}
+}
+
+// 挂起持久化降级警告：面向用户可见，同会话同进程只提示一次（避免每轮刷屏）
+// 有进度写出写进度（详细模式 stderr），否则直接写标准错误
+func (t *TowerResponder) warnSuspensionOnce(sessionID, format string, args ...any) {
+	if t.suspensionWarned == nil {
+		t.suspensionWarned = make(map[string]struct{})
+	}
+	if _, done := t.suspensionWarned[sessionID]; done {
+		return
+	}
+	t.suspensionWarned[sessionID] = struct{}{}
+	w := t.progress
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, "aruing: "+format+"\n", args...)
 }
 
 // LastMemoryStats 返回最近一轮 Respond 的记忆观测量（只读副本）
@@ -223,13 +312,23 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}()
 
 	// 挂起恢复优先：会话内有 waiting_user 的 run 时，本轮用户原文作澄清答复，不经动作决策
+	// 进程内索引优先（同进程新鲜度最高）；为空且配了快照存储时自盘恢复（跨进程）
 	if runner, ok := t.executor.(session.SuspendedRunner); ok {
-		if runID := runner.FindSuspended(in.SessionID); runID != "" {
+		runID := runner.FindSuspended(in.SessionID)
+		if runID == "" {
+			var restoreErr error
+			runID, restoreErr = t.restoreSuspendedFromDisk(ctx, in.SessionID)
+			if restoreErr != nil {
+				return session.RespondOutput{}, restoreErr
+			}
+		}
+		if runID != "" {
 			t.progressf("tower: resume suspended run=%s", runID)
 			out, resumeErr := session.Resume(ctx, runner, t.ledger, in.SessionID, runID, in.UserText)
 			if resumeErr != nil {
 				return session.RespondOutput{}, resumeErr
 			}
+			t.settleSuspensionAfterOutcome(ctx, in.SessionID, out)
 			return out, nil
 		}
 	}
@@ -322,6 +421,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 				if escErr != nil {
 					return session.RespondOutput{}, escErr
 				}
+				t.settleSuspensionAfterOutcome(ctx, in.SessionID, out)
 				out.CheckpointContent = view.CheckpointContent
 				return out, nil
 			}
@@ -346,6 +446,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			if escErr != nil {
 				return session.RespondOutput{}, escErr
 			}
+			t.settleSuspensionAfterOutcome(ctx, in.SessionID, out)
 			out.CheckpointContent = view.CheckpointContent
 			return out, nil
 

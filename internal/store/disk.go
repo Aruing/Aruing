@@ -408,6 +408,25 @@ func splitSessionLines(data []byte) []sessionLine {
 	return lines
 }
 
+// 关闭全部已打开会话的追加句柄并清空已打开映射（进程退出前生命周期收口）
+// 幂等：重复调用无副作用；关闭后再追加消息会按需重新加载并重开文件。
+// 不冲刷任何缓冲（写路径无 bufio，写返回即入页缓存），只为及时归还描述符
+func (d *DiskStore) Close() error {
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var firstErr error
+	for id, h := range d.open {
+		if err := h.file.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close session %s: %w", id, err)
+		}
+		delete(d.open, id)
+	}
+	return firstErr
+}
+
 // 校验存储编号可安全充当目录名与文件名成分：含路径分隔符或点段（./..）
 // 的编号按调用方接线错误拒绝，防止越出数据根。读路径由启动扫描的索引
 // 门槛天然挡住越界编号，此处收口写路径，为未来直接受纳外部编号的功能兜底

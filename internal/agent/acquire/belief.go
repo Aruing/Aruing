@@ -3,7 +3,9 @@
 package acquire
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 )
 
@@ -197,4 +199,39 @@ func clamp01(s float64) float64 {
 		return 1
 	}
 	return s
+}
+
+// 信念的线格式：对数域原样存（不存线性域概率，避免长证据链下溢后不可逆）
+type beliefJSON struct {
+	LogP    []float64 `json:"logp"`
+	LogMass float64   `json:"logMass"`
+}
+
+// MarshalJSON 导出信念的精确内部状态：挂起快照跨进程持久化用。
+// 不做归一化假设的重建期校验以外的变换，导出即原状
+func (b Belief) MarshalJSON() ([]byte, error) {
+	return json.Marshal(beliefJSON{LogP: b.logp, LogMass: b.logMass})
+}
+
+// UnmarshalJSON 从对数域载荷重建信念；非空、全部有限值才接受，
+// 否则报错（坏快照归调用方降级处置，不静默归零）
+func (b *Belief) UnmarshalJSON(data []byte) error {
+	var raw beliefJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("acquire: belief payload: %w", err)
+	}
+	if len(raw.LogP) == 0 {
+		return fmt.Errorf("acquire: belief payload: empty logp")
+	}
+	for _, v := range raw.LogP {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return fmt.Errorf("acquire: belief payload: non-finite logp")
+		}
+	}
+	if math.IsNaN(raw.LogMass) || math.IsInf(raw.LogMass, 0) {
+		return fmt.Errorf("acquire: belief payload: non-finite logMass")
+	}
+	b.logp = raw.LogP
+	b.logMass = raw.LogMass
+	return nil
 }
