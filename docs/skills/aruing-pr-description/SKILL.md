@@ -86,6 +86,21 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 pr-agent 评论处理见 `aruing-pr-agent-triage`（实测裁决 + 按类修复 + 批量单推）。
 
+### 6.6 PR 规模自检（参考阈值，非硬限）
+
+push 前看一眼规模（`docs/` 同步与生成物不计入）：
+
+```bash
+git diff <base>...HEAD --stat -- internal/ cmd/ | tail -1
+```
+
+参考阈值：~100 行最好；~300 行单一逻辑可接受；**>500 行必须主动评估**。超限不是自动拆分信号——依赖升级、机械重构、生成物属合理大批量。评估间：内容是否合理、是否清晰、是否会导致 pr-agent 上下文爆炸或审核者无从下手：
+
+- 不合理 → 拆分：按可独立编译验证的层 / 切片建栈式 PR（如 agent → store/session → cmd 装配），不是机械按行数剁碎
+- 合理 → 在 PR 描述「检查」段显式说明理由，由维护者裁决；必要时维护者手动触发 `aruing-pr-review` 兜底审核
+
+步骤设计文档预估超限时，应在设计内预排 PR 切分（见笔记仓《工作流约定》步骤节）。
+
 ### 7. 创建 PR
 
 创建前先过本地闸门：
