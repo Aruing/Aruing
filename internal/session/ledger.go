@@ -10,8 +10,8 @@ import (
 // 按运行编号找不到正式诊断记录时由诊断账本查询返回
 var ErrRunNotFound = errors.New("run not found")
 
-// 一次正式诊断在进程内的可追溯记录（报告加证据）
-// 权威源不是消息摘要；进程退出即丢，非磁盘持久化
+// 一次正式诊断的可追溯记录（报告加证据）
+// 权威源不是消息摘要；磁盘实现留存于会话目录 runs/（见 internal/store）
 type DiagnosticRecord struct {
 	// 正式诊断运行编号
 	RunID string
@@ -25,7 +25,7 @@ type DiagnosticRecord struct {
 	Evidence []core.Evidence
 }
 
-// 正式诊断结果的进程内账本；接口挂在使用方，实现在存储包
+// 正式诊断结果账本；接口挂在使用方，实现在存储包（内存与磁盘两套）
 // 写入成功后可按编号读回；同运行编号重复写入覆盖；不按条数淘汰
 type RunLedger interface {
 	// 写入或覆盖一条诊断记录；调用方持有的切片后续改动不得影响已存数据

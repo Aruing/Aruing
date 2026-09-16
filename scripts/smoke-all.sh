@@ -128,6 +128,8 @@ echo
 
 logs_dir="$ARUING_SCN_DIR/.smoke"
 mkdir -p "$logs_dir"
+# chat 会话数据目录：smoke 本地留存（不污染用户默认数据目录 ~/.aruing/data）
+smoke_data="$ARUING_SCN_DIR/.smoke/data"
 
 declare -a rows
 overall=0
@@ -157,8 +159,8 @@ run_cases() { # <scenario>
 		fi
 		[[ $apply_fail -eq 0 ]] || all_ok=1
 
-		# 逐条 prompt 同 session 续聊：单进程 stdin 行模式（MemoryStore 进程内，
-		# 跨进程 --session 不共享；非 tty stdin 下 chat 逐行同会话跑 Turn）
+		# 逐条 prompt 同 session 续聊：单进程 stdin 行模式（非 tty stdin 下 chat
+		# 逐行同会话跑 Turn）；会话落 smoke 本地数据目录，与用户数据目录隔离
 		total=0 chat_ok=0
 		prompts_tmp="$(mktemp)"
 		while IFS= read -r msg; do
@@ -171,7 +173,7 @@ run_cases() { # <scenario>
 		if [[ $total -gt 0 ]]; then
 			echo "exit" >>"$prompts_tmp"
 			run_step chat "$log" env KUBECONFIG="$PWD/scenarios/.kube/$scn.yaml" \
-				"$PWD/bin/aruing" chat <"$prompts_tmp" && chat_ok=1 || all_ok=1
+				"$PWD/bin/aruing" chat --data-dir "$smoke_data" <"$prompts_tmp" && chat_ok=1 || all_ok=1
 		fi
 		rm -f "$prompts_tmp"
 

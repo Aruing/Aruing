@@ -20,6 +20,8 @@ METHODS="${METHODS:-b1-serial b2-random b4-cheapest ours b3-react}"
 KS="${KS:-1 2 3 5 8}"
 REPS="${REPS:-3}"
 OUT="${OUT:-eval/results/0.1.2}"
+# 会话数据目录：随批隔离（默认 $OUT/data），不污染用户默认数据目录 ~/.aruing/data
+DATA_DIR="${DATA_DIR:-$OUT/data}"
 CONFIG="${CONFIG:-playground/config.yaml}"
 ARUING="${ARUING:-go run ./cmd/aruing}"
 DRYRUN="${DRYRUN:-0}"
@@ -95,14 +97,14 @@ for scn in $SCENARIOS; do
                     envs="$envs ARUING_AGENT_ACQUIRE_SEED=$r"
                 fi
                 if [ "$DRYRUN" = "1" ]; then
-                    printf 'env %s %s run --config %s --eval-json %s "%s"\n' \
-                        "$envs" "$ARUING" "$CONFIG" "$rec" "$q"
+                    printf 'env %s %s run --config %s --data-dir %s --eval-json %s "%s"\n' \
+                        "$envs" "$ARUING" "$CONFIG" "$DATA_DIR" "$rec" "$q"
                     continue
                 fi
                 echo "[$units] $scn $m k=$k r=$r"
                 # 单元失败不中断矩阵（失败 run 全量报告是统计纪律）；
                 # 失败路径同样落评测记录，事后按记录缺失计数
-                if ! env $envs $ARUING run --config "$CONFIG" --eval-json "$rec" "$q" \
+                if ! env $envs $ARUING run --config "$CONFIG" --data-dir "$DATA_DIR" --eval-json "$rec" "$q" \
                     >/dev/null 2>>"$OUT/run.stderr.log"; then
                     echo "  单元非零退出（失败记录仍计入）" >&2
                 fi

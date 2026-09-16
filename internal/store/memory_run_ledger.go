@@ -29,7 +29,8 @@ func NewMemoryRunLedger() *MemoryRunLedger {
 	}
 }
 
-// 写入或覆盖；运行编号为空时返回错误
+// 写入或覆盖；运行编号与会话编号为空时返回错误（会话编号必填与磁盘实现一致，
+// 避免用内存实现的测试路径掩盖漏传接线错误）
 func (l *MemoryRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -37,13 +38,16 @@ func (l *MemoryRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord)
 	if rec.RunID == "" {
 		return fmt.Errorf("run id is required")
 	}
+	if rec.SessionID == "" {
+		return fmt.Errorf("run record requires a session id (run and chat both create sessions)")
+	}
 
 	stored := cloneDiagnosticRecord(rec)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	if _, exists := l.byRun[rec.RunID]; !exists && rec.SessionID != "" {
+	if _, exists := l.byRun[rec.RunID]; !exists {
 		l.bySession[rec.SessionID] = append(l.bySession[rec.SessionID], rec.RunID)
 	}
 	l.byRun[rec.RunID] = stored
