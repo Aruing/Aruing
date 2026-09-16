@@ -364,6 +364,51 @@ func TestDiskStoreTraversalIDsUnreachable(t *testing.T) {
 	}
 }
 
+// 末行 JSON 完整但无换行（撕裂写只丢末字节换行的形态）：内容保留，
+// 加载时补写换行修复，后续追加不再把两行顶成一行拒载整个会话
+func TestDiskStoreUnterminatedValidTailRepaired(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	s, err := store.NewDiskStore(ctx, root)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	newDiskSessionWithMessages(t, s, "sess_t", "u1")
+
+	// 手工构造：去掉末行换行，内容仍为合法 JSON
+	path := filepath.Join(root, "sess_t", "session.jsonl")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if writeErr := os.WriteFile(path, data[:len(data)-1], 0o600); writeErr != nil {
+		t.Fatalf("write: %v", writeErr)
+	}
+
+	reopened, err := store.NewDiskStore(ctx, root)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	msgs, err := reopened.ListMessages(ctx, "sess_t")
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("messages after reopen: %d err=%v", len(msgs), err)
+	}
+	appErr := reopened.AppendMessage(ctx, &session.Message{ID: "sess_t-m2", SessionID: "sess_t", Role: session.RoleUser, Content: "u2", CreatedAt: diskNow})
+	if appErr != nil {
+		t.Fatalf("append: %v", appErr)
+	}
+
+	// 追加后再重开：修复后两行各自完整，全量恢复
+	again, err := store.NewDiskStore(ctx, root)
+	if err != nil {
+		t.Fatalf("reopen2: %v", err)
+	}
+	msgs2, err := again.ListMessages(ctx, "sess_t")
+	if err != nil || len(msgs2) != 2 || msgs2[1].Content != "u2" {
+		t.Fatalf("messages after append: %d err=%v", len(msgs2), err)
+	}
+}
+
 // 写入口拒绝含路径成分的编号：读路径已被索引门槛挡住（见穿越不可达测试），
 // 此处收口写路径，防止未来调用方把外部字符串直接当编号传入越出数据根
 func TestDiskStoreCreateSessionRejectsPathComponentID(t *testing.T) {
