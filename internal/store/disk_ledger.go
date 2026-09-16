@@ -103,6 +103,14 @@ func (l *DiskRunLedger) Put(ctx context.Context, rec session.DiagnosticRecord) e
 		l.bySession[rec.SessionID] = append(l.bySession[rec.SessionID], rec.RunID)
 	}
 	l.byRun[rec.RunID] = rec.SessionID
+	// rename 后同步父目录（目录项不落盘时断电可丢替换本身，违背「旧文件
+	// 或完整新文件」）；放在索引更新之后：目录同步失败时记录已 rename 落位，
+	// 索引如实反映盘上事实，同号换会话重试仍被跨会话守卫拒绝，不会留下
+	// 孤儿记录导致重启扫描拒启
+	dir := filepath.Join(l.root, rec.SessionID, runsDirName)
+	if err := dirSync(dir); err != nil {
+		return fmt.Errorf("sync runs dir %s: %w", dir, err)
+	}
 	return nil
 }
 
@@ -210,9 +218,8 @@ func (l *DiskRunLedger) writeRecordLocked(rec session.DiagnosticRecord) error {
 	}
 	// 落盘后再替换：延迟分配文件系统上 rename 可能先于数据块持久化，
 	// 断电后出现空/半记录，违背「旧文件或完整新文件」承诺。
-	// rename 后还须同步父目录：目录项不落盘时断电可丢替换本身，
-	// 数据块已持久但记录消失，同样违背承诺。每诊断仅一次写入，
-	// 两次 Sync 代价可忽略（会话逐行追加不 fsync 是另一裁决）
+	// 每诊断仅一次写入，Sync 代价可忽略（会话逐行追加不 fsync 是另一裁决；
+	// 目录项同步由 Put 在更新索引后执行）
 	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		return fmt.Errorf("sync temp run record: %w", err)
@@ -223,9 +230,6 @@ func (l *DiskRunLedger) writeRecordLocked(rec session.DiagnosticRecord) error {
 	target := l.recordPath(rec.SessionID, rec.RunID)
 	if err := os.Rename(tmpName, target); err != nil {
 		return fmt.Errorf("replace run record %s: %w", target, err)
-	}
-	if err := syncDir(dir); err != nil {
-		return fmt.Errorf("sync runs dir %s: %w", dir, err)
 	}
 	return nil
 }
@@ -244,6 +248,9 @@ func syncDir(dir string) error {
 	defer d.Close()
 	return d.Sync()
 }
+
+// 目录同步钩子：生产恒为 syncDir，拆出变量为测试注入目录 fsync 故障
+var dirSync = syncDir
 
 // 按索引定位并读回记录拷贝（调用方持锁）；文件内容归属不匹配视为损坏
 func (l *DiskRunLedger) readLocked(runID string) (session.DiagnosticRecord, error) {
