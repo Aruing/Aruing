@@ -193,6 +193,8 @@ type sessionStack struct {
 	tower *agent.TowerResponder
 	// 编排器（LastRunStats 逐诊断统计）
 	orch *agent.Orchestrator
+	// 会话与消息存储（供退出前关闭磁盘句柄）
+	store session.Store
 	// 诊断账本（内嵌 RunRecord 组装与 from_ledger 展开的权威源）
 	ledger session.RunLedger
 	// token 用量跟踪器（适配器未实现时为 nil）
@@ -210,20 +212,25 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 }
 
 // 按数据目录分派存储实现：空 → 内存（仅测试与编程式装配），非空 → 磁盘。
-// 磁盘实现打开即建目录（0700）并扫索引；产品路径的 DataDir 由加载链填默认，永不空
-func openStores(ctx context.Context, dataDir string) (session.Store, session.RunLedger, error) {
+// 磁盘实现打开即建目录（0700）并扫索引；产品路径的 DataDir 由加载链填默认，永不空。
+// 挂起快照存储同源分派：内存路径返回 nil（挂起不持久化，行为同进程内形态）
+func openStores(ctx context.Context, dataDir string) (session.Store, session.RunLedger, session.SuspensionStore, error) {
 	if strings.TrimSpace(dataDir) == "" {
-		return store.NewMemoryStore(), store.NewMemoryRunLedger(), nil
+		return store.NewMemoryStore(), store.NewMemoryRunLedger(), nil, nil
 	}
 	st, err := store.NewDiskStore(ctx, dataDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	ledger, err := store.NewDiskRunLedger(ctx, dataDir)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return st, ledger, nil
+	susp, err := store.NewDiskSuspensionStore(ctx, dataDir)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return st, ledger, susp, nil
 }
 
 // 组装会话栈全量句柄（newSessionStack 的全量形态）
@@ -263,7 +270,7 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 		return nil, acqErr
 	}
 
-	st, ledger, err := openStores(context.Background(), cfg.Storage.DataDir)
+	st, ledger, susp, err := openStores(context.Background(), cfg.Storage.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("open stores %s: %w", cfg.Storage.DataDir, err)
 	}
@@ -282,6 +289,8 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 	if memErr := configureMemory(tower, cfg); memErr != nil {
 		return nil, memErr
 	}
+	// 挂起快照跨进程恢复：磁盘路径落盘 + 轮首自盘恢复；内存路径 nil 不持久化
+	tower.SetSuspensionStore(susp)
 	if cfg.Debug {
 		tower.SetProgress(progress)
 	}
@@ -291,6 +300,7 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 		service: session.NewService(st, factory, tower),
 		tower:   tower,
 		orch:    orch,
+		store:   st,
 		ledger:  ledger,
 		tracker: tracker,
 	}, nil

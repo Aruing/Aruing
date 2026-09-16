@@ -186,62 +186,67 @@ type entityFactory interface {
 	Now() time.Time
 }
 
-// 进程内挂起运行快照：澄清后 Resume 按阶段派发重跑/续跑
-// 不做磁盘持久化；进程退出即丢
-type suspendedRun struct {
+// 挂起运行快照：澄清后 Resume 按阶段派发重跑/续跑；进程内索引 + 跨进程序列化同一形态
+// （ExportSuspended/ImportSuspended 以 JSON 载荷进出，格式版本见 V）
+type SuspensionSnapshot struct {
+	// 载荷格式版本；未知版本导入明确报错（升级时走迁移）
+	V int `json:"v"`
 	// 运行快照（含问题与会话编号）
-	run core.Run
+	Run core.Run `json:"run"`
 	// 解析后的问题结构，Resume 时复用避免重复解析
-	query core.Query
+	Query core.Query `json:"query"`
 	// 挂起阶段（resolve / investigate）；Resume 据此派发
-	stage string
+	Stage string `json:"stage"`
 	// 定位状态（任务、证据、澄清累积）；stage=resolve 时有效
-	resolve ResolveState
+	Resolve ResolveState `json:"resolve"`
 	// 调查状态（猜想、任务、证据、判决、澄清累积）；stage=investigate 时有效
-	investigate InvestigateState
+	Investigate InvestigateState `json:"investigate"`
 	// 调查挂起前已完成的侦察产物；Resume 续跑复用（不重复侦察、不丢证据与规划上下文）
-	recon *reconResult
+	Recon *ReconResult `json:"recon,omitempty"`
 	// 最近一次澄清请求（面向用户）
-	clarify ClarifyRequest
+	Clarify ClarifyRequest `json:"clarify"`
 }
+
+// 当前快照载荷格式版本
+const suspensionSnapshotVersion = 1
 
 // 一次集群侦察的产物：进报告链的证据（不进验证器输入）与喂规划器的资源清单
 // resolveCount 为定位证据在种子中的前缀长度，完成链按此插位侦察证据
-type reconResult struct {
+type ReconResult struct {
 	// 侦察证据；可能为失败证据或 nil（未启用/未尝试）
-	evidence *core.Evidence
+	Evidence *core.Evidence `json:"evidence,omitempty"`
 	// 解析出的资源类型清单；失败或无输出时为空
-	resources []ClusterResource
+	Resources []ClusterResource `json:"resources,omitempty"`
 	// 侦察证据在最终证据链中的插位（定位块之后）；resume 路径据此还原链序
-	resolveCount int
+	ResolveCount int `json:"resolveCount"`
 }
 
 // 调查阶段累积状态：investigateLoop 的种子与挂起快照载体，镜像 ResolveState 角色
 // Resume 续跑时全量携带（保留调查进度），Round 重置（预算只计本段工具调用）
 type InvestigateState struct {
 	// 定位阶段已确认的目标（调查输入；Resume 续跑保留）
-	Targets []core.Target
+	Targets []core.Target `json:"targets,omitempty"`
 	// 跨轮累积的候选猜想；验证器每轮拿全量重判
-	Hypotheses []core.Hypothesis
+	Hypotheses []core.Hypothesis `json:"hypotheses,omitempty"`
 	// 已登记录的取证任务
-	Tasks []core.Task
+	Tasks []core.Task `json:"tasks,omitempty"`
 	// 累积证据（定位种子 + 调查取证）
-	Evidence []core.Evidence
+	Evidence []core.Evidence `json:"evidence,omitempty"`
 	// 最近一轮判决；首轮为空
-	Verdicts []core.Verdict
+	Verdicts []core.Verdict `json:"verdicts,omitempty"`
 	// 本段调查循环的工具调用轮计数（预算计数，挂起恢复时重置）
-	Round int
+	Round int `json:"round"`
 	// 本段调查轮数预算上限；零值由循环用默认
-	MaxRounds int
+	MaxRounds int `json:"maxRounds"`
 	// 用户澄清的累积答复（Resume 注入）
-	Clarifications []string
+	Clarifications []string `json:"clarifications,omitempty"`
 	// 取证决策循环状态（ours 路径专用；B1 路径为 nil 不参与）
 	// 挂起快照整体携带，Resume 后信念与动作池连续
-	Acquire *AcquireState
+	Acquire *AcquireState `json:"acquire,omitempty"`
 	// 已收集的决策轨迹（观测非进度，但随快照携带）：ask 挂起时存入，Resume
 	// 段继续累积——否则恢复段的 defer 会用局部轨迹覆盖，挂起前历史丢失
 	// （pr-agent #134 R2）；挂起轮在恢复段重跑，轮号可重复，按发生序保留
-	Trace []DecisionTraceEntry
+	Trace []DecisionTraceEntry `json:"trace,omitempty"`
 }
 
 // 取证决策循环的跨轮状态（ours 路径）
@@ -250,13 +255,13 @@ type InvestigateState struct {
 // 挂起时整体进快照，Resume 续跑不重规划不丢进度
 type AcquireState struct {
 	// 当前信念（与循环内 hypotheses 索引对齐）
-	Belief acquire.Belief
+	Belief acquire.Belief `json:"belief"`
 	// 未执行的候选动作池（已执行/已挂起的按名移出）
-	Actions []ActionProposal
+	Actions []ActionProposal `json:"actions,omitempty"`
 	// 已执行过的动作名（重规划后去重，不重复执行同名动作）
-	Executed []string
+	Executed []string `json:"executed,omitempty"`
 	// 待答复的问用户动作（挂起时非 nil；Resume 后按答复归类更新并清空）
-	Asked *ActionProposal
+	Asked *ActionProposal `json:"asked,omitempty"`
 }
 
 // 保存完整假闭环所需的角色和执行依赖
@@ -301,7 +306,7 @@ type Orchestrator struct {
 	// 最近一次调查循环的只读统计（轮数）；LastRunStats 读取
 	// 只作评测观测，不参与任何编排决策
 	lastStats RunStats
-	suspended map[string]*suspendedRun
+	suspended map[string]*SuspensionSnapshot
 }
 
 // RunStats 一次运行的观测统计（只读快照，不参与编排决策）
@@ -513,38 +518,38 @@ func (o *Orchestrator) Resume(ctx context.Context, runID, answer string) (core.O
 		return core.Outcome{}, fmt.Errorf("resume: no suspended run %q", runID)
 	}
 
-	o.progressf("恢复运行 %s（%s 澄清已注入）…", runID, snap.stage)
-	switch snap.stage {
+	o.progressf("恢复运行 %s（%s 澄清已注入）…", runID, snap.Stage)
+	switch snap.Stage {
 	case core.StageResolve:
-		state := snap.resolve
+		state := snap.Resolve
 		state.Clarifications = append(slices.Clone(state.Clarifications), strings.TrimSpace(answer))
 		// 澄清后重跑定位：保留已取证据与任务，但重置轮次预算计数，避免触顶后无法消歧
 		// 证据/任务仍回喂驱动；Round 仅表示本段工具调用次数
 		state.Round = 0
-		return o.continueFromResolve(ctx, snap.run, snap.query, state)
+		return o.continueFromResolve(ctx, snap.Run, snap.Query, state)
 	case core.StageInvestigate:
-		state := snap.investigate
+		state := snap.Investigate
 		state.Clarifications = append(slices.Clone(state.Clarifications), strings.TrimSpace(answer))
 		// 澄清后续跑调查：保留全部调查进度（猜想/任务/证据/判决），仅重置预算计数
 		// 侦察产物自快照复用（不重复侦察、不丢证据与规划上下文）
 		state.Round = 0
-		return o.continueFromInvestigate(ctx, snap.run, snap.query, state, -1, snap.recon)
+		return o.continueFromInvestigate(ctx, snap.Run, snap.Query, state, -1, snap.Recon)
 	default:
 		// 未知阶段不应发生（挂起仅在编排 switch 内产生）；防御性归位快照并明确失败
 		o.putSuspendedRun(snap)
-		return core.Outcome{}, fmt.Errorf("resume: unknown suspension stage %q", snap.stage)
+		return core.Outcome{}, fmt.Errorf("resume: unknown suspension stage %q", snap.Stage)
 	}
 }
 
 // 把快照存入挂起索引并标记运行状态为等待用户（各阶段挂起的共用入口）
-func (o *Orchestrator) putSuspendedRun(snap *suspendedRun) {
+func (o *Orchestrator) putSuspendedRun(snap *SuspensionSnapshot) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.suspended == nil {
-		o.suspended = make(map[string]*suspendedRun)
+		o.suspended = make(map[string]*SuspensionSnapshot)
 	}
-	snap.run.Status = core.RunStatusWaitingUser
-	o.suspended[snap.run.ID] = snap
+	snap.Run.Status = core.RunStatusWaitingUser
+	o.suspended[snap.Run.ID] = snap
 }
 
 // 查找会话内挂起运行编号；无则空串
@@ -556,11 +561,58 @@ func (o *Orchestrator) FindSuspended(sessionID string) string {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	for id, snap := range o.suspended {
-		if snap != nil && snap.run.SessionID == sessionID {
+		if snap != nil && snap.Run.SessionID == sessionID {
 			return id
 		}
 	}
 	return ""
+}
+
+// 导出挂起快照的序列化载荷：跨进程持久化用（挂起不因重启丢失）
+// 深拷贝后序列化，载荷与进程内状态不共享底层数组；runID 不存在时明确报错
+func (o *Orchestrator) ExportSuspended(runID string) ([]byte, error) {
+	if o == nil {
+		return nil, errors.New("export suspended: orchestrator is nil")
+	}
+	if strings.TrimSpace(runID) == "" {
+		return nil, errors.New("export suspended: run id is required")
+	}
+	o.mu.Lock()
+	snap, ok := o.suspended[runID]
+	o.mu.Unlock()
+	if !ok || snap == nil {
+		return nil, fmt.Errorf("export suspended: no suspended run %q", runID)
+	}
+	b, err := json.Marshal(cloneSuspensionSnapshot(snap))
+	if err != nil {
+		return nil, fmt.Errorf("export suspended %s: %w", runID, err)
+	}
+	return b, nil
+}
+
+// 导入快照载荷回进程内挂起索引：跨进程恢复（Tower 轮首自盘恢复路径）
+// 校验版本、编号与阶段后归位（幂等覆盖）；坏载荷明确报错，降级策略归调用方
+func (o *Orchestrator) ImportSuspended(payload []byte) error {
+	if o == nil {
+		return errors.New("import suspended: orchestrator is nil")
+	}
+	var snap SuspensionSnapshot
+	if err := json.Unmarshal(payload, &snap); err != nil {
+		return fmt.Errorf("import suspended: %w", err)
+	}
+	if snap.V != suspensionSnapshotVersion {
+		return fmt.Errorf("import suspended: unsupported snapshot version %d (want %d)", snap.V, suspensionSnapshotVersion)
+	}
+	if strings.TrimSpace(snap.Run.ID) == "" {
+		return errors.New("import suspended: run id is required")
+	}
+	switch snap.Stage {
+	case core.StageResolve, core.StageInvestigate:
+	default:
+		return fmt.Errorf("import suspended: unknown suspension stage %q", snap.Stage)
+	}
+	o.putSuspendedRun(&snap)
+	return nil
 }
 
 // 自定位阶段继续：可被 Execute（空 state）与 Resume（带澄清）共用
@@ -603,7 +655,7 @@ func (o *Orchestrator) continueFromInvestigate(
 	query core.Query,
 	seed InvestigateState,
 	resolveSeedCount int,
-	prior *reconResult,
+	prior *ReconResult,
 ) (core.Outcome, error) {
 	if seed.MaxRounds <= 0 {
 		if o.investigateMaxRounds > 0 {
@@ -619,14 +671,14 @@ func (o *Orchestrator) continueFromInvestigate(
 	recon := prior
 	if recon == nil && resolveSeedCount >= 0 {
 		ev, resources := o.reconCluster(ctx, run.ID)
-		recon = &reconResult{evidence: ev, resources: resources, resolveCount: resolveSeedCount}
+		recon = &ReconResult{Evidence: ev, Resources: resources, ResolveCount: resolveSeedCount}
 		if resources != nil {
 			o.progressf("侦察到 %d 种资源类型", len(resources))
 		}
 	}
 	var clusterResources []ClusterResource
 	if recon != nil {
-		clusterResources = recon.resources
+		clusterResources = recon.Resources
 	}
 
 	// 调查阶段为编排可见循环：按方法分派——B1 走旧串行循环（零改保真），
@@ -665,7 +717,7 @@ func (o *Orchestrator) continueFromInvestigate(
 	// 报告器只看定位与调查证据（侦察是上下文，不是结论依据）；返回链含侦察供命令行渲染
 	var chain []core.Evidence
 	if recon != nil {
-		chain = appendEvidence(evidence, recon.evidence, recon.resolveCount)
+		chain = appendEvidence(evidence, recon.Evidence, recon.ResolveCount)
 	} else {
 		chain = evidence
 	}
@@ -682,12 +734,13 @@ func (o *Orchestrator) continueFromInvestigate(
 
 // 存入定位阶段挂起快照并标记运行状态为等待用户；深拷贝定位状态避免污染
 func (o *Orchestrator) putResolveSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state ResolveState) {
-	snap := &suspendedRun{
-		run:     run,
-		query:   query,
-		stage:   core.StageResolve,
-		resolve: cloneResolveState(state),
-		clarify: ClarifyRequest{
+	snap := &SuspensionSnapshot{
+		V:       suspensionSnapshotVersion,
+		Run:     run,
+		Query:   query,
+		Stage:   core.StageResolve,
+		Resolve: cloneResolveState(state),
+		Clarify: ClarifyRequest{
 			Question: clarify.Question,
 			Options:  slices.Clone(clarify.Options),
 		},
@@ -696,14 +749,15 @@ func (o *Orchestrator) putResolveSuspended(run core.Run, query core.Query, clari
 }
 
 // 存入调查阶段挂起快照；深拷贝调查状态并携带侦察产物（保留进度续跑，Resume 派发见 StageInvestigate case）
-func (o *Orchestrator) putInvestigateSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state InvestigateState, recon *reconResult) {
-	snap := &suspendedRun{
-		run:         run,
-		query:       query,
-		stage:       core.StageInvestigate,
-		investigate: cloneInvestigateState(state),
-		recon:       recon,
-		clarify: ClarifyRequest{
+func (o *Orchestrator) putInvestigateSuspended(run core.Run, query core.Query, clarify ClarifyRequest, state InvestigateState, recon *ReconResult) {
+	snap := &SuspensionSnapshot{
+		V:           suspensionSnapshotVersion,
+		Run:         run,
+		Query:       query,
+		Stage:       core.StageInvestigate,
+		Investigate: cloneInvestigateState(state),
+		Recon:       recon,
+		Clarify: ClarifyRequest{
 			Question: clarify.Question,
 			Options:  slices.Clone(clarify.Options),
 		},
@@ -712,7 +766,7 @@ func (o *Orchestrator) putInvestigateSuspended(run core.Run, query core.Query, c
 }
 
 // 取出并删除挂起快照；不存在时返回 false，调用方据此报错或降级
-func (o *Orchestrator) takeSuspended(runID string) (*suspendedRun, bool) {
+func (o *Orchestrator) takeSuspended(runID string) (*SuspensionSnapshot, bool) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.suspended == nil {
@@ -764,6 +818,38 @@ func cloneInvestigateState(state InvestigateState) InvestigateState {
 		cloned.Acquire = &acq
 	}
 	return cloned
+}
+
+// 深拷贝整张挂起快照：导出载荷与进程内状态不共享底层数组
+// （V 归一为当前版本；侦察产物与澄清请求一并拷贝）
+func cloneSuspensionSnapshot(snap *SuspensionSnapshot) SuspensionSnapshot {
+	return SuspensionSnapshot{
+		V:           suspensionSnapshotVersion,
+		Run:         snap.Run,
+		Query:       snap.Query,
+		Stage:       snap.Stage,
+		Resolve:     cloneResolveState(snap.Resolve),
+		Investigate: cloneInvestigateState(snap.Investigate),
+		Recon:       cloneReconResult(snap.Recon),
+		Clarify: ClarifyRequest{
+			Question: snap.Clarify.Question,
+			Options:  slices.Clone(snap.Clarify.Options),
+		},
+	}
+}
+
+// 深拷贝侦察产物：证据值拷贝 + 资源清单切片拷贝
+func cloneReconResult(r *ReconResult) *ReconResult {
+	if r == nil {
+		return nil
+	}
+	cloned := *r
+	if r.Evidence != nil {
+		ev := *r.Evidence
+		cloned.Evidence = &ev
+	}
+	cloned.Resources = slices.Clone(r.Resources)
+	return &cloned
 }
 
 // 把侦察证据插入到证据链的定位块之后、调查块之前（按发生时间顺序）

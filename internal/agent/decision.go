@@ -44,23 +44,23 @@ type PlanDecision struct {
 // 本结构不进 core（动作提议是规划中间态，执行才落 Task/Evidence）
 type ActionProposal struct {
 	// 动作名，人读标识，计划内唯一；用于日志、实验记录与编排映射
-	Name string
+	Name string `json:"name"`
 	// 只读 kubectl 参数（不含 kubectl 本身），例如 ["get","pods","-n","demo"]
 	// 为空表示非工具动作（问用户）；与 Ask 互斥
-	Argv []string
+	Argv []string `json:"argv,omitempty"`
 	// 问用户动作的问题文本；非空表示问用户，此时 Argv 必须为空
 	// 动作的结果类别（Outcomes）即用户可能给出的回答类别
-	Ask string
+	Ask string `json:"ask,omitempty"`
 	// 本次取证要证明或排除什么；映射 Task 时作为 Purpose
-	Purpose string
+	Purpose string `json:"purpose,omitempty"`
 	// 成本粗档：1 轻查 / 2 普查 / 5 重扫；问用户动作固定 askCost
 	// 解析期已归一为正有限值（非法值回 1，与 acquire.NewAction 同口径）
-	Cost float64
+	Cost float64 `json:"cost"`
 	// 结果类别名列表，顺序即矩阵列序；须唯一且非空
-	Outcomes []string
+	Outcomes []string `json:"outcomes,omitempty"`
 	// 判别矩阵 d[i][j] = P(Outcomes[j] | 第 i 个假设成立)，行序对齐
 	// PlanDecision.Hypotheses；行归一交给 acquire.NewAction 在构造期做
-	Matrix [][]float64
+	Matrix [][]float64 `json:"matrix,omitempty"`
 }
 
 // 判定一条富文本证据相对每个假设的方向与强度（(d,s) 素材）

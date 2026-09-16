@@ -188,13 +188,18 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
 	}
-	st, ledger, err := openStores(context.Background(), cfg.Storage.DataDir)
+	st, ledger, susp, err := openStores(context.Background(), cfg.Storage.DataDir)
 	if err != nil {
 		return formatRunError(fmt.Errorf("open stores: %w", err))
 	}
+	// 退出前归还磁盘句柄（内存实现无 Close，不受影响）
+	defer closeStores(st)
 	// run 与 chat 统一为会话模型：单次 run 也建会话（一问一答），产物落盘可经
-	// aruing chat --session 续聊追问；诊断执行仍走同一编排器与调度器（#17）
-	svc := session.NewService(st, factory, session.NewDiagnoseResponder(factory, orchestrator, ledger))
+	// aruing chat --session 续聊追问；诊断执行仍走同一编排器与调度器（#17）。
+	// 挂起快照落盘：run 进程随后即退出，落盘后澄清问题才能跨进程恢复
+	diagnose := session.NewDiagnoseResponder(factory, orchestrator, ledger)
+	diagnose.SetSuspensionStore(susp)
+	svc := session.NewService(st, factory, diagnose)
 	sess, err := svc.NewSession(context.Background())
 	if err != nil {
 		return formatRunError(fmt.Errorf("create session: %w", err))
@@ -362,10 +367,13 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	// 进度协调器：编排/Tower 的 progress 行先落到这里；inline 模式绑定终端后
 	// 与 spinner 同屏重绘，其余模式（单句 / stdin 行 / app）透传 stderr 维持现状
 	progress := tui.NewTurnProgress(stderr)
-	svc, err := newSessionStack(factory, cfg, progress)
+	stack, err := newSessionStackFull(factory, cfg, progress)
 	if err != nil {
 		return formatRunError(err)
 	}
+	svc := stack.service
+	// 退出前归还磁盘句柄（内存实现无 Close，不受影响）
+	defer closeStores(stack.store)
 
 	ctx := context.Background()
 	sessionID := strings.TrimSpace(*sessionIDFlag)
@@ -397,6 +405,14 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 
 	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回
 	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI, progress)
+}
+
+// 退出前关闭磁盘存储句柄（P2-3 生命周期收口）；内存实现无 Close 不受影响，
+// 关闭失败不阻断退出（写路径无缓冲，内容已入页缓存）
+func closeStores(st session.Store) {
+	if c, ok := st.(io.Closer); ok {
+		_ = c.Close()
+	}
 }
 
 // 非 tty stdin 行模式：每行一 Turn，同会话；空行忽略，exit/quit 停止。
