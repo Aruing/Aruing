@@ -55,6 +55,8 @@ type fakeSpoolFile struct {
 	aborted   bool
 	// 非空时首次 Write 返回该错误（模拟盘中途故障）
 	writeErr error
+	// 非空时 Commit 返回该错误（模拟收尾故障）
+	commitErr error
 }
 
 func (f *fakeSpoolFile) Write(p []byte) (int, error) {
@@ -67,6 +69,9 @@ func (f *fakeSpoolFile) Write(p []byte) (int, error) {
 }
 
 func (f *fakeSpoolFile) Commit() (string, error) {
+	if f.commitErr != nil {
+		return "", f.commitErr
+	}
 	f.committed = true
 	f.ref = fmt.Sprintf("spool-%d", len(f.sessionID))
 	return f.ref, nil
@@ -179,6 +184,37 @@ func TestToolExecuteSpillCreateFailure(t *testing.T) {
 	}
 	if !strings.Contains(evidence.Summary, "残缺原文见 raw") {
 		t.Fatalf("summary should keep legacy truncation note, got: %s", evidence.Summary)
+	}
+}
+
+// 提交失败：降级旧截断语义且盘上半文件被真清理（钉板 pr-agent R3：
+// finalize 不能只标记不 Abort）
+func TestToolExecuteSpillCommitFailureDegradation(t *testing.T) {
+	full := strings.Repeat("x\n", 200)
+	kubectl := writeFakeKubectlCat(t, full)
+	spool := &fakeSpoolStore{}
+	spool.onCreate = func(f *fakeSpoolFile) { f.commitErr = errors.New("dir sync down") }
+	tool := mustNewTool(t, Config{
+		KubectlPath:    kubectl,
+		MaxStdoutBytes: 128,
+		Spool:          spool,
+	})
+
+	ctx := tools.WithSpoolScope(context.Background(), "sess_cfail")
+	evidence, err := tool.Execute(ctx, mustArgs(t, map[string]any{"argv": []string{"logs", "web"}}))
+	if err != nil {
+		t.Fatalf("execute must survive commit failure: %v", err)
+	}
+
+	raw := decodeRaw(t, evidence.Raw)
+	if raw.StdoutSpool != nil {
+		t.Fatal("no spool ref after commit failure")
+	}
+	if len(spool.files) != 1 || !spool.files[0].aborted || spool.files[0].committed {
+		t.Fatal("failed spool file should be aborted (cleaned), not committed")
+	}
+	if !strings.Contains(evidence.Summary, "残缺原文见 raw") {
+		t.Fatalf("summary should degrade to legacy note, got: %s", evidence.Summary)
 	}
 }
 

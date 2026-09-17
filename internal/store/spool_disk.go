@@ -67,7 +67,7 @@ func (s *DiskSpoolStore) Create(ctx context.Context, sessionID string) (tools.Sp
 	if err != nil {
 		return nil, fmt.Errorf("create temp spool: %w", err)
 	}
-	return &diskSpoolFile{f: f}, nil
+	return &diskSpoolFile{f: f, path: f.Name()}, nil
 }
 
 // 打开已留存的 spool 原文供流式读；文件不存在或含路径成分时明确报错
@@ -100,10 +100,13 @@ func requireSpoolSession(sessionID string) error {
 	return checkStorageID(sessionID)
 }
 
-// spool 写入流：包装临时文件，Commit 时落盘转正，Abort 时删除半文件
+// spool 写入流：包装临时文件，Commit 时落盘转正，Abort 时删除半文件。
+// path 跟踪当前实际文件名（rename 后更新），失败路径据此自清理，不留孤儿
 type diskSpoolFile struct {
 	// 临时文件句柄
 	f *os.File
+	// 当前实际文件名（未转正为临时名，rename 后为终名）
+	path string
 }
 
 func (w *diskSpoolFile) Write(p []byte) (int, error) {
@@ -111,31 +114,43 @@ func (w *diskSpoolFile) Write(p []byte) (int, error) {
 }
 
 // 收尾：Sync + Close + rename 转正（临时名去临时前缀）+ 父目录同步；
-// 返回最终引用名。rename 后临时文件已不存在
+// 返回最终引用名。任一步失败时自清理当前文件（spool 文件名随机不复用，
+// 失败残留不会被后续覆盖，必须就地删除，否则反复失败无限积累）
 func (w *diskSpoolFile) Commit() (string, error) {
 	if err := w.f.Sync(); err != nil {
 		w.f.Close()
+		w.removeCurrent()
 		return "", fmt.Errorf("sync spool: %w", err)
 	}
 	tmpName := w.f.Name()
 	if err := w.f.Close(); err != nil {
+		w.removeCurrent()
 		return "", fmt.Errorf("close spool: %w", err)
 	}
 	base := filepath.Base(tmpName)
 	ref := spoolFinalPrefix + strings.TrimPrefix(base, spoolTmpPrefix)
 	target := filepath.Join(filepath.Dir(tmpName), ref)
 	if err := os.Rename(tmpName, target); err != nil {
+		w.removeCurrent()
 		return "", fmt.Errorf("finalize spool: %w", err)
 	}
+	w.path = target
 	if err := dirSync(filepath.Dir(tmpName)); err != nil {
+		// rename 已完成：目录同步失败报错，由上层 Abort 按当前终名清理
 		return "", fmt.Errorf("sync spool dir: %w", err)
 	}
 	return ref, nil
 }
 
-// 放弃：关闭并删除未提交的临时文件，不留残缺引用
+// 放弃：关闭并删除当前文件（未提交的临时文件或 dirSync 失败后的终名孤儿）
 func (w *diskSpoolFile) Abort() {
-	name := w.f.Name()
 	w.f.Close()
-	_ = os.Remove(name)
+	w.removeCurrent()
+}
+
+// 删除当前实际文件；不存在时静默（幂等）
+func (w *diskSpoolFile) removeCurrent() {
+	if w.path != "" {
+		_ = os.Remove(w.path)
+	}
 }

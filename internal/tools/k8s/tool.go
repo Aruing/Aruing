@@ -361,7 +361,8 @@ func (s *spoolSink) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// 收尾：写失败或提交失败时放弃并返回 nil（降级旧截断语义）；成功返回引用
+// 收尾：写失败或提交失败时放弃并返回 nil（降级旧截断语义，必须真调
+// Abort 清理盘上文件）；成功返回引用
 func (s *spoolSink) finalize() *tools.SpoolRef {
 	if s == nil {
 		return nil
@@ -372,7 +373,7 @@ func (s *spoolSink) finalize() *tools.SpoolRef {
 	}
 	ref, err := s.file.Commit()
 	if err != nil {
-		s.aborted = true
+		s.discard()
 		return nil
 	}
 	return &tools.SpoolRef{

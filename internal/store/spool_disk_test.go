@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -115,4 +116,43 @@ func TestDiskSpoolStoreOpenMissing(t *testing.T) {
 	if _, err := s.Open(context.Background(), "sess_a", "spool-none"); err == nil {
 		t.Fatal("open missing ref should fail")
 	}
+}
+
+// 提交失败自清理：dirSync 失败时 rename 已完成，Abort 须按当前终名清掉孤儿
+// （spool 文件名随机不复用，失败残留不会被后续覆盖，钉板 pr-agent R3）
+func TestDiskSpoolStoreCommitDirSyncFailureCleanup(t *testing.T) {
+	root := t.TempDir()
+	s, err := NewDiskSpoolStore(context.Background(), root)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	f, err := s.Create(context.Background(), "sess_c")
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, werr := io.WriteString(f, "content"); werr != nil {
+		t.Fatalf("write: %v", werr)
+	}
+	// 注入目录同步故障：Commit 报错，rename 后的终名孤儿由 Abort 清理
+	restore := failDirSync(t)
+	defer restore()
+	if _, cerr := f.Commit(); cerr == nil {
+		t.Fatal("commit should fail on dir sync error")
+	}
+	f.Abort()
+	entries, rerr := os.ReadDir(filepath.Join(root, "sess_c", "spool"))
+	if rerr != nil {
+		t.Fatalf("list spool dir: %v", rerr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("spool dir after failed commit + abort = %v, want empty", entries)
+	}
+}
+
+// 替换目录同步钩子为故障；返回恢复函数
+func failDirSync(t *testing.T) func() {
+	t.Helper()
+	orig := dirSync
+	dirSync = func(string) error { return errors.New("dir sync down") }
+	return func() { dirSync = orig }
 }
