@@ -75,7 +75,9 @@ func buildTooling(toolsCfg config.Tools, llmClient llm.Client, spool tools.Spool
 	}
 
 	obsIndex := tools.NewObservationIndex()
-	evidenceRead, err := tools.NewEvidenceReadTool(obsIndex, registry)
+	// evidence.read 与 Tower 共用同一轮内索引；spool 随磁盘路径注入，
+	// 带盘上引用的超巨观察可翻到截断点之后（内存路径 nil，navError 引导重查）
+	evidenceRead, err := tools.NewEvidenceReadTool(obsIndex, registry, spool)
 	if err != nil {
 		return tooling{}, fmt.Errorf("create evidence.read tool: %w", err)
 	}

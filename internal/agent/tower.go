@@ -341,6 +341,11 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 		return session.RespondOutput{}, fmt.Errorf("tower list diagnostic runs: %w", listErr)
 	}
 
+	// 轮首回灌（跨进程翻页）：账本证据带盘上留存引用的按其账本编号进本轮观察索引，
+	// 重启后旧超巨观察仍可 evidence.read 翻页（#18，版本头标志 1 末项）；
+	// 只回灌带引用条目（裁决：内存代价小），编号计入轮末 Discard
+	t.rehydrateSpooledEvidence(records, &putEvidenceIDs)
+
 	// 记忆组装按方法分派：ours = tier-aware（R 卡片锁定常驻 + W 窗口 + C 压缩）
 	// D1 / D2 为纯记忆策略实验臂——无卡片无回灌（对照口径：回灌与卡片归 ours 组件）
 	var view towerContextView
@@ -633,6 +638,25 @@ func (t *TowerResponder) mapTowerDecision(out towerLLMOutput) towerDecision {
 		}
 	}
 	return decision
+}
+
+// 账本中带盘上留存引用的证据按其账本编号 Put 进本轮观察索引（Raw 原样，
+// evidence.read 单点探测引用）；编号进 putIDs 供轮末 Discard。
+// 索引未配置或账本为空时无操作；与记忆方法无关（导航能力，非记忆组装）
+func (t *TowerResponder) rehydrateSpooledEvidence(records []session.DiagnosticRecord, putIDs *[]string) {
+	if t.obsIndex == nil || len(records) == 0 {
+		return
+	}
+	for _, rec := range records {
+		for i := range rec.Evidence {
+			ev := &rec.Evidence[i]
+			if ev.ID == "" || len(ev.Raw) == 0 || tools.StdoutSpoolRef(ev.Raw) == nil {
+				continue
+			}
+			t.obsIndex.Put(ev.ID, tools.ObsRecord{Raw: ev.Raw, ToolName: ev.ToolName})
+			*putIDs = append(*putIDs, ev.ID)
+		}
+	}
 }
 
 // 轻量集群资源类型侦察：每轮由应答调用至多一次

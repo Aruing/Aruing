@@ -22,11 +22,15 @@ const (
 	lineRenderTruncateRunes = 240
 )
 
-// 按 evidenceId 从轮内索引取 Raw，经源工具 Slicer 切出一页
+// 按 evidenceId 从轮内索引取 Raw，经源工具 Slicer 切出一页；Raw 带盘上留存
+// 引用时优先走盘读全量切页（可翻到内存内联截断点之后，#18）
 // 只读导航；不复制 stdout 进模型上下文以外的路径；导航结果不回写索引
 type EvidenceReadTool struct {
 	index    *ObservationIndex
 	registry *Registry
+	// 可选盘上留存读取：观察 Raw 带 spool 引用时经此打开全量流切页；
+	// nil = 未装配（内存形态），带引用观察明确引导重查
+	spools   SpoolStore
 	schema   *jsonschema.Schema
 	specJSON json.RawMessage
 }
@@ -44,8 +48,9 @@ var evidenceReadInputSchema = json.RawMessage(`{
   }
 }`)
 
-// 组装 evidence.read；index 与 registry 必填
-func NewEvidenceReadTool(index *ObservationIndex, registry *Registry) (*EvidenceReadTool, error) {
+// 组装 evidence.read；index 与 registry 必填，spools 可选（盘上留存读取，
+// 内存形态传 nil：带引用观察 navError 引导重查）
+func NewEvidenceReadTool(index *ObservationIndex, registry *Registry, spools SpoolStore) (*EvidenceReadTool, error) {
 	if index == nil {
 		return nil, errors.New("evidence.read requires an observation index")
 	}
@@ -59,6 +64,7 @@ func NewEvidenceReadTool(index *ObservationIndex, registry *Registry) (*Evidence
 	return &EvidenceReadTool{
 		index:    index,
 		registry: registry,
+		spools:   spools,
 		schema:   schema,
 		specJSON: append(json.RawMessage(nil), evidenceReadInputSchema...),
 	}, nil
@@ -74,6 +80,8 @@ func (t *EvidenceReadTool) Spec() ToolSpec {
 			"非表格切片逐行返回并带行号，单行超长会截断标注。" +
 			"带时间戳的 logs 观察可用可选 since/until（RFC3339 闭区间）先按时间窗过滤再翻页；" +
 			"取 logs 时建议源工具加 --timestamps，否则不可时间切（报错时会提示）。" +
+			"超上限已完整落盘的超巨观察可翻页到截断点之后（行号与 total 覆盖全量输出）；" +
+			"prior_run_details 证据卡中的历史证据编号同样可读。" +
 			"logs 大输出建议先用源工具加 --since-time / --tail 收窄。" +
 			"不可切片时返回错误说明，可改用源工具重新查询（如 k8s 加 --field-selector / -o jsonpath）。",
 		InputSchema: append(json.RawMessage(nil), t.specJSON...),
@@ -102,28 +110,88 @@ func (t *EvidenceReadTool) Execute(ctx context.Context, args json.RawMessage) (*
 			"evidenceId %q 不在本轮观察索引中（可能已结束或未产出 evidenceId）", q.EvidenceID)), nil
 	}
 
-	tool, getErr := t.registry.Get(rec.ToolName)
-	if getErr != nil {
-		return navErrorEvidence(q.EvidenceID, fmt.Sprintf(
-			"源工具 %q 未注册，无法切片", rec.ToolName)), nil
-	}
-	slicer, ok := tool.(Slicer)
-	if !ok {
-		return navErrorEvidence(q.EvidenceID, fmt.Sprintf(
-			"源工具 %q 不支持切片；请用该工具重新查询并收窄范围", rec.ToolName)), nil
+	// 超巨观察优先走盘上延伸：Raw 携带 spool 引用时从盘读全量切页，
+	// 可翻到内存内联截断点之后（#18）；失败统一 navError 引导重查，不冒充可读
+	var view SliceView
+	spoolBacked := false
+	if ref := StdoutSpoolRef(rec.Raw); ref != nil {
+		spoolBacked = true
+		v, navErr := t.sliceFromSpool(ctx, q, rec, ref)
+		if navErr != nil {
+			return navErrorEvidence(q.EvidenceID, navErr.Error()), nil
+		}
+		view = v
+	} else {
+		tool, getErr := t.registry.Get(rec.ToolName)
+		if getErr != nil {
+			return navErrorEvidence(q.EvidenceID, fmt.Sprintf(
+				"源工具 %q 未注册，无法切片", rec.ToolName)), nil
+		}
+		slicer, ok := tool.(Slicer)
+		if !ok {
+			return navErrorEvidence(q.EvidenceID, fmt.Sprintf(
+				"源工具 %q 不支持切片；请用该工具重新查询并收窄范围", rec.ToolName)), nil
+		}
+		v, sliceErr := slicer.Slice(rec.Raw, SliceQuery{
+			Offset: q.Offset,
+			Limit:  q.Limit,
+			Since:  q.Since,
+			Until:  q.Until,
+		})
+		if sliceErr != nil {
+			return navErrorEvidence(q.EvidenceID, fmt.Sprintf(
+				"无法切片（%s）；请用源工具重新查询（如加 --field-selector / -o jsonpath）", sliceErr.Error())), nil
+		}
+		view = v
 	}
 
-	view, sliceErr := slicer.Slice(rec.Raw, SliceQuery{
+	return renderSliceEvidence(q, rec, view, spoolBacked), nil
+}
+
+type evidenceReadArgs struct {
+	EvidenceID string `json:"evidenceId"`
+	Offset     int    `json:"offset"`
+	Limit      int    `json:"limit"`
+	// 可选时间窗（RFC3339 闭区间），透传给源工具 Slicer 先过滤再开窗
+	Since string `json:"since"`
+	Until string `json:"until"`
+}
+
+// 盘上延伸切片：打开引用文件 → 源工具 SpoolSlicer 流式切页
+// 失败（内存形态未装配 / 文件缺失 / 源工具不实现 / 切片错误）统一返回
+// 面向模型的引导性错误，由调用方包 navErrorEvidence 出口
+func (t *EvidenceReadTool) sliceFromSpool(ctx context.Context, q evidenceReadArgs, rec ObsRecord, ref *SpoolRef) (SliceView, error) {
+	if t.spools == nil {
+		return SliceView{}, errors.New("该观察带盘上留存引用，但当前为内存形态未装配 spool 存储；请用源工具重新查询并收窄范围")
+	}
+	r, err := t.spools.Open(ctx, ref.SessionID, ref.File)
+	if err != nil {
+		return SliceView{}, fmt.Errorf("盘上留存读取失败（%s）；文件可能缺失或已损坏，请用源工具重新查询", err)
+	}
+	defer r.Close()
+	tool, getErr := t.registry.Get(rec.ToolName)
+	if getErr != nil {
+		return SliceView{}, fmt.Errorf("源工具 %q 未注册，无法切片", rec.ToolName)
+	}
+	sp, ok := tool.(SpoolSlicer)
+	if !ok {
+		return SliceView{}, fmt.Errorf("源工具 %q 不支持盘上切片；请用该工具重新查询并收窄范围", rec.ToolName)
+	}
+	view, sliceErr := sp.SliceSpool(rec.Raw, SliceQuery{
 		Offset: q.Offset,
 		Limit:  q.Limit,
 		Since:  q.Since,
 		Until:  q.Until,
-	})
+	}, r)
 	if sliceErr != nil {
-		return navErrorEvidence(q.EvidenceID, fmt.Sprintf(
-			"无法切片（%s）；请用源工具重新查询（如加 --field-selector / -o jsonpath）", sliceErr.Error())), nil
+		return SliceView{}, fmt.Errorf(
+			"无法盘上切片（%s）；请用源工具重新查询（如加 --field-selector / -o jsonpath）", sliceErr.Error())
 	}
+	return view, nil
+}
 
+// 切片结果渲染为导航证据（分页元信息 + 行/表渲染 + 导航载荷）；盘读与内联两条路径共用
+func renderSliceEvidence(q evidenceReadArgs, rec ObsRecord, view SliceView, spoolBacked bool) *core.Evidence {
 	label := fmt.Sprintf("evidence.read %s", q.EvidenceID)
 	// 非表格切片（Columns 为空）走行渲染：避免大表抽样逻辑误伤行模式，也带行号便于继续翻页
 	var pageSummary string
@@ -136,6 +204,9 @@ func (t *EvidenceReadTool) Execute(ctx context.Context, args json.RawMessage) (*
 	}
 	meta := fmt.Sprintf("切片 · total=%d offset=%d limit=%d 本页=%d 行 · 源工具=%s",
 		view.Total, view.Offset, view.Limit, len(view.Rows), rec.ToolName)
+	if spoolBacked {
+		meta += " · 盘上留存翻页（行号与 total 覆盖全量输出）"
+	}
 	if q.Since != "" || q.Until != "" {
 		meta += fmt.Sprintf(" · 时间窗 since=%s until=%s", orDash(q.Since), orDash(q.Until))
 		// 后端回填窗内首末时间戳，供模型判断窗口是否切中、要不要再推进
@@ -168,16 +239,7 @@ func (t *EvidenceReadTool) Execute(ctx context.Context, args json.RawMessage) (*
 		CommandView: fmt.Sprintf("evidence.read evidenceId=%s offset=%d limit=%d", q.EvidenceID, q.Offset, q.Limit),
 		Summary:     strings.TrimRight(fullSummary, "\n"),
 		Raw:         rawPayload,
-	}, nil
-}
-
-type evidenceReadArgs struct {
-	EvidenceID string `json:"evidenceId"`
-	Offset     int    `json:"offset"`
-	Limit      int    `json:"limit"`
-	// 可选时间窗（RFC3339 闭区间），透传给源工具 Slicer 先过滤再开窗
-	Since string `json:"since"`
-	Until string `json:"until"`
+	}
 }
 
 func (t *EvidenceReadTool) parseArgs(args json.RawMessage) (evidenceReadArgs, error) {

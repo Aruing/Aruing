@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"strings"
 )
@@ -63,4 +65,23 @@ func SpoolScopeFrom(ctx context.Context) string {
 	}
 	v, _ := ctx.Value(spoolScopeKey{}).(string)
 	return strings.TrimSpace(v)
+}
+
+// 从观察 Raw 中探测超巨 stdout 的盘上引用：只解 stdoutSpool 一个字段，
+// 源工具未写该字段或 Raw 非对象形态时返回 nil。Tower 轮首回灌与
+// evidence.read 单点共用此探测，不解析各后端私有 Raw 形态
+func StdoutSpoolRef(raw []byte) *SpoolRef {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var probe struct {
+		StdoutSpool *SpoolRef `json:"stdoutSpool"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return nil
+	}
+	if probe.StdoutSpool == nil || strings.TrimSpace(probe.StdoutSpool.File) == "" {
+		return nil
+	}
+	return probe.StdoutSpool
 }
