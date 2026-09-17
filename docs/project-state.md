@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-09-16（PR #146 已合并 → feat/0.1.4-persistence：0.1.4 persistence 步骤 2 挂起快照持久化交付，P2-3 消化）；前值 2026-09-16（步骤 2 实现中）
+> 最后更新：2026-09-17（0.1.4 persistence 步骤 3 超巨输出 spill 腿 A 捕获留存交付：PR #149 → feat/0.1.4-persistence；下一步腿 B 盘读翻页）；前值 2026-09-16（PR #146 步骤 2 挂起快照持久化）
 
 ## 当前阶段
 
@@ -118,6 +118,7 @@
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
 | 0.1.4-1 | 磁盘存储地基（会话单元目录 + run 统一进会话） | ✅ | PR #145（merge 6e7edfb → feat/0.1.4-persistence）；`DiskStore`/`DiskRunLedger`（per-session 目录：session.jsonl type 开放 entry 流 + runs/ 每诊断一 JSON tmp+rename 原子写（文件与父目录 fsync）；惰性打开；末行无换行残迹容忍（解析失败截断 / 可解析补行）中间坏行报错；写入口拒绝路径成分编号；UpdatedAt 推导）+ `storage.data_dir`（默认 ~/.aruing/data，probe 覆盖 tmp）+ `--data-dir` + `RespondOutput/TurnResult.Evidence` 透传；run 经 Diagnose 应答器统一进会话（Run.SessionID 必填，chat --session 可续聊） |
 | 0.1.4-2 | 挂起快照持久化（跨进程 Resume） | ✅ | PR #146（merge 9b9ec5d → feat/0.1.4-persistence，2026-09-16）；agent `SuspensionSnapshot`（原 `suspendedRun` 导出，V 版本号）+ `ExportSuspended`/`ImportSuspended`（深拷贝/校验回灌）+ `acquire.Belief` JSON 编解码；session `SuspensionStore` 接口 + `SuspendExporter`/`SuspendImporter` 可选能力 + `PersistSuspension`/`ClearSuspension` 助手；store `DiskSuspensionStore`（`suspended/<runId>.json` tmp+rename+fsync，Get 取字典序最大，Delete 清理全部）+ `MemorySuspensionStore` + `DiskStore.Close`（P2-3）；Tower 轮首内存优先→盘恢复（账本守卫清已完成残留，数据层失败降级 + stderr 警告一次，接线不完整明确失败）+ 澄清落盘/完成清理/再挂起覆盖；Diagnose 澄清落盘（失败明确报错）；跨实例 Resume 等价性测试（resolve/investigate/acquire 信念连续）+ tower 白盒 + store 往返 |
+| 0.1.4-3a | 超巨输出 spill·腿 A（捕获留存） | ✅ | PR #149（→ feat/0.1.4-persistence）；tools `SpoolStore`/`SpoolFile`/`SpoolRef` + ctx 会话标注 `WithSpoolScope`；k8s stdout 双写（内存预算内内联 + 盘上全量，tmp+rename 转正，`Raw.stdoutSpool` 引用含全量字节/行数，失败降级旧截断语义不废取证）；store `DiskSpoolStore`（会话目录 `spool/`，永久留存随会话目录删）；Tower/编排 `Execute`/`Resume` 注入会话标注；openStores 先开存储后建工具图；config 零新键（磁盘/内存装配自然分派，内存路径不开 spill）。腿 B（evidence.read 盘读翻页 + Tower 轮首回灌）随本步 PR-b |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -125,7 +126,7 @@
 
 ## 下一步
 
-**下一项**：**0.1.4 persistence 步骤 3：超巨输出 spill**（`spool/` 子目录 + k8s 捕获改造 + `evidence.read` 跨页）。后续步骤：`aruing sessions`（`ListSessions` + CLI 列表命令）；streaming / map-reduce 并行排期由维护者裁决。注：步骤 1/2 合并前 smoke 均未单独跑——裁决 2026-09-16 随版本收尾 `make smoke-all` 一并兜底。
+**下一项**：**0.1.4 persistence 步骤 3 腿 B：超巨输出盘读翻页**（`SpoolSlicer` 流式切片 + evidence.read spool 路径 + Tower 轮首回灌账本带引用证据；设计见笔记 `plan/0.1.4/persistence/2026-9-17-oversized-spill.md`）。后续步骤：`aruing sessions`（`ListSessions` + CLI 列表命令）；streaming / map-reduce 并行排期由维护者裁决。注：步骤 1/2/3a 合并前 smoke 均未单独跑——裁决 2026-09-16 随版本收尾 `make smoke-all` 一并兜底。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`；0.1.4 已立项三项不再列此处）：
 

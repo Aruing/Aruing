@@ -298,6 +298,8 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	if strings.TrimSpace(in.UserText) == "" {
 		return session.RespondOutput{}, errors.New("tower requires user text")
 	}
+	// 会话归属随 ctx 下发：工具层超巨输出 spill 据此定位会话目录
+	ctx = tools.WithSpoolScope(ctx, in.SessionID)
 
 	t.progressf("tower: session=%s history=%d user_chars=%d", in.SessionID, len(in.History), len(in.UserText))
 	// 轮首重置记忆观测量：本轮任何路径（含挂起恢复）都有可读统计
