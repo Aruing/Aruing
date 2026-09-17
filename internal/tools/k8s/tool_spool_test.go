@@ -18,10 +18,12 @@ import (
 	"github.com/Aruing/Aruing/internal/tools"
 )
 
-// 内存假 spool 存储：记录创建的写入流，可注入 Create 故障
+// 内存假 spool 存储：记录创建的写入流，可注入 Create 故障与盘中途写故障
 type fakeSpoolStore struct {
 	createErr error
-	files     []*fakeSpoolFile
+	// 创建后回调（注入写故障用）
+	onCreate func(*fakeSpoolFile)
+	files    []*fakeSpoolFile
 }
 
 func (s *fakeSpoolStore) Create(_ context.Context, sessionID string) (tools.SpoolFile, error) {
@@ -29,6 +31,9 @@ func (s *fakeSpoolStore) Create(_ context.Context, sessionID string) (tools.Spoo
 		return nil, s.createErr
 	}
 	f := &fakeSpoolFile{sessionID: sessionID}
+	if s.onCreate != nil {
+		s.onCreate(f)
+	}
 	s.files = append(s.files, f)
 	return f, nil
 }
@@ -48,9 +53,18 @@ type fakeSpoolFile struct {
 	ref       string
 	committed bool
 	aborted   bool
+	// 非空时首次 Write 返回该错误（模拟盘中途故障）
+	writeErr error
 }
 
-func (f *fakeSpoolFile) Write(p []byte) (int, error) { return f.buf.Write(p) }
+func (f *fakeSpoolFile) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		err := f.writeErr
+		f.writeErr = nil
+		return 0, err
+	}
+	return f.buf.Write(p)
+}
 
 func (f *fakeSpoolFile) Commit() (string, error) {
 	f.committed = true
@@ -208,6 +222,67 @@ func TestToolExecuteSpillAbortOnTimeout(t *testing.T) {
 	}
 	if len(spool.files) != 1 || !spool.files[0].aborted {
 		t.Fatal("spool file should be aborted on timeout")
+	}
+}
+
+// 盘写中途故障：写入错误不得传播到 exec 复制路径把取证打死（spill 失败族
+// 第三分支，钉板 pr-agent R1）；内存内联不受影响，退回旧截断语义
+func TestToolExecuteSpillWriteFailureDegradation(t *testing.T) {
+	full := strings.Repeat("line\n", 50)
+	kubectl := writeFakeKubectlCat(t, full)
+	spool := &fakeSpoolStore{}
+	spool.onCreate = func(f *fakeSpoolFile) { f.writeErr = errors.New("disk full mid-write") }
+	tool := mustNewTool(t, Config{
+		KubectlPath:    kubectl,
+		MaxStdoutBytes: 1024,
+		Spool:          spool,
+	})
+
+	ctx := tools.WithSpoolScope(context.Background(), "sess_wfail")
+	evidence, err := tool.Execute(ctx, mustArgs(t, map[string]any{"argv": []string{"get", "pods"}}))
+	if err != nil {
+		t.Fatalf("execute must survive mid-write spool failure: %v", err)
+	}
+
+	raw := decodeRaw(t, evidence.Raw)
+	if raw.Stdout != full {
+		t.Fatalf("inline stdout corrupted by spool failure: len=%d want=%d", len(raw.Stdout), len(full))
+	}
+	if raw.StdoutSpool != nil {
+		t.Fatal("no spool ref after mid-write failure")
+	}
+	if len(spool.files) != 1 || !spool.files[0].aborted || spool.files[0].committed {
+		t.Fatal("failed spool file should be aborted, not committed")
+	}
+}
+
+// stderr 截断而 stdout 完整：文案只报标准错误，不得误报 stdout 已落盘
+// （钉板 pr-agent R2）
+func TestToolExecuteSpillStderrOnlyTruncation(t *testing.T) {
+	kubectl := writeFakeKubectl(t, "#!/bin/sh\nprintf 'ok\\n'\nprintf '"+strings.Repeat("e", 4096)+"' 1>&2\n")
+	spool := &fakeSpoolStore{}
+	tool := mustNewTool(t, Config{
+		KubectlPath:    kubectl,
+		MaxStdoutBytes: 1024,
+		MaxStderrBytes: 128,
+		Spool:          spool,
+	})
+
+	ctx := tools.WithSpoolScope(context.Background(), "sess_err")
+	evidence, err := tool.Execute(ctx, mustArgs(t, map[string]any{"argv": []string{"logs", "web"}}))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	raw := decodeRaw(t, evidence.Raw)
+	if !raw.StderrTruncated || raw.StdoutTruncated {
+		t.Fatalf("truncation flags: stderr=%v stdout=%v", raw.StderrTruncated, raw.StdoutTruncated)
+	}
+	if !strings.Contains(evidence.Summary, "标准错误已超过保留上限") {
+		t.Fatalf("summary should mention stderr truncation, got: %s", evidence.Summary)
+	}
+	if strings.Contains(evidence.Summary, "已完整落盘") {
+		t.Fatalf("summary must not claim spooled stdout when only stderr truncated, got: %s", evidence.Summary)
 	}
 }
 
