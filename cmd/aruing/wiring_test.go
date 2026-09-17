@@ -12,9 +12,9 @@ import (
 )
 
 // 数据目录分派：空走内存实现，非空走磁盘实现（产品路径默认非空）；
-// 挂起快照存储同源分派：内存路径 nil、磁盘路径非 nil
+// 挂起快照与 spool 留存同源分派：内存路径 nil、磁盘路径非 nil
 func TestOpenStoresDispatch(t *testing.T) {
-	memStore, memLedger, memSusp, err := openStores(context.Background(), "")
+	memStore, memLedger, memSusp, memSpool, err := openStores(context.Background(), "")
 	if err != nil {
 		t.Fatalf("open memory: %v", err)
 	}
@@ -27,9 +27,12 @@ func TestOpenStoresDispatch(t *testing.T) {
 	if memSusp != nil {
 		t.Fatalf("empty data dir should not persist suspensions, got %T", memSusp)
 	}
+	if memSpool != nil {
+		t.Fatalf("empty data dir should not spill, got %T", memSpool)
+	}
 
 	root := t.TempDir()
-	diskStore, _, diskSusp, err := openStores(context.Background(), root)
+	diskStore, _, diskSusp, diskSpool, err := openStores(context.Background(), root)
 	if err != nil {
 		t.Fatalf("open disk: %v", err)
 	}
@@ -38,6 +41,9 @@ func TestOpenStoresDispatch(t *testing.T) {
 	}
 	if _, ok := diskSusp.(*store.DiskSuspensionStore); !ok {
 		t.Fatalf("non-empty data dir should use disk suspension store, got %T", diskSusp)
+	}
+	if _, ok := diskSpool.(*store.DiskSpoolStore); !ok {
+		t.Fatalf("non-empty data dir should use disk spool store, got %T", diskSpool)
 	}
 	// 磁盘实现落盘可见：建会话后会话目录成形
 	ctx := context.Background()

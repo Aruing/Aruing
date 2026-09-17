@@ -66,9 +66,10 @@ type tooling struct {
 
 // 组装工具注册表与调度器；集群命令可用时注册集群工具与 evidence.read
 // llmClient 可为 nil；仅 tools.projection.method=llm-rerank 时必需（构造 C4 重排器，实验专用）
-func buildTooling(toolsCfg config.Tools, llmClient llm.Client) (tooling, error) {
+// spool 可为 nil（内存形态不开 spill）；磁盘路径由调用方先开存储再组装工具
+func buildTooling(toolsCfg config.Tools, llmClient llm.Client, spool tools.SpoolStore) (tooling, error) {
 	registry := tools.NewRegistry()
-	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg, llmClient)
+	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg, llmClient, spool)
 	if err != nil {
 		return tooling{}, err
 	}
@@ -99,7 +100,7 @@ func buildTooling(toolsCfg config.Tools, llmClient llm.Client) (tooling, error) 
 // MaxStdoutBytes 零值时由 k8s 包默认（1MiB）
 // method=llm-rerank 时必须提供 llm 客户端构造重排器（C4 对照臂）：
 // 启动期明确报错，不静默回退机械方法（#18 精神）
-func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient llm.Client) (bool, error) {
+func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient llm.Client, spool tools.SpoolStore) (bool, error) {
 	path := toolsCfg.KubectlPath
 	if path == "" {
 		looked, err := exec.LookPath("kubectl")
@@ -131,6 +132,7 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient
 		MaxTimeout:     2 * time.Minute,
 		MaxStdoutBytes: toolsCfg.MaxStdoutBytes,
 		Projection:     projOpts,
+		Spool:          spool,
 	})
 	if err != nil {
 		return false, nil
@@ -143,7 +145,8 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient
 
 // 组装编排器：必须大模型齐全，无假实现回退
 // 第二返回值为可选的用量跟踪器（llm.UsageTracker）；适配器未实现时为 nil，评测记录里 token 段为空
-func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, llm.UsageTracker, error) {
+// spool 可为 nil（不开超巨输出盘上留存）
+func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer, spool tools.SpoolStore) (*agent.Orchestrator, llm.UsageTracker, error) {
 	if factory == nil {
 		return nil, nil, fmt.Errorf("orchestrator requires a factory")
 	}
@@ -155,7 +158,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 	if err != nil {
 		return nil, nil, fmt.Errorf("build llm client: %w", err)
 	}
-	toolsGraph, err := buildTooling(cfg.Tools, client)
+	toolsGraph, err := buildTooling(cfg.Tools, client, spool)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -213,24 +216,28 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 
 // 按数据目录分派存储实现：空 → 内存（仅测试与编程式装配），非空 → 磁盘。
 // 磁盘实现打开即建目录（0700）并扫索引；产品路径的 DataDir 由加载链填默认，永不空。
-// 挂起快照存储同源分派：内存路径返回 nil（挂起不持久化，行为同进程内形态）
-func openStores(ctx context.Context, dataDir string) (session.Store, session.RunLedger, session.SuspensionStore, error) {
+// 挂起快照存储与 spool 留存同源分派：内存路径均返回 nil（不持久化，行为同进程内形态）
+func openStores(ctx context.Context, dataDir string) (session.Store, session.RunLedger, session.SuspensionStore, tools.SpoolStore, error) {
 	if strings.TrimSpace(dataDir) == "" {
-		return store.NewMemoryStore(), store.NewMemoryRunLedger(), nil, nil
+		return store.NewMemoryStore(), store.NewMemoryRunLedger(), nil, nil, nil
 	}
 	st, err := store.NewDiskStore(ctx, dataDir)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	ledger, err := store.NewDiskRunLedger(ctx, dataDir)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	susp, err := store.NewDiskSuspensionStore(ctx, dataDir)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	return st, ledger, susp, nil
+	spool, err := store.NewDiskSpoolStore(ctx, dataDir)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return st, ledger, susp, spool, nil
 }
 
 // 组装会话栈全量句柄（newSessionStack 的全量形态）
@@ -246,7 +253,12 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 	if err != nil {
 		return nil, fmt.Errorf("build llm client: %w", err)
 	}
-	toolsGraph, err := buildTooling(cfg.Tools, client)
+	// 存储先开（spool 留存随磁盘路径注入工具层），工具图后建
+	st, ledger, susp, spool, err := openStores(context.Background(), cfg.Storage.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("open stores %s: %w", cfg.Storage.DataDir, err)
+	}
+	toolsGraph, err := buildTooling(cfg.Tools, client, spool)
 	if err != nil {
 		return nil, err
 	}
@@ -270,10 +282,6 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 		return nil, acqErr
 	}
 
-	st, ledger, susp, err := openStores(context.Background(), cfg.Storage.DataDir)
-	if err != nil {
-		return nil, fmt.Errorf("open stores %s: %w", cfg.Storage.DataDir, err)
-	}
 	tower, err := agent.NewTowerResponder(
 		llm.NewLabelingClient(client, "tower"),
 		factory,

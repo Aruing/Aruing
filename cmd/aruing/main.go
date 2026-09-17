@@ -184,16 +184,18 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 
 	factory := core.NewFactory()
 
-	orchestrator, tracker, err := newOrchestrator(factory, cfg, stderr)
-	if err != nil {
-		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
-	}
-	st, ledger, susp, err := openStores(context.Background(), cfg.Storage.DataDir)
+	// 存储先开：spool 留存随磁盘路径注入工具层，编排器组装时带上
+	st, ledger, susp, spoolStore, err := openStores(context.Background(), cfg.Storage.DataDir)
 	if err != nil {
 		return formatRunError(fmt.Errorf("open stores: %w", err))
 	}
 	// 退出前归还磁盘句柄（内存实现无 Close，不受影响）
 	defer closeStores(st)
+
+	orchestrator, tracker, err := newOrchestrator(factory, cfg, stderr, spoolStore)
+	if err != nil {
+		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
+	}
 	// run 与 chat 统一为会话模型：单次 run 也建会话（一问一答），产物落盘可经
 	// aruing chat --session 续聊追问；诊断执行仍走同一编排器与调度器（#17）。
 	// 挂起快照落盘：run 进程随后即退出，落盘后澄清问题才能跨进程恢复

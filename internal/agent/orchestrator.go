@@ -30,6 +30,7 @@ import (
 
 	"github.com/Aruing/Aruing/internal/agent/acquire"
 	"github.com/Aruing/Aruing/internal/core"
+	"github.com/Aruing/Aruing/internal/tools"
 )
 
 // 决策循环缺角色/缺能力的防御错误口径
@@ -489,6 +490,10 @@ func (o *Orchestrator) Execute(ctx context.Context, run core.Run) (core.Outcome,
 	if err := o.validate(); err != nil {
 		return core.Outcome{}, err
 	}
+	// 会话归属随 ctx 下发：工具层超巨输出 spill 据此定位会话目录（无会话则不开）
+	if run.SessionID != "" {
+		ctx = tools.WithSpoolScope(ctx, run.SessionID)
+	}
 
 	o.progressf("解析问题…")
 	query, err := o.parser.Parse(ctx, run)
@@ -516,6 +521,10 @@ func (o *Orchestrator) Resume(ctx context.Context, runID, answer string) (core.O
 	snap, ok := o.takeSuspended(runID)
 	if !ok {
 		return core.Outcome{}, fmt.Errorf("resume: no suspended run %q", runID)
+	}
+	// 会话归属随 ctx 下发（同 Execute）：续跑阶段的工具调用同样按会话目录 spill
+	if snap.Run.SessionID != "" {
+		ctx = tools.WithSpoolScope(ctx, snap.Run.SessionID)
 	}
 
 	o.progressf("恢复运行 %s（%s 澄清已注入）…", runID, snap.Stage)

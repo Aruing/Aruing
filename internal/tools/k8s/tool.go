@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -72,6 +73,9 @@ type Config struct {
 	MaxStderrBytes int
 	// 表格投影选项（方法与预算）；零值 = 默认 fast 路径，方法名校验在装配层
 	Projection summary.RenderOptions
+	// 可选的超巨输出盘上留存：stdout 超上限时全量落盘并 Raw 携带引用；
+	// nil = 不 spill（内存形态，超限仍诚实截断）。开启还需执行 ctx 带会话标注
+	Spool tools.SpoolStore
 }
 
 // 后端级集群工具，通过无命令行外壳的参数列表调用集群命令
@@ -225,9 +229,10 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 		cmd.Stdin = strings.NewReader(invoke.Stdin)
 	}
 
-	stdout := &limitedBuffer{max: t.config.MaxStdoutBytes}
+	// 组合捕获输出：内存保留预算内内联，超出上限的部分经 spool 全量落盘
+	stdout, stdoutSink, spoolSink := t.captureSinks(ctx)
 	stderr := &limitedBuffer{max: t.config.MaxStderrBytes}
-	cmd.Stdout = stdout
+	cmd.Stdout = stdoutSink
 	cmd.Stderr = stderr
 
 	started := time.Now()
@@ -236,6 +241,7 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 
 	if runCtx.Err() != nil {
 		// 超时或外部取消时优先返回上下文错误，不把半截输出当成功证据
+		abortSpool(spoolSink)
 		if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("kubectl timed out after %s: %w", timeout, runCtx.Err())
 		}
@@ -248,8 +254,16 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 		if errors.As(runErr, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
+			// 进程层失败（启动不了等）：无有效输出，spool 半文件一并放弃
+			abortSpool(spoolSink)
 			return nil, fmt.Errorf("run kubectl: %w", runErr)
 		}
+	}
+
+	// 进程已跑完（无论退出码）：spool 提交为可读原带；写失败/提交失败退回纯内存截断语义
+	var stdoutSpool *tools.SpoolRef
+	if spoolSink != nil {
+		stdoutSpool = spoolSink.finalize()
 	}
 
 	stdinBytes := len(invoke.Stdin)
@@ -261,6 +275,7 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 		Stderr:          stderr.String(),
 		StdoutTruncated: stdout.truncated,
 		StderrTruncated: stderr.truncated,
+		StdoutSpool:     stdoutSpool,
 		StdinBytes:      stdinBytes,
 		StdinSHA256:     hex.EncodeToString(stdinHash[:]),
 		DurationMs:      duration.Milliseconds(),
@@ -271,9 +286,18 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 	}
 
 	summary := projectSummary(invoke.Argv, stdout.String(), stderr.String(), exitCode, t.config.Projection)
-	if stdout.truncated || stderr.truncated {
-		// 输出超出保留上限被截断：原带不全，追加明确提示，区别于按行数的大表截断
-		summary += "\n（原始输出已超过保留上限被截断，请缩小查询范围；残缺原文见 raw）"
+	// 截断提示按流分开：stdout 与 stderr 各自判定，避免 stderr 截断时误报 stdout 已落盘
+	if stdout.truncated {
+		if stdoutSpool != nil {
+			// 内联截断但全量已落盘：导航可翻到截断点之后，引导翻页而非重新拉取
+			summary += fmt.Sprintf("\n（标准输出已超过保留上限，超出部分已完整落盘（共 %d 行）；可用 evidence.read 对该观察翻页读取）", stdoutSpool.TotalLines)
+		} else {
+			// 超限被截断且无盘上留存：原带不全，追加明确提示，区别于按行数的大表截断
+			summary += "\n（标准输出已超过保留上限被截断，请缩小查询范围；残缺原文见 raw）"
+		}
+	}
+	if stderr.truncated {
+		summary += "\n（标准错误已超过保留上限被截断；残缺原文见 raw）"
 	}
 
 	evidence := &core.Evidence{
@@ -287,6 +311,123 @@ func (t *Tool) Execute(ctx context.Context, args json.RawMessage) (*core.Evidenc
 		evidence.Error = fmt.Sprintf("kubectl exited with code %d", exitCode)
 	}
 	return evidence, nil
+}
+
+// 准备捕获输出流：内存限量缓冲恒在；配置了 spool 且 ctx 带会话标注时另开
+// 盘上全量流双写（写入错误被 spoolSink 吞掉，不传播到 exec 复制路径）。
+// spool 创建使用与调用超时解耦的 ctx（收尾 fsync/rename 不应被 kubectl 超时
+// 连带取消）；创建失败静默降级为纯内存截断（spill 是增强路径，取证不因落盘
+// 失败而废，#18）
+func (t *Tool) captureSinks(ctx context.Context) (*limitedBuffer, io.Writer, *spoolSink) {
+	stdout := &limitedBuffer{max: t.config.MaxStdoutBytes}
+	if t.config.Spool == nil {
+		return stdout, stdout, nil
+	}
+	sid := tools.SpoolScopeFrom(ctx)
+	if sid == "" {
+		return stdout, stdout, nil
+	}
+	f, err := t.config.Spool.Create(context.WithoutCancel(ctx), sid)
+	if err != nil {
+		return stdout, stdout, nil
+	}
+	sink := &spoolSink{file: f, sessionID: sid, counter: &spoolCounter{}}
+	return stdout, io.MultiWriter(stdout, sink), sink
+}
+
+// spool 写入汇：盘上写失败只记录不传播——exec 的 stdout 复制遇到写错误会
+// 中止并使整次调用按进程层失败报错，把本应降级的取证打死（spill 失败族：
+// 写中失败与 Create/Commit 失败同走旧截断语义，#18）
+type spoolSink struct {
+	file      tools.SpoolFile
+	sessionID string
+	counter   *spoolCounter
+	writeErr  error
+	aborted   bool
+}
+
+// 尽力写盘：首次失败后丢弃后续写入并对外声称全部写成功（内存缓冲经
+// MultiWriter 已先行写入，不受影响）
+func (s *spoolSink) Write(p []byte) (int, error) {
+	if s.writeErr != nil {
+		return len(p), nil
+	}
+	if _, err := s.file.Write(p); err != nil {
+		s.writeErr = err
+		return len(p), nil
+	}
+	// 计数器为纯内存统计，写永不失败；返回值无消费意义
+	_, _ = s.counter.Write(p)
+	return len(p), nil
+}
+
+// 收尾：写失败或提交失败时放弃并返回 nil（降级旧截断语义，必须真调
+// Abort 清理盘上文件）；成功返回引用
+func (s *spoolSink) finalize() *tools.SpoolRef {
+	if s == nil {
+		return nil
+	}
+	if s.writeErr != nil {
+		s.discard()
+		return nil
+	}
+	ref, err := s.file.Commit()
+	if err != nil {
+		s.discard()
+		return nil
+	}
+	return &tools.SpoolRef{
+		SessionID:  s.sessionID,
+		File:       ref,
+		TotalBytes: s.counter.bytes,
+		TotalLines: s.counter.totalLines(),
+	}
+}
+
+// 放弃未提交内容（失败/超时路径）；幂等
+func (s *spoolSink) discard() {
+	if s != nil && !s.aborted {
+		s.aborted = true
+		s.file.Abort()
+	}
+}
+
+// abortSpool 保留为失败路径入口别名；幂等
+func abortSpool(s *spoolSink) {
+	if s != nil {
+		s.discard()
+	}
+}
+
+// spool 写入统计：字节数与物理行数（每个换行结束一行，末尾无换行的残留
+// 内容计一行）；行数语义与盘上流式切片读取端一致，供翻页 total 免二次全扫
+type spoolCounter struct {
+	bytes int64
+	lines int
+	tail  byte // 最后一个已写字节，判断末尾残留行
+	wrote bool
+}
+
+func (c *spoolCounter) Write(p []byte) (int, error) {
+	c.bytes += int64(len(p))
+	for _, b := range p {
+		if b == '\n' {
+			c.lines++
+		}
+		c.tail = b
+	}
+	if len(p) > 0 {
+		c.wrote = true
+	}
+	return len(p), nil
+}
+
+// 全量行数：末尾无换行的残留内容补计一行；空流为零行
+func (c *spoolCounter) totalLines() int {
+	if c.wrote && c.tail != '\n' {
+		return c.lines + 1
+	}
+	return c.lines
 }
 
 // 调用方传入的参数形态，字段与输入模式对齐
@@ -307,6 +448,8 @@ type resultRaw struct {
 	ExitCode int `json:"exitCode"`
 	// 截断后的标准输出
 	Stdout string `json:"stdout"`
+	// 超巨 stdout 的盘上留存引用（spill 开启且提交成功时非 nil；内联 stdout 仍为截断版）
+	StdoutSpool *tools.SpoolRef `json:"stdoutSpool,omitempty"`
 	// 截断后的标准错误
 	Stderr string `json:"stderr"`
 	// 标准输出是否因超过上限被截断
