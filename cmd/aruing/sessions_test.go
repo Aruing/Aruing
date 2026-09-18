@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,19 @@ import (
 	"github.com/Aruing/Aruing/internal/session"
 	"github.com/Aruing/Aruing/internal/store"
 )
+
+// 隔离配置加载链的环境依赖：ARUING_CONFIG 指向空配置文件，截断环境变量指向
+// 与用户级 / 系统级配置搜索链（机内坏配置文件不再影响测试）；存储目录变量
+// 清空，--data-dir 旗标本就后置覆盖（pr-agent #151 R3）
+func isolateSessionsConfig(t *testing.T) {
+	t.Helper()
+	empty := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(empty, []byte("# isolated\n"), 0o600); err != nil {
+		t.Fatalf("write empty config: %v", err)
+	}
+	t.Setenv("ARUING_CONFIG", empty)
+	t.Setenv("ARUING_STORAGE_DATA_DIR", "")
+}
 
 // 在临时数据目录落一个带首问的会话（不依赖 LLM，直接走磁盘存储）
 func writeSessionsFixture(t *testing.T, dir, id, firstQuestion string) {
@@ -44,6 +59,7 @@ func writeSessionsFixture(t *testing.T, dir, id, firstQuestion string) {
 // 表格视图：含表头、会话编号、折叠后的首问预览与截断标注；
 // 标准错误承载生效数据目录
 func TestRunSessionsTable(t *testing.T) {
+	isolateSessionsConfig(t)
 	dir := t.TempDir()
 	long := "line one\nline two  " + strings.Repeat("x", 80)
 	writeSessionsFixture(t, dir, "sess_tbl", long)
@@ -68,6 +84,7 @@ func TestRunSessionsTable(t *testing.T) {
 
 // json 视图：首问全文不截断，字段为 snake_case
 func TestRunSessionsJSON(t *testing.T) {
+	isolateSessionsConfig(t)
 	dir := t.TempDir()
 	long := strings.Repeat("问", 60)
 	writeSessionsFixture(t, dir, "sess_json", long)
@@ -94,6 +111,7 @@ func TestRunSessionsJSON(t *testing.T) {
 // 空数据目录：表格模式打印人读提示；json 模式输出合法空数组（机器契约），
 // 人读提示不落在 stdout 污染机器消费
 func TestRunSessionsEmpty(t *testing.T) {
+	isolateSessionsConfig(t)
 	var out, errOut bytes.Buffer
 	if err := runSessions([]string{"--data-dir", t.TempDir()}, &out, &errOut); err != nil {
 		t.Fatalf("run: %v", err)
