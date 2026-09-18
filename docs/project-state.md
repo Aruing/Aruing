@@ -1,10 +1,10 @@
 # 项目当前状态
 
-> 最后更新：2026-09-18（步骤 4 `aruing sessions` 已合并：PR #151 merge 9d6a732，persistence 功能标志全绿，剩版本级集成验证与 streaming / map-reduce 排期）；前值 2026-09-18（步骤 4 已交付：`SessionLister` + CLI 会话发现）
+> 最后更新：2026-09-18（persistence 专项真集群冒烟通过：①②④⑤ pass / ③ attention 非产品回归；裁决 smoke-all 随收尾例行）；前值 2026-09-18（步骤 4 `aruing sessions` 已合并：PR #151 merge 9d6a732）
 
 ## 当前阶段
 
-**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 三创新点版本全部交付**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）+ 毕业论文三创新点载体（动机与排序依据在笔记仓）。**版本节奏**：小版本递增，每个 0.1.x = 一个可用正式实现：`0.1.1`（创新点二·代表性投影）✅ v0.1.1 已发布；`0.1.2`（创新点一·主动取证决策）✅ done 2026-08-31；`0.1.3`（创新点三·分层记忆）✅ done 2026-08-31，随 **v0.1.3 单 tag** 一并发布（0.1.2 不独立发版，发布裁决 2026-08-30）；`0.1.4`（产品完备批：持久化 + 流式 + map-reduce）🚧 进行中：persistence 步骤 1（磁盘存储地基）已合并（PR #145，2026-09-16）；persistence 步骤 2（挂起快照持久化）已合并（PR #146，merge 9b9ec5d，2026-09-16；跨进程 Resume + `DiskStore.Close`（P2-3 消化）；pr-agent 评审随合并处置）；步骤 3（超巨输出 spill 两腿）已合并：腿 A PR #149 merge f49e317 + 腿 B PR #150 merge 592e13c（2026-09-18，pr-agent R1 分诊随 4caee38）；步骤 4（`aruing sessions` 会话发现）已合并（PR #151 merge 9d6a732，2026-09-18：`session.SessionLister` 只读汇总 + CLI `--format table|json` 纯读取不须 LLM；persistence 功能头 5 条标志全绿）（2026-09-10 立项，plan 见笔记 `plan/0.1.4/`）。三创新点均已「形式化 + 实现 + 同装置对比数据」齐备，实验数据归档笔记仓 `gproject/中期/实验数据/`（0.1.1 主实验 + 0.1.2-0.1.3 统一实验批含钉板 README）；plan 已归档 `plan/archive/0.2.0/{0.1.2,0.1.3}/`。
+**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 三创新点版本全部交付**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）+ 毕业论文三创新点载体（动机与排序依据在笔记仓）。**版本节奏**：小版本递增，每个 0.1.x = 一个可用正式实现：`0.1.1`（创新点二·代表性投影）✅ v0.1.1 已发布；`0.1.2`（创新点一·主动取证决策）✅ done 2026-08-31；`0.1.3`（创新点三·分层记忆）✅ done 2026-08-31，随 **v0.1.3 单 tag** 一并发布（0.1.2 不独立发版，发布裁决 2026-08-30）；`0.1.4`（产品完备批：持久化 + 流式 + map-reduce）🚧 进行中：persistence 步骤 1（磁盘存储地基）已合并（PR #145，2026-09-16）；persistence 步骤 2（挂起快照持久化）已合并（PR #146，merge 9b9ec5d，2026-09-16；跨进程 Resume + `DiskStore.Close`（P2-3 消化）；pr-agent 评审随合并处置）；步骤 3（超巨输出 spill 两腿）已合并：腿 A PR #149 merge f49e317 + 腿 B PR #150 merge 592e13c（2026-09-18，pr-agent R1 分诊随 4caee38）；步骤 4（`aruing sessions` 会话发现）已合并（PR #151 merge 9d6a732，2026-09-18：`session.SessionLister` 只读汇总 + CLI `--format table|json` 纯读取不须 LLM；persistence 功能头 5 条标志全绿）；**persistence 专项真集群冒烟 2026-09-18 通过**（kind × 2 + 真 LLM：①消息落盘跨进程续聊 / ②账本落盘索引卡读回 / ④ spill 双写+跨进程 evidence.read 盘读翻页均 pass；⑤ sessions 列表 pass；③ 挂起真集群不可确定性触发——模型按症状消歧或 baseline 反问，机制已由 #146 跨实例等价测试覆盖，非产品回归；spool 双写全量留存真路径首次确认）（2026-09-10 立项，plan 见笔记 `plan/0.1.4/`）。三创新点均已「形式化 + 实现 + 同装置对比数据」齐备，实验数据归档笔记仓 `gproject/中期/实验数据/`（0.1.1 主实验 + 0.1.2-0.1.3 统一实验批含钉板 README）；plan 已归档 `plan/archive/0.2.0/{0.1.2,0.1.3}/`。
 
 **`0.1.3` / 分层记忆组装（信任分层记忆 + 按需回灌）✅ 完成**（2026-08-31 关闭；#129 C1 压缩出口地址无损机械校验 / #130 tier-aware 组装器 + `agent.memory.method` 实验臂开关 / #131 分层检索回灌（λ₁ 确定性寻址 + λ₂ LLM 兑底 + 证据 raw 预览）/ #132 探针实验装置（`aruing probe` + `judge --probe` + `make probe-sweep`））。完成标志 10（探针真跑数）：批③ 36 会话两波全绿，长会话事实回忆 **ours 0.83 vs last-N 0.57 vs 平铺摘要 0.35**，久远证据链回溯（须回灌才能答的探针）**6/6 vs 2/6 vs 0/6**；判分出图 + ③层抽样（LLM 辅助评零 error、人工一致率 0.70）随批归档。完成标志 11（归档发布）✅：plan 归档 + v0.1.3 已发布（2026-09-05，#141 → tag → publish）。
 
@@ -128,7 +128,7 @@
 
 ## 下一步
 
-**下一项**：**0.1.4 版本收尾裁决**：persistence 功能标志全绿（步骤 1–4），剩余 streaming（分支 feat/streaming-output，PR #148 未合并）与 map-reduce 是否随 0.1.4 交付由维护者裁决；版本级集成验证（多功能同 build `make check` + `make smoke-all` 场景全绿，兼收步骤 1–4 全部 smoke 欠账）后打 tag 发布。
+**下一项**：**0.1.4 版本收尾裁决**：persistence 功能标志全绿（步骤 1–4）且专项真集群冒烟已过，剩余 streaming（分支 feat/streaming-output，PR #148 未合并）与 map-reduce 是否随 0.1.4 交付由维护者裁决；版本级集成验证（`make check` + `make smoke-all`）随收尾例行执行（裁决 2026-09-18：smoke-all 不再作欠账项）后打 tag 发布。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`；0.1.4 已立项三项不再列此处）：
 
