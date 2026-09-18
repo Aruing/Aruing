@@ -254,7 +254,9 @@ func (s *DiskStore) ListMessages(ctx context.Context, sessionID string) ([]sessi
 // 接受，且避开逐行扫描器的行长上限（长 checkpoint 行会踩）。
 // 坏会话不劫持列表：目录缺会话文件视为非会话静默跳过；解析失败（含中间坏
 // 行、会话头不符）跳过并警告一行——打开该会话时仍按加载语义明确失败，
-// 这里不伪造状态（#18）
+// 这里不伪造状态（#18）。警告走进程级标准错误，与 readSessionFile 末行
+// 警告同约定，不经命令层注入的 writer；嵌入式消费若需结构化诊断应整包
+// 引入注入，不在此单点分叉
 func (s *DiskStore) ListSessions(ctx context.Context) ([]session.SessionSummary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
