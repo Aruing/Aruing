@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -245,6 +246,49 @@ func (s *DiskStore) ListMessages(ctx context.Context, sessionID string) ([]sessi
 	out := make([]session.Message, len(h.messages))
 	copy(out, h.messages)
 	return out, nil
+}
+
+// 列出数据目录下全部会话的只读汇总（最近活跃降序，排序与内存实现同序）。
+// 只读路径：不开追加句柄、不进打开缓存、不执行末尾截断与补行修复（修复留给
+// 首次加载）。复用整文件解析而非流式扫描：列表是冷路径，单会话峰值内存可
+// 接受，且避开逐行扫描器的行长上限（长 checkpoint 行会踩）。
+// 坏会话不劫持列表：目录缺会话文件视为非会话静默跳过；解析失败（含中间坏
+// 行、会话头不符）跳过并警告一行——打开该会话时仍按加载语义明确失败，
+// 这里不伪造状态（#18）
+func (s *DiskStore) ListSessions(ctx context.Context) ([]session.SessionSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// 快照已知集合后释放锁再读盘：列表是时点视图，不阻塞其他会话读写
+	s.mu.Lock()
+	ids := make([]string, 0, len(s.known))
+	for id := range s.known {
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+
+	summaries := make([]session.SessionSummary, 0, len(ids))
+	for _, id := range ids {
+		h, _, _, err := readSessionFile(s.sessionPath(id), id)
+		if err != nil {
+			if errors.Is(err, session.ErrSessionNotFound) {
+				// 非会话目录或断电未完成创建：不列入也不警告
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "warn: skip listing session %s: %v\n", id, err)
+			continue
+		}
+		summaries = append(summaries, session.SessionSummary{
+			ID:            h.header.ID,
+			CreatedAt:     h.header.CreatedAt,
+			UpdatedAt:     h.lastActivityLocked(),
+			MessageCount:  len(h.messages),
+			FirstQuestion: firstUserQuestion(h.messages),
+		})
+	}
+	sortSessionSummaries(summaries)
+	return summaries, nil
 }
 
 // 会话单元目录路径（目录名即会话编号）

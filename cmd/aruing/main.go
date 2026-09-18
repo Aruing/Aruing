@@ -49,6 +49,7 @@ Commands:
   update           Self-update to the latest release (npm installs: npm update -g aruing)
   run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
+  sessions        List saved sessions: id, times, message count, first question
   judge            Score eval records against scenario ground truth
   bench            Run the mechanical projection benchmark (no LLM, no cluster)
   probe            Drive one scripted long session with tail probes (experiment rig)
@@ -104,6 +105,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runRun(args[1:], stdout, stderr)
 	case "chat":
 		return runChat(args[1:], stdout, stderr)
+	case "sessions":
+		return runSessions(args[1:], stdout, stderr)
 	case "judge":
 		return runJudge(args[1:], stdout, stderr)
 	case "bench":

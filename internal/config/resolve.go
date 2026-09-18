@@ -121,6 +121,24 @@ func LoadResolved(explicit string) (Config, string, error) {
 
 // 与已解析加载相同，可注入路径与环境依赖以便单测
 func LoadResolvedWith(explicit string, opt ResolveOptions) (Config, string, error) {
+	cfg, path, err := loadResolvedBase(explicit, opt)
+	if err != nil {
+		return cfg, path, err
+	}
+	if err := ValidateLLM(cfg); err != nil {
+		return cfg, path, err
+	}
+	return cfg, path, nil
+}
+
+// 加载同一配置链但不校验大模型三件套：供无 LLM 的只读命令（如会话列表）
+// 使用；路径解析与配置文件本身的错误仍明确报错，仅跳过 LLM 完整性校验
+func LoadResolvedNoLLM(explicit string) (Config, string, error) {
+	return loadResolvedBase(explicit, ResolveOptions{})
+}
+
+// 配置链公共部分：路径解析、可选读文件、环境变量覆盖、数据目录填默认
+func loadResolvedBase(explicit string, opt ResolveOptions) (Config, string, error) {
 	lookup := opt.LookupEnv
 	if lookup == nil {
 		lookup = os.LookupEnv
@@ -153,9 +171,6 @@ func LoadResolvedWith(explicit string, opt ResolveOptions) (Config, string, erro
 			}
 		}
 		cfg.Storage.DataDir = filepath.Join(home, ".aruing", "data")
-	}
-	if err := ValidateLLM(cfg); err != nil {
-		return cfg, path, err
 	}
 	return cfg, path, nil
 }

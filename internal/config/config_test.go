@@ -331,6 +331,29 @@ llm:
 	}
 }
 
+// 无 LLM 的只读命令加载链：不校验大模型三件套，其余解析（文件 / 环境覆盖 /
+// 数据目录默认）与主链一致
+func TestLoadResolvedNoLLM(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("storage:\n  data_dir: /tmp/aruing-list-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, used, err := LoadResolvedNoLLM(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used != path {
+		t.Fatalf("used=%q", used)
+	}
+	if cfg.Storage.DataDir != "/tmp/aruing-list-test" {
+		t.Fatalf("data dir=%q", cfg.Storage.DataDir)
+	}
+}
+
 // TUI.Mode 随环境变量加载与覆盖；空值默认
 func TestTUIModeEnv(t *testing.T) {
 	cfg := LoadFrom(func(k string) string {
