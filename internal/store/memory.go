@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/Aruing/Aruing/internal/session"
@@ -139,4 +140,50 @@ func (s *MemoryStore) ListMessages(ctx context.Context, sessionID string) ([]ses
 	out := make([]session.Message, len(src))
 	copy(out, src)
 	return out, nil
+}
+
+// 列出全部会话的只读汇总（最近活跃降序）；口径与磁盘实现一致：
+// 消息数与 ListMessages 同，首问为首条 user 消息全文
+func (s *MemoryStore) ListSessions(ctx context.Context) ([]session.SessionSummary, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	summaries := make([]session.SessionSummary, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		msgs := s.messages[sess.ID]
+		summaries = append(summaries, session.SessionSummary{
+			ID:            sess.ID,
+			CreatedAt:     sess.CreatedAt,
+			UpdatedAt:     sess.UpdatedAt,
+			MessageCount:  len(msgs),
+			FirstQuestion: firstUserQuestion(msgs),
+		})
+	}
+	sortSessionSummaries(summaries)
+	return summaries, nil
+}
+
+// 首条 user 消息正文全文；无 user 消息时返回空串（列表条目的首问口径）
+func firstUserQuestion(messages []session.Message) string {
+	for i := range messages {
+		if messages[i].Role == session.RoleUser {
+			return messages[i].Content
+		}
+	}
+	return ""
+}
+
+// 列表统一排序：最近活跃降序（找续聊对象是列表首要诉求），并列按编号降序；
+// 内存与磁盘两实现共用，保证跨实现同序
+func sortSessionSummaries(summaries []session.SessionSummary) {
+	sort.Slice(summaries, func(i, j int) bool {
+		if !summaries[i].UpdatedAt.Equal(summaries[j].UpdatedAt) {
+			return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
+		}
+		return summaries[i].ID > summaries[j].ID
+	})
 }
