@@ -163,6 +163,29 @@ func TestToolSliceSpoolOffsetBeyondTotal(t *testing.T) {
 	}
 }
 
+// 行内容保真：仅剁一个 \n 终止符，行尾 \r 是内容不是终止符（与内联切片 Split("\n") 同语义，#19 投影不改写内容）
+func TestToolSliceSpoolPreservesTrailingCR(t *testing.T) {
+	full := "keep\r\nplain\ntail"
+	raw := marshalResultRaw(t, full, 1<<30, &tools.SpoolRef{SessionID: "s", File: "spool-cr", TotalLines: 3})
+	spool := &fakeSpoolStore{}
+	commitFakeSpool(t, spool, "s", "spool-cr", full)
+	tool := mustNewTool(t, Config{KubectlPath: "kubectl"})
+
+	view, err := tool.SliceSpool(raw, tools.SliceQuery{Offset: 0, Limit: 3}, openSpool(t, spool, raw))
+	if err != nil {
+		t.Fatalf("slice spool: %v", err)
+	}
+	if len(view.Rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(view.Rows))
+	}
+	if view.Rows[0][0] != "keep\r" {
+		t.Fatalf("CRLF 行内容应保留尾随 \r（与内联一致），got %q", view.Rows[0][0])
+	}
+	if view.Rows[2][0] != "tail" {
+		t.Fatalf("EOF 无换行残留行 = %q, want tail", view.Rows[2][0])
+	}
+}
+
 // Raw 无引用（防御）：仍可流式全扫计数切页
 func TestToolSliceSpoolWithoutRefCounts(t *testing.T) {
 	full := "a\nb\nc\n"

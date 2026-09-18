@@ -34,6 +34,7 @@ func TestStdoutSpoolRef(t *testing.T) {
 	}{
 		{"带引用", `{"argv":["logs"],"exitCode":0,"stdoutSpool":{"sessionId":"s","file":"spool-1","totalBytes":10,"totalLines":2}}`, "spool-1"},
 		{"无引用字段", `{"argv":["logs"],"exitCode":0}`, ""},
+		{"会话编号缺失（半引用不命中）", `{"stdoutSpool":{"file":"spool-1"}}`, ""},
 		{"引用字段为空对象", `{"stdoutSpool":{}}`, ""},
 		{"文件名为空白", `{"stdoutSpool":{"sessionId":"s","file":"  "}}`, ""},
 		{"非对象形态", `[]`, ""},

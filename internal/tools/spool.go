@@ -80,7 +80,11 @@ func StdoutSpoolRef(raw []byte) *SpoolRef {
 	if err := json.Unmarshal(raw, &probe); err != nil {
 		return nil
 	}
-	if probe.StdoutSpool == nil || strings.TrimSpace(probe.StdoutSpool.File) == "" {
+	// 引用完整（会话与文件都非空白）才命中：半引用不进盘读路径，
+	// 也不被 Tower 回灌收进索引（探测契约：完整引用才命中）
+	if probe.StdoutSpool == nil ||
+		strings.TrimSpace(probe.StdoutSpool.SessionID) == "" ||
+		strings.TrimSpace(probe.StdoutSpool.File) == "" {
 		return nil
 	}
 	return probe.StdoutSpool

@@ -115,12 +115,14 @@ func (t *Tool) SliceSpool(raw []byte, q tools.SliceQuery, spool io.Reader) (tool
 }
 
 // 物理行判定与内容归一：完整行（含换行）与末尾无换行的残留内容都是一行
-// （与捕获侧 spoolCounter 同语义）；空串（EOF 无残留）不是行
+// （与捕获侧 spoolCounter 同语义）；空串（EOF 无残留）不是行。
+// 只剁一个 \n 终止符：行尾 \r 是内容不是终止符（与内联切片 Split("\n") 同语义，
+// #19 投影不改写内容）
 func physicalLine(s string) (string, bool) {
 	if s == "" {
 		return "", false
 	}
-	return strings.TrimRight(s, "\r\n"), true
+	return strings.TrimSuffix(s, "\n"), true
 }
 
 // 查询窗口钳制：与 summary.SliceRows 同语义（offset 负归零；limit 非正取默认、超顶截顶）
