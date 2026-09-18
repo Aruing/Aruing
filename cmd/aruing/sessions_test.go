@@ -91,7 +91,8 @@ func TestRunSessionsJSON(t *testing.T) {
 	}
 }
 
-// 空数据目录：打印空态提示，不报错
+// 空数据目录：表格模式打印人读提示；json 模式输出合法空数组（机器契约），
+// 人读提示不落在 stdout 污染机器消费
 func TestRunSessionsEmpty(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if err := runSessions([]string{"--data-dir", t.TempDir()}, &out, &errOut); err != nil {
@@ -99,6 +100,18 @@ func TestRunSessionsEmpty(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "no sessions found") {
 		t.Fatalf("empty state message missing:\n%s", out.String())
+	}
+
+	var jsonOut, jsonErrOut bytes.Buffer
+	if err := runSessions([]string{"--data-dir", t.TempDir(), "--format", "json"}, &jsonOut, &jsonErrOut); err != nil {
+		t.Fatalf("run json: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(jsonOut.Bytes(), &rows); err != nil {
+		t.Fatalf("json empty state must be a valid empty array: %v\n%s", err, jsonOut.String())
+	}
+	if len(rows) != 0 {
+		t.Fatalf("want empty array, got %d rows", len(rows))
 	}
 }
 

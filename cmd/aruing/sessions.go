@@ -81,13 +81,15 @@ func runSessions(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// json 是机器契约：空态也必须输出合法空数组，人读提示只留在表格模式
+	// （data dir 与坏会话警告在 stderr，不污染 stdout）
+	if *format == "json" {
+		return writeSessionsJSON(stdout, summaries)
+	}
 	if len(summaries) == 0 {
 		fmt.Fprintf(stdout, "no sessions found (data dir: %s)\n", dir)
 		fmt.Fprintln(stdout, "start one with: aruing chat")
 		return nil
-	}
-	if *format == "json" {
-		return writeSessionsJSON(stdout, summaries)
 	}
 	writeSessionsTable(stdout, summaries)
 	return nil
