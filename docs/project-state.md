@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-09-17（腿 B 盘读翻页实现完成：SpoolSlicer 流式切片 + evidence.read spool 路径 + Tower 轮首回灌，待 PR 合并；前值同日腿 A PR #149 merge f49e317）；前值 2026-09-16（PR #146 步骤 2 挂起快照持久化）
+> 最后更新：2026-09-18（腿 B 盘读翻页已合并：PR #150 merge 592e13c；pr-agent R1 分诊采纳 2 证伪 1 随分支跟进 commit 4caee38；下一步步骤 4 aruing sessions）；前值 2026-09-17（腿 A PR #149 merge f49e317）
 
 ## 当前阶段
 
@@ -119,7 +119,7 @@
 | 0.1.4-1 | 磁盘存储地基（会话单元目录 + run 统一进会话） | ✅ | PR #145（merge 6e7edfb → feat/0.1.4-persistence）；`DiskStore`/`DiskRunLedger`（per-session 目录：session.jsonl type 开放 entry 流 + runs/ 每诊断一 JSON tmp+rename 原子写（文件与父目录 fsync）；惰性打开；末行无换行残迹容忍（解析失败截断 / 可解析补行）中间坏行报错；写入口拒绝路径成分编号；UpdatedAt 推导）+ `storage.data_dir`（默认 ~/.aruing/data，probe 覆盖 tmp）+ `--data-dir` + `RespondOutput/TurnResult.Evidence` 透传；run 经 Diagnose 应答器统一进会话（Run.SessionID 必填，chat --session 可续聊） |
 | 0.1.4-2 | 挂起快照持久化（跨进程 Resume） | ✅ | PR #146（merge 9b9ec5d → feat/0.1.4-persistence，2026-09-16）；agent `SuspensionSnapshot`（原 `suspendedRun` 导出，V 版本号）+ `ExportSuspended`/`ImportSuspended`（深拷贝/校验回灌）+ `acquire.Belief` JSON 编解码；session `SuspensionStore` 接口 + `SuspendExporter`/`SuspendImporter` 可选能力 + `PersistSuspension`/`ClearSuspension` 助手；store `DiskSuspensionStore`（`suspended/<runId>.json` tmp+rename+fsync，Get 取字典序最大，Delete 清理全部）+ `MemorySuspensionStore` + `DiskStore.Close`（P2-3）；Tower 轮首内存优先→盘恢复（账本守卫清已完成残留，数据层失败降级 + stderr 警告一次，接线不完整明确失败）+ 澄清落盘/完成清理/再挂起覆盖；Diagnose 澄清落盘（失败明确报错）；跨实例 Resume 等价性测试（resolve/investigate/acquire 信念连续）+ tower 白盒 + store 往返 |
 | 0.1.4-3a | 超巨输出 spill·腿 A（捕获留存） | ✅ | PR #149（merge f49e317 → feat/0.1.4-persistence，2026-09-17）；tools `SpoolStore`/`SpoolFile`/`SpoolRef` + ctx 会话标注 `WithSpoolScope`；k8s stdout 双写（内存预算内内联 + 盘上全量，tmp+rename 转正，`Raw.stdoutSpool` 引用含全量字节/行数，失败降级旧截断语义不废取证）；store `DiskSpoolStore`（会话目录 `spool/`，永久留存随会话目录删）；Tower/编排 `Execute`/`Resume` 注入会话标注；openStores 先开存储后建工具图；config 零新键（磁盘/内存装配自然分派，内存路径不开 spill） |
-| 0.1.4-3b | 超巨输出 spill·腿 B（盘读翻页） | ✅ | 本 PR（合并后补 merge 号）；tools `SpoolSlicer` 接口（盘读切页）+ `StdoutSpoolRef` 单点探测；k8s `SliceSpool` 流式行级切页（行号/total 覆盖全量，时间窗行首 RFC3339 流式过滤，引用 TotalLines 供非时间窗提前止读）；evidence.read 引用命中优先盘读路径（`NewEvidenceReadTool` 增第三参 spool，失败路径统一 navError 引导重查）；Tower 轮首回灌账本带引用证据按账本编号进本轮索引（跨进程/重启后旧超巨观察可翻页，编号轮末随 Discard 清）；prompt/Spec 教学同步；smoke 随版本收尾 `make smoke-all` 兜底 |
+| 0.1.4-3b | 超巨输出 spill·腿 B（盘读翻页） | ✅ | PR #150（merge 592e13c → feat/0.1.4-persistence，2026-09-18）；tools `SpoolSlicer` 接口（盘读切页）+ `StdoutSpoolRef` 单点探测（完整引用才命中）；k8s `SliceSpool` 流式行级切页（行号/total 覆盖全量，时间窗行首 RFC3339 流式过滤，引用 TotalLines 供非时间窗提前止读，只剥一个 \n 终止符与内联同语义）；evidence.read 引用命中优先盘读路径（`NewEvidenceReadTool` 增第三参 spool，失败路径统一 navError 引导重查）；Tower 轮首回灌账本带引用证据按账本编号进本轮索引（跨进程/重启后旧超巨观察可翻页，编号轮末随 Discard 清）；prompt/Spec 教学同步；pr-agent R1 分诊（采纳 2：探测契约/行内容终止符；证伪 1：时间窗全扫上限，设计已裁决）随 commit 4caee38；smoke 随版本收尾 `make smoke-all` 兜底 |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
