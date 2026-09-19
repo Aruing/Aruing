@@ -26,6 +26,12 @@ type Responder interface {
 	Respond(ctx context.Context, in RespondInput) (RespondOutput, error)
 }
 
+// StreamingResponder 在保持完整业务提交语义的同时，逐段输出最终自然语言正文
+// emit 不得承载结构化角色 JSON、工具参数或诊断中间态；调用方取消时实现必须停止上游生成
+type StreamingResponder interface {
+	RespondStream(ctx context.Context, in RespondInput, emit func(delta string) error) (RespondOutput, error)
+}
+
 // 交给应答器的本轮输入
 // 历史为本轮用户消息写入前的列表（不含本轮用户句），用户原文为当前句
 type RespondInput struct {

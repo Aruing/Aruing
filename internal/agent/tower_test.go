@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,6 +45,30 @@ func newMockLLMClient(t *testing.T, handler http.HandlerFunc) llm.Client {
 		t.Fatalf("new llm client: %v", err)
 	}
 	return c
+}
+
+func isTowerReplyRequest(t *testing.T, r *http.Request) bool {
+	t.Helper()
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		t.Fatalf("read request: %v", err)
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var req struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	for _, message := range req.Messages {
+		if message.Role == "system" && strings.HasPrefix(message.Content, "# Tower Reply") {
+			return true
+		}
+	}
+	return false
 }
 
 func newTestFactory(t *testing.T) *core.Factory {
@@ -455,6 +480,10 @@ func TestTowerLLMToolBudgetAutoEscalate(t *testing.T) {
 func TestTowerLLMReply(t *testing.T) {
 	body := `{"action":"reply","content":"这是概念解释","question":""}`
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if isTowerReplyRequest(t, r) {
+			writeChatCompletion(w, "这是概念解释")
+			return
+		}
 		writeChatCompletion(w, body)
 	})
 	exec := &fakeRunExecutor{}
@@ -683,6 +712,10 @@ func TestTowerLLMBadJSONRetries(t *testing.T) {
 func TestTowerLLMBadJSONThenOK(t *testing.T) {
 	var calls atomic.Int32
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if isTowerReplyRequest(t, r) {
+			writeChatCompletion(w, "recovered")
+			return
+		}
 		if calls.Add(1) == 1 {
 			writeChatCompletion(w, "garbage")
 			return
@@ -925,6 +958,10 @@ func TestTowerBaselineReconSkippedWithoutK8s(t *testing.T) {
 func TestTowerBaselineReconFailureDegrades(t *testing.T) {
 	var userPayload string
 	client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if isTowerReplyRequest(t, r) {
+			writeChatCompletion(w, "仍可回答")
+			return
+		}
 		var reqBody struct {
 			Messages []struct {
 				Role    string `json:"role"`
