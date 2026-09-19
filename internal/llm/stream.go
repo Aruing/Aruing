@@ -6,7 +6,7 @@ import (
 	"errors"
 )
 
-// 流未正常结束或出现不支持的增量；调用方不得自动重新生成
+// 流未正常结束或出现不支持的增量；已对外发射内容的调用方不得自动重新生成
 var ErrStreamIncomplete = errors.New("llm stream incomplete")
 
 // 正文超过接收上限；明确失败，不截断后作为成功结果

@@ -52,8 +52,32 @@ func (c *collectingClient) GenerateJSON(ctx context.Context, req Request, out an
 	return nil
 }
 
-// 限制收集大小，即使注入的流实现没有自身上限也不无限分配
+// 私有收集未对外展示内容，断流或空正文可按默认预算重开，失败片段不复用
 func (c *collectingClient) collect(ctx context.Context, req StreamRequest) (string, error) {
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		content, err := c.collectOnce(ctx, req)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
+		if err == nil {
+			return content, nil
+		}
+		if attempt >= defaultMaxRetries || errors.Is(err, context.Canceled) ||
+			errors.Is(err, context.DeadlineExceeded) || errors.Is(err, ErrStreamLimit) ||
+			(!errors.Is(err, ErrStreamIncomplete) && !errors.Is(err, ErrEmptyResponse)) {
+			return "", err
+		}
+		if err := sleep(ctx, backoff(attempt)); err != nil {
+			return "", err
+		}
+	}
+}
+
+// 限制收集大小，即使注入的流实现没有自身上限也不无限分配
+func (c *collectingClient) collectOnce(ctx context.Context, req StreamRequest) (string, error) {
 	var buffer strings.Builder
 	_, err := c.stream.Stream(ctx, req, func(delta string) error {
 		if err := ctx.Err(); err != nil {
