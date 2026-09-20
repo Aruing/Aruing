@@ -28,6 +28,12 @@ import (
 //go:embed prompts/tower.md
 var towerPromptTemplate string
 
+//go:embed prompts/tower-reply.md
+var towerReplyPromptTemplate string
+
+// 底层客户端未提供真实流式能力时返回，调用方不得把整块结果冒充增量
+var ErrTowerStreamingUnsupported = errors.New("tower streaming requires llm streaming support")
+
 const (
 	// 单次决策业务级重试上限（非法动作、空正文、非法工具等）
 	maxTowerAttempts = 3
@@ -47,8 +53,10 @@ const (
 // 不持有跨轮可变状态；每次应答独立决策
 // 轮内观察索引可选：有则基线工具观察写入 evidenceId，供 evidence.read 切片
 type TowerResponder struct {
-	// 大模型客户端，用于结构化决策
+	// 大模型客户端，用于结构化路由与阻塞式最终回复
 	client llm.Client
+	// 可选流式能力，仅用于最终自然语言回复；结构化决策仍走完整解析
+	replyStreamer llm.Streamer
 	// 领域编号工厂，升格建运行与基线任务编号
 	factory *core.Factory
 	// 正式诊断执行器，升格时调用
@@ -135,8 +143,10 @@ func NewTowerResponder(
 	if err != nil {
 		return nil, err
 	}
+	replyStreamer, _ := client.(llm.Streamer)
 	return &TowerResponder{
 		client:                client,
+		replyStreamer:         replyStreamer,
 		factory:               factory,
 		executor:              executor,
 		ledger:                ledger,
@@ -197,6 +207,25 @@ func (t *TowerResponder) progressf(format string, args ...any) {
 // 每轮最多一次轻量集群资源侦察（上下文用，非正式判决证据）；失败降级为空
 // 直接回复或升格时带回检查点正文，供会话轮次落检查点消息
 func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
+	return t.respond(ctx, in, nil)
+}
+
+// RespondStream 只流式输出最终 reply；诊断、澄清和工具中间态保持完整结果语义
+func (t *TowerResponder) RespondStream(ctx context.Context, in session.RespondInput, emit func(string) error) (session.RespondOutput, error) {
+	if t == nil {
+		return session.RespondOutput{}, errors.New("tower responder is nil")
+	}
+	if emit == nil {
+		return session.RespondOutput{}, errors.New("tower stream requires a consumer")
+	}
+	if t.replyStreamer == nil {
+		return session.RespondOutput{}, ErrTowerStreamingUnsupported
+	}
+	return t.respond(ctx, in, emit)
+}
+
+// 统一执行记忆组装、结构化路由和动作提交；emit 非空时只交给最终 reply
+func (t *TowerResponder) respond(ctx context.Context, in session.RespondInput, emit func(string) error) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
 	}
@@ -308,8 +337,12 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 
 		switch decision.Action {
 		case towerActionReply:
+			content, replyErr := t.generateReply(ctx, in, view, priorRuns, observations, clusterResources, rehydrated, decision.Content, emit)
+			if replyErr != nil {
+				return session.RespondOutput{}, replyErr
+			}
 			return session.RespondOutput{
-				Content:           decision.Content,
+				Content:           content,
 				Mode:              session.ModeBaseline,
 				CheckpointContent: view.CheckpointContent,
 			}, nil
@@ -355,11 +388,64 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}
 }
 
+// 以同一份已组装上下文生成最终回复；阻塞与流式路径只在传输方式上不同
+func (t *TowerResponder) generateReply(
+	ctx context.Context,
+	in session.RespondInput,
+	view towerContextView,
+	priorRuns []towerPriorRunDetail,
+	observations []towerObservation,
+	clusterResources []ClusterResource,
+	rehydrated []rehydratedMsg,
+	draft string,
+	emit func(string) error,
+) (string, error) {
+	contextPayload, err := buildTowerUserPayload(in, view, priorRuns, observations, t.specs, clusterResources, rehydrated)
+	if err != nil {
+		return "", fmt.Errorf("tower reply payload: %w", err)
+	}
+	payload, err := json.Marshal(struct {
+		Context json.RawMessage `json:"context"`
+		Draft   string          `json:"draft"`
+	}{Context: json.RawMessage(contextPayload), Draft: draft})
+	if err != nil {
+		return "", fmt.Errorf("tower reply payload: %w", err)
+	}
+	req := llm.Request{
+		System: towerReplyPromptTemplate,
+		User:   string(payload),
+		Label:  "tower-reply",
+	}
+
+	var content string
+	if emit == nil {
+		response, generateErr := t.client.Generate(ctx, req)
+		if generateErr != nil {
+			return "", fmt.Errorf("tower reply: %w", generateErr)
+		}
+		content = response.Content
+	} else {
+		var streamed strings.Builder
+		_, streamErr := t.replyStreamer.Stream(ctx, llm.StreamRequest{Request: req}, func(delta string) error {
+			streamed.WriteString(delta)
+			return emit(delta)
+		})
+		if streamErr != nil {
+			return "", fmt.Errorf("tower reply stream: %w", streamErr)
+		}
+		content = streamed.String()
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", errors.New("tower reply is empty")
+	}
+	return content, nil
+}
+
 // 单轮决策结果（校验后）
 type towerDecision struct {
 	// 动作：直接回复、调工具或升格诊断
 	Action string
-	// 直接回复时的助手正文，其它动作可空
+	// 直接回复时的简短草稿或要点，其它动作可空
 	Content string
 	// 升格时写入运行的诊断问题；空则回退为用户原文
 	Question string
@@ -404,7 +490,7 @@ type towerObservation struct {
 type towerLLMOutput struct {
 	// 动作：直接回复、调工具或升格诊断
 	Action string `json:"action"`
-	// 直接回复时的助手正文
+	// 直接回复时的简短草稿或要点
 	Content string `json:"content"`
 	// 升格时的诊断问题
 	Question string `json:"question"`
