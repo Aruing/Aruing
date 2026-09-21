@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-09-21（map-reduce 排期裁决：随 0.1.4 交付，owner 维护者；总需求文档就绪于笔记 plan/0.1.4/map-reduce/requirements.md，下一项改为 map-reduce 步骤 1）；前值 2026-09-18（persistence 专项真集群冒烟通过：①②④⑤ pass / ③ attention 非产品回归；裁决 smoke-all 随收尾例行）
+> 最后更新：2026-09-21（map-reduce 步骤 1 纯函数核心实现完成于 feat/0.1.4-map-reduce-core，下一项改为步骤 2 接线）；前值 2026-09-21（map-reduce 排期裁决：随 0.1.4 交付，owner 维护者；总需求文档就绪）
 
 ## 当前阶段
 
@@ -121,6 +121,7 @@
 | 0.1.4-3a | 超巨输出 spill·腿 A（捕获留存） | ✅ | PR #149（merge f49e317 → feat/0.1.4-persistence，2026-09-17）；tools `SpoolStore`/`SpoolFile`/`SpoolRef` + ctx 会话标注 `WithSpoolScope`；k8s stdout 双写（内存预算内内联 + 盘上全量，tmp+rename 转正，`Raw.stdoutSpool` 引用含全量字节/行数，失败降级旧截断语义不废取证）；store `DiskSpoolStore`（会话目录 `spool/`，永久留存随会话目录删）；Tower/编排 `Execute`/`Resume` 注入会话标注；openStores 先开存储后建工具图；config 零新键（磁盘/内存装配自然分派，内存路径不开 spill） |
 | 0.1.4-3b | 超巨输出 spill·腿 B（盘读翻页） | ✅ | PR #150（merge 592e13c → feat/0.1.4-persistence，2026-09-18）；tools `SpoolSlicer` 接口（盘读切页）+ `StdoutSpoolRef` 单点探测（完整引用才命中）；k8s `SliceSpool` 流式行级切页（行号/total 覆盖全量，时间窗行首 RFC3339 流式过滤，引用 TotalLines 供非时间窗提前止读，只剥一个 \n 终止符与内联同语义）；evidence.read 引用命中优先盘读路径（`NewEvidenceReadTool` 增第三参 spool，失败路径统一 navError 引导重查）；Tower 轮首回灌账本带引用证据按账本编号进本轮索引（跨进程/重启后旧超巨观察可翻页，编号轮末随 Discard 清）；prompt/Spec 教学同步；pr-agent R1 分诊（采纳 2：探测契约/行内容终止符；证伪 1：时间窗全扫上限，设计已裁决）随 commit 4caee38；smoke 随版本收尾 `make smoke-all` 兜底 |
 | 0.1.4-4 | 会话发现（`aruing sessions`） | ✅ | PR #151（merge 9d6a732 → feat/0.1.4-persistence，2026-09-18）；`session.SessionLister` 可选能力 + `SessionSummary`（id / 创建 / 最近活跃 / 消息数 / 首问全文，按最近活跃降序；排序归 store 层，内存/磁盘两实现同序）；磁盘实现只读复用 `readSessionFile`（不开追加句柄不进打开缓存不触发修复；缺会话文件静默跳过，坏会话跳过 + stderr 警告不劫持列表，打开时仍按加载语义明确失败，警告走进程级 stderr 为既有约定）；CLI `sessions` 子命令纯读取不须 LLM（config 新增 `LoadResolvedNoLLM` 拆开加载链与 LLM 校验），`--format table|json`，json 空态输出 `[]`（机器契约），table 首问 48 runes 展示层截断 / json 全文，无条数上限（#18）；pr-agent 三轮 R1–R3 分诊：采纳 3（R1 json 空态契约 + config 测试环境隔离；R3 cmd 测试隔离配置搜索链）证伪 1（R2 警告通道语义，约定钉板）；smoke 随版本收尾 `make smoke-all` 兕底 |
+| map-reduce-1 | 大表全覆盖 map-reduce 纯函数核心 | ✅ | PR #TBD（feat/0.1.4-map-reduce-core，2026-09-21 设计评审冻结后实现）；`summary` 新增 `mapreduce.go`：Pass 1 全局基准（频次 + 稀有论域 + 全局 T²）→ 等行数分片（`chooseShardCount` 候选循环精确记账动态定 S，无魔法常数）→ 片内两阶段选择（稀有代表优先 + T²/步长补位）→ Reduce 归并 + 溢出显式标注；`method` 枚举 `map-reduce` 显式启用（默认 fast 逐字节不变，G4）；行号 0 基贯通 evidence.read；产物总 rune ≤ 预算口径；config/k8s/编排零改（config 字符串经装配层 `ParseMethod` 自动放行，教学面归步骤 2）；实现期修正三处：行预算按渲染整行口径（#i 前缀含，防系统性超支）、尾注/溢出悲观预留入片节记账、稀有论域列规则不继承 0.999 均匀性阈（超均匀列极稀有值深误杀，补钉板回归） |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -128,7 +129,7 @@
 
 ## 下一步
 
-**下一项**：**0.1.4 map-reduce 步骤 1（纯函数核心）**：表格两遍分片（Pass 1 全局频次基准 → 片内全局基准投影 → Reduce 归并 + 溢出显式标注），只动 `internal/tools/summary` 纯函数包（零接线零 config）；需求与拆分起点见笔记 `plan/0.1.4/map-reduce/requirements.md`。**并行裁决项**：streaming（分支 feat/streaming-output，PR #148 未合并）是否随 0.1.4 交付由维护者裁决；版本级集成验证（`make check` + `make smoke-all`）随收尾例行执行（裁决 2026-09-18：smoke-all 不再作欠账项）后打 tag 发布。
+**下一项**：**0.1.4 map-reduce 步骤 2（接线与教学面）**：k8s 工具 Spec / tower prompt 教学同步（超巨表可切 map-reduce 全覆盖）+ `aruing.example.yaml` 注释；config 零改（枚举经装配层 `summary.ParseMethod` 自动放行）；步骤 1（纯函数核心）已实现于 feat/0.1.4-map-reduce-core，plan 见笔记 `plan/0.1.4/map-reduce/2026-9-21-map-reduce-core.md`（三决策评审定稿：片数候选循环方案 B / 片间均匀 / 单 PR）。**并行裁决项**：streaming（分支 feat/streaming-output，PR #148 未合并）是否随 0.1.4 交付由维护者裁决；版本级集成验证（`make check` + `make smoke-all`）随收尾例行执行（裁决 2026-09-18：smoke-all 不再作欠账项）后打 tag 发布。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`；0.1.4 已立项三项不再列此处）：
 
