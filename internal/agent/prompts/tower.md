@@ -28,7 +28,7 @@
 - 不要用工具做破坏性变更；只读策略会拒绝写入类调用
 - 不得在 reply 中声称「已裁决根因」或伪造 Evidence / Verdict
 - 每轮最多一条工具调用；不要编造工具返回结果
-- **大表导航**：观察摘要若含「大表」/ PCA 抽样且本条有 `evidenceId`，要看其它行时用 `evidence.read`（offset/limit），不要重复 k8s 全量拉表；`evidence.read` 失败（不可切片）时再改用源工具收窄查询（`--field-selector` / `-o jsonpath`）
+- **大表导航**：观察摘要若含「大表」/ PCA 抽样且本条有 `evidenceId`，要看其它行时用 `evidence.read`（offset/limit），不要重复 k8s 全量拉表；`evidence.read` 失败（不可切片）时再改用源工具收窄查询（`--field-selector` / `-o jsonpath`）。分片全覆盖形态（含「片 i/S」节）下：片节报数「稀有命中 N 行」与溢出标注「命中 N 行仅展示 k 行」是存在性信号——该稀有值在此片确有 N 行，代表行未展示也不算不存在；要看某片原文直接把片头区间作 `evidence.read` 的 offset/limit；溢出行给出的参数可照抄
 - 若 history 含 `[folded]` / `[truncated...]`，仍以 `prior_run_details` / `prior_diagnostics` 与可见摘要为准；不得编造未出现的步骤细节
 - 若提供了 `rehydrated_messages`，答该步「为什么 / 当时如何」时引用其中原文要点；仍不伪装本轮新裁决或新 Evidence
 - `rehydrated_messages` 中 `mode` 为 `evidence` 的条目是按编号/资源名回灌的历史证据原始输出预览：回答旧证据细节（当时完整输出、具体行）时优先依据该条目，不得编造；它仍不是新 Evidence/Verdict

@@ -22,10 +22,16 @@ tools:
   max_stdout_bytes: 0
   # Table projection method for method-comparison experiments; empty = fast (default
   # three-segment path). Values: fast | greedy | greedy-knapsack | full | head-tail |
-  # uniform. Unknown values fail at startup. Env: ARUING_TOOLS_PROJECTION_METHOD
+  # uniform | llm-rerank (C4 arm, requires LLM) | map-reduce. Unknown values fail at
+  # startup. map-reduce = full-coverage two-pass sharding for very large tables
+  # (thousands of rows: global column frequencies + per-shard representative rows +
+  # explicit overflow notes, so mid-table signals stay visible); costlier than
+  # single-pass projection, explicit opt-in — default stays fast.
+  # Env: ARUING_TOOLS_PROJECTION_METHOD
   projection:
     method: ""
-    # Row budget in runes for greedy/head-tail/uniform; 0 = default 4096
+    # Row budget in runes for greedy/head-tail/uniform/map-reduce; 0 = default 4096.
+    # map-reduce counts the whole product (frequency section + shard notes included).
     budget: 0
     # Lambda weight of the anomaly term (greedy only); 0 = default 1
     lambda: 0

@@ -124,6 +124,7 @@ func (t *Tool) Spec() tools.ToolSpec {
 			"参数 argv 为不含命令自身的参数列表，例如 [\"get\",\"pods\",\"-n\",\"default\"]。" +
 			"使用进程直调，不经 shell；默认表格输出会被自动投影为摘要（类型/条数/列/行）。" +
 			"大结果集先用 --field-selector / label selector 收窄，或 -o jsonpath={...} 抽取具体字段；需要完整对象时再 -o json。" +
+			"若大表摘要呈分片全覆盖形态（全局列频次 + 「片 i/S」节）：行号为全表 0 基，按片头行区间用 evidence.read（offset/limit）可直达任意行；片内未展示的命中行有显式溢出标注，照其参数跟进即可。" +
 			"若观察已有 evidenceId 且需翻页看表内其它行，用 evidence.read 按 offset/limit 切片，勿重复拉全量。" +
 			"取 logs 建议加 --timestamps，之后可对该观察用 evidence.read 的 since/until（RFC3339）按时间窗切片。" +
 			"可选 stdin 与 timeoutSeconds。",

@@ -276,6 +276,19 @@ func TestToolRegisterSpecs(t *testing.T) {
 	}
 }
 
+// 教学契约锚：Spec 必须教分片全覆盖摘要（map-reduce 投影产物）的读法——
+// 0 基全表行号可直达、溢出标注照参数跟进，
+// 防止教学文案被无意删除后模型面对分片摘要不知如何下钻（0.1.4 map-reduce 步骤 2）
+func TestToolSpecShardTeaching(t *testing.T) {
+	tool := mustNewTool(t, Config{KubectlPath: writeFakeKubectl(t, "#!/bin/sh\nexit 0\n")})
+	desc := tool.Spec().Description
+	for _, key := range []string{"分片全覆盖", "0 基", "溢出标注"} {
+		if !strings.Contains(desc, key) {
+			t.Errorf("Spec description missing teaching keyword %q", key)
+		}
+	}
+}
+
 // 证明调用不经命令行外壳：参数中的元字符不会被解释
 func TestToolNoShell(t *testing.T) {
 	kubectl := writeFakeKubectl(t, `#!/bin/sh
