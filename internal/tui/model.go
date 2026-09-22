@@ -23,14 +23,20 @@ type msgView struct {
 	text string
 }
 
-// 为流式响应预留（arc《流式响应》）：累积当前正在生成的 chunk，完成后落为正式消息并清空。
-// 当前非流式恒空；流式落地时 chunk 经 append 灌入、View 检查 empty() 渲染、完成 reset()
-type streamingBuffer struct{ b strings.Builder }
+// 当前回复的展示副本；使用字符串以适配框架按值复制模型，终态到达后清空
+type streamingBuffer struct{ text string }
 
-func (s *streamingBuffer) append(chunk string) { s.b.WriteString(chunk) } //nolint:unused // 为 arc《流式响应》预留；Step 2 非流式不调用
-func (s *streamingBuffer) view() string        { return s.b.String() }
-func (s *streamingBuffer) reset()              { s.b.Reset() } //nolint:unused // 为 arc《流式响应》预留；Turn 完成时清空
-func (s *streamingBuffer) empty() bool         { return s.b.Len() == 0 }
+// 追加展示片段，不参与业务提交
+func (s *streamingBuffer) append(chunk string) { s.text += chunk }
+
+// 返回当前展示正文
+func (s *streamingBuffer) view() string { return s.text }
+
+// 轮次结束后清除临时正文
+func (s *streamingBuffer) reset() { s.text = "" }
+
+// 判断是否已有可见片段
+func (s *streamingBuffer) empty() bool { return s.text == "" }
 
 // Turn 完成消息：成功带 result，失败带 err
 type turnMsg struct {
@@ -61,6 +67,10 @@ type Model struct {
 	// 在途 Turn 的取消句柄；program 退出时由 Run 的 defer cancel 触发。
 	// bubbletea Model 受框架约束需持有 ctx（Update 签名无法传参），此处偏离通用「不存 ctx」约定
 	ctx context.Context
+	// 当前轮次的取消句柄；取消后等待终态再允许下一轮
+	cancelTurn context.CancelFunc
+	// 当前轮次按序消费的展示事件
+	events <-chan streamMsg
 }
 
 func (m Model) Init() tea.Cmd {
@@ -83,9 +93,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r, err := newMarkdownRenderer(m.tuiTheme, msg.Width); err == nil {
 			m.md = r
 		}
+		syncViewport(&m)
 		return m, nil
 
+	case streamStartedMsg:
+		m.events = msg.events
+		return m, nextStream(m.events)
+
+	case streamMsg:
+		if msg.ack == nil {
+			return m.Update(msg.final)
+		}
+		m.streaming.append(msg.delta)
+		msg.ack <- nil
+		syncViewport(&m)
+		return m, nextStream(m.events)
+
 	case turnMsg:
+		if m.cancelTurn != nil {
+			m.cancelTurn()
+			m.cancelTurn = nil
+		}
+		m.streaming.reset()
+		m.events = nil
 		m.busy = false
 		if msg.err != nil {
 			m.messages = append(m.messages, msgView{kind: "error", text: msg.err.Error()})
@@ -106,6 +136,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.Type {
 		case tea.KeyCtrlC:
+			if m.busy && m.cancelTurn != nil {
+				m.cancelTurn()
+				return m, nil
+			}
 			m.quit = true
 			return m, tea.Quit
 		case tea.KeyEnter:
@@ -124,14 +158,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input.Reset()
 			m.busy = true
 			syncViewport(&m)
-			svc := m.svc
-			sid := m.sessionID
-			ctx := m.ctx
+			turnCtx, cancel := context.WithCancel(m.ctx)
+			m.cancelTurn = cancel
+			m.streaming.reset()
+			// 启动命令执行后才产生事件，更新线程只消费并渲染
+			svc, sid, parent := m.svc, m.sessionID, m.ctx
 			turn := func() tea.Msg {
-				result, err := svc.Turn(ctx, sid, text)
-				return turnMsg{result: result, err: err}
+				stream := startStream(parent, turnCtx, svc, sid, text)
+				// 转交实际事件通道，后续命令逐个读取
+				return streamStartedMsg{events: stream}
 			}
-			// 提交时重启 spinner tick：idle 时 tick 已停，busy 期间需持续动画
 			return m, tea.Batch(turn, m.spinner.Tick)
 		default:
 			var cmd tea.Cmd
@@ -151,11 +187,8 @@ func (m Model) View() string {
 	}
 	var b strings.Builder
 	b.WriteString(m.viewport.View())
-	if m.busy {
+	if m.busy && m.streaming.empty() {
 		b.WriteString("\n" + m.spinner.View() + " 思考中…")
-	}
-	if !m.streaming.empty() {
-		b.WriteString("\n" + m.styles.assistant.Render(m.streaming.view()))
 	}
 	w := m.width
 	if w < 1 {
@@ -168,7 +201,17 @@ func (m Model) View() string {
 
 // 把 messages 渲染成历史文本，塞进 viewport 并滚到底
 func syncViewport(m *Model) {
-	m.viewport.SetContent(renderHistory(m))
+	history := renderHistory(m)
+	if !m.streaming.empty() {
+		var draft strings.Builder
+		printGap(&draft, m.styles.spacing.assistantTop)
+		if m.styles.labels.enabled {
+			draft.WriteString(m.styles.assistant.Render(m.styles.labels.assistant) + "\n")
+		}
+		draft.WriteString(m.styles.assistant.Render(renderMarkdown(m.md, m.streaming.view())))
+		history += draft.String()
+	}
+	m.viewport.SetContent(history)
 	m.viewport.GotoBottom()
 }
 
