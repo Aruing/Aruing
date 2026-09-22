@@ -1,10 +1,10 @@
 # 项目当前状态
 
-> 最后更新：2026-09-05（**v0.1.3 已发布**——收尾 docs #139/#140 → production PR #141 → tag → publish 全链走完，release notes 含 0.1.2 全部增量；#142 pr-agent #141 评审跟进修复。实验数据与钉板记录在笔记仓 `gproject/中期/实验数据/0.1.2-0.1.3-统一批/`，遗留问题见笔记仓 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）
+> 最后更新：2026-09-21（map-reduce 步骤 1 纯函数核心实现完成于 feat/0.1.4-map-reduce-core，下一项改为步骤 2 接线）；前值 2026-09-21（map-reduce 排期裁决：随 0.1.4 交付，owner 维护者；总需求文档就绪）
 
 ## 当前阶段
 
-**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 三创新点版本全部交付**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）+ 毕业论文三创新点载体（动机与排序依据在笔记仓）。**版本节奏**：小版本递增，每个 0.1.x = 一个可用正式实现：`0.1.1`（创新点二·代表性投影）✅ v0.1.1 已发布；`0.1.2`（创新点一·主动取证决策）✅ done 2026-08-31；`0.1.3`（创新点三·分层记忆）✅ done 2026-08-31，随 **v0.1.3 单 tag** 一并发布（0.1.2 不独立发版，发布裁决 2026-08-30）；`0.1.4`（产品完备批：持久化 + 流式 + map-reduce）🚧 已立项 2026-09-10（plan 见笔记 `plan/0.1.4/`，未开工）。三创新点均已「形式化 + 实现 + 同装置对比数据」齐备，实验数据归档笔记仓 `gproject/中期/实验数据/`（0.1.1 主实验 + 0.1.2-0.1.3 统一实验批含钉板 README）；plan 已归档 `plan/archive/0.2.0/{0.1.2,0.1.3}/`。
+**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 三创新点版本全部交付**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`）。定位：对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）+ 毕业论文三创新点载体（动机与排序依据在笔记仓）。**版本节奏**：小版本递增，每个 0.1.x = 一个可用正式实现：`0.1.1`（创新点二·代表性投影）✅ v0.1.1 已发布；`0.1.2`（创新点一·主动取证决策）✅ done 2026-08-31；`0.1.3`（创新点三·分层记忆）✅ done 2026-08-31，随 **v0.1.3 单 tag** 一并发布（0.1.2 不独立发版，发布裁决 2026-08-30）；`0.1.4`（产品完备批：持久化 + 流式 + map-reduce）🚧 进行中：persistence 步骤 1（磁盘存储地基）已合并（PR #145，2026-09-16）；persistence 步骤 2（挂起快照持久化）已合并（PR #146，merge 9b9ec5d，2026-09-16；跨进程 Resume + `DiskStore.Close`（P2-3 消化）；pr-agent 评审随合并处置）；步骤 3（超巨输出 spill 两腿）已合并：腿 A PR #149 merge f49e317 + 腿 B PR #150 merge 592e13c（2026-09-18，pr-agent R1 分诊随 4caee38）；步骤 4（`aruing sessions` 会话发现）已合并（PR #151 merge 9d6a732，2026-09-18：`session.SessionLister` 只读汇总 + CLI `--format table|json` 纯读取不须 LLM；persistence 功能头 5 条标志全绿）；**persistence 专项真集群冒烟 2026-09-18 通过**（kind × 2 + 真 LLM：①消息落盘跨进程续聊 / ②账本落盘索引卡读回 / ④ spill 双写+跨进程 evidence.read 盘读翻页均 pass；⑤ sessions 列表 pass；③ 挂起真集群不可确定性触发——模型按症状消歧或 baseline 反问，机制已由 #146 跨实例等价测试覆盖，非产品回归；spool 双写全量留存真路径首次确认）（2026-09-10 立项，plan 见笔记 `plan/0.1.4/`）。**map-reduce 排期裁决（2026-09-21）：随 0.1.4 交付**，owner 维护者；总需求文档就绪（笔记 `plan/0.1.4/map-reduce/requirements.md`：问题机理 / 机制需求 / 保证结构 G1–G4 / 步骤拆分建议），步骤 1–4 设计待写；streaming 是否随版仍待裁决。三创新点均已「形式化 + 实现 + 同装置对比数据」齐备，实验数据归档笔记仓 `gproject/中期/实验数据/`（0.1.1 主实验 + 0.1.2-0.1.3 统一实验批含钉板 README）；plan 已归档 `plan/archive/0.2.0/{0.1.2,0.1.3}/`。
 
 **`0.1.3` / 分层记忆组装（信任分层记忆 + 按需回灌）✅ 完成**（2026-08-31 关闭；#129 C1 压缩出口地址无损机械校验 / #130 tier-aware 组装器 + `agent.memory.method` 实验臂开关 / #131 分层检索回灌（λ₁ 确定性寻址 + λ₂ LLM 兑底 + 证据 raw 预览）/ #132 探针实验装置（`aruing probe` + `judge --probe` + `make probe-sweep`））。完成标志 10（探针真跑数）：批③ 36 会话两波全绿，长会话事实回忆 **ours 0.83 vs last-N 0.57 vs 平铺摘要 0.35**，久远证据链回溯（须回灌才能答的探针）**6/6 vs 2/6 vs 0/6**；判分出图 + ③层抽样（LLM 辅助评零 error、人工一致率 0.70）随批归档。完成标志 11（归档发布）✅：plan 归档 + v0.1.3 已发布（2026-09-05，#141 → tag → publish）。
 
@@ -116,6 +116,12 @@
 | 0.1.1-3 | bench 遍历 + 消融对照臂 + 主实验 | ✅ | #116；`eval` bench runner（BenchMatrix YAML / 内置默认 2400 单元 → RunBench → CSV + 矩阵快照）+ RandomPick 随机消融臂 + `summary` SimpleStat 简单统计量消融臂（bench 注入不进 config）+ `RenderWithStats` 观测量 + C4 llm-rerank 方法（`RerankFunc` 注入，k8s `NewReranker` + go:embed prompt，装配层校验 LLM）；`aruing bench` 子命令 + `make bench` + `scripts/bench-plot.py`（位置柱状 / 预算曲线 / 消融表）；core/agent 零改 |
 | 0.1.1-2 | 评测基建 A（ground_truth + eval-json + 判分 CLI） | ✅ | #114；含两轮 pr-agent 评审采纳（evidence_ids 空切片归一、rubric 单元格净化）；`internal/eval` 新包（大表生成器 / run 记录 / 判分①②③抽样）；llm 用量记账（Request.Label + LabelingClient + UsageTracker，角色零改）；Orchestrator LastRunStats 只读统计；`run --eval-json`（成功/挂起/失败三路径全记）；`judge` 子命令；4 场景 ground_truth 回填；core 零改 |
 | 0.1.1-1 | 加权贪心代表性投影 + 方法开关 | ✅ | #112；`summary` 新增 greedy（覆盖 + T² 目标，锚预置，基数折算 CELF；knapsack 对照变体）+ RenderWithOptions 方法分发（full/head-tail/uniform 基线）+ config `tools.projection` 开关 + k8s 透传；T² 修正为平方口径（总体方差）；core/agent 零改 |
+| 0.1.4-1 | 磁盘存储地基（会话单元目录 + run 统一进会话） | ✅ | PR #145（merge 6e7edfb → feat/0.1.4-persistence）；`DiskStore`/`DiskRunLedger`（per-session 目录：session.jsonl type 开放 entry 流 + runs/ 每诊断一 JSON tmp+rename 原子写（文件与父目录 fsync）；惰性打开；末行无换行残迹容忍（解析失败截断 / 可解析补行）中间坏行报错；写入口拒绝路径成分编号；UpdatedAt 推导）+ `storage.data_dir`（默认 ~/.aruing/data，probe 覆盖 tmp）+ `--data-dir` + `RespondOutput/TurnResult.Evidence` 透传；run 经 Diagnose 应答器统一进会话（Run.SessionID 必填，chat --session 可续聊） |
+| 0.1.4-2 | 挂起快照持久化（跨进程 Resume） | ✅ | PR #146（merge 9b9ec5d → feat/0.1.4-persistence，2026-09-16）；agent `SuspensionSnapshot`（原 `suspendedRun` 导出，V 版本号）+ `ExportSuspended`/`ImportSuspended`（深拷贝/校验回灌）+ `acquire.Belief` JSON 编解码；session `SuspensionStore` 接口 + `SuspendExporter`/`SuspendImporter` 可选能力 + `PersistSuspension`/`ClearSuspension` 助手；store `DiskSuspensionStore`（`suspended/<runId>.json` tmp+rename+fsync，Get 取字典序最大，Delete 清理全部）+ `MemorySuspensionStore` + `DiskStore.Close`（P2-3）；Tower 轮首内存优先→盘恢复（账本守卫清已完成残留，数据层失败降级 + stderr 警告一次，接线不完整明确失败）+ 澄清落盘/完成清理/再挂起覆盖；Diagnose 澄清落盘（失败明确报错）；跨实例 Resume 等价性测试（resolve/investigate/acquire 信念连续）+ tower 白盒 + store 往返 |
+| 0.1.4-3a | 超巨输出 spill·腿 A（捕获留存） | ✅ | PR #149（merge f49e317 → feat/0.1.4-persistence，2026-09-17）；tools `SpoolStore`/`SpoolFile`/`SpoolRef` + ctx 会话标注 `WithSpoolScope`；k8s stdout 双写（内存预算内内联 + 盘上全量，tmp+rename 转正，`Raw.stdoutSpool` 引用含全量字节/行数，失败降级旧截断语义不废取证）；store `DiskSpoolStore`（会话目录 `spool/`，永久留存随会话目录删）；Tower/编排 `Execute`/`Resume` 注入会话标注；openStores 先开存储后建工具图；config 零新键（磁盘/内存装配自然分派，内存路径不开 spill） |
+| 0.1.4-3b | 超巨输出 spill·腿 B（盘读翻页） | ✅ | PR #150（merge 592e13c → feat/0.1.4-persistence，2026-09-18）；tools `SpoolSlicer` 接口（盘读切页）+ `StdoutSpoolRef` 单点探测（完整引用才命中）；k8s `SliceSpool` 流式行级切页（行号/total 覆盖全量，时间窗行首 RFC3339 流式过滤，引用 TotalLines 供非时间窗提前止读，只剥一个 \n 终止符与内联同语义）；evidence.read 引用命中优先盘读路径（`NewEvidenceReadTool` 增第三参 spool，失败路径统一 navError 引导重查）；Tower 轮首回灌账本带引用证据按账本编号进本轮索引（跨进程/重启后旧超巨观察可翻页，编号轮末随 Discard 清）；prompt/Spec 教学同步；pr-agent R1 分诊（采纳 2：探测契约/行内容终止符；证伪 1：时间窗全扫上限，设计已裁决）随 commit 4caee38；smoke 随版本收尾 `make smoke-all` 兜底 |
+| 0.1.4-4 | 会话发现（`aruing sessions`） | ✅ | PR #151（merge 9d6a732 → feat/0.1.4-persistence，2026-09-18）；`session.SessionLister` 可选能力 + `SessionSummary`（id / 创建 / 最近活跃 / 消息数 / 首问全文，按最近活跃降序；排序归 store 层，内存/磁盘两实现同序）；磁盘实现只读复用 `readSessionFile`（不开追加句柄不进打开缓存不触发修复；缺会话文件静默跳过，坏会话跳过 + stderr 警告不劫持列表，打开时仍按加载语义明确失败，警告走进程级 stderr 为既有约定）；CLI `sessions` 子命令纯读取不须 LLM（config 新增 `LoadResolvedNoLLM` 拆开加载链与 LLM 校验），`--format table|json`，json 空态输出 `[]`（机器契约），table 首问 48 runes 展示层截断 / json 全文，无条数上限（#18）；pr-agent 三轮 R1–R3 分诊：采纳 3（R1 json 空态契约 + config 测试环境隔离；R3 cmd 测试隔离配置搜索链）证伪 1（R2 警告通道语义，约定钉板）；smoke 随版本收尾 `make smoke-all` 兕底 |
+| map-reduce-1 | 大表全覆盖 map-reduce 纯函数核心 | ✅ | PR #155（feat/0.1.4-map-reduce-core，2026-09-21 设计评审冻结后实现）；`summary` 新增 `mapreduce.go`：Pass 1 全局基准（频次 + 稀有论域 + 全局 T²）→ 等行数分片（`chooseShardCount` 候选循环精确记账动态定 S，无魔法常数）→ 片内两阶段选择（稀有代表优先 + T²/步长补位）→ Reduce 归并 + 溢出显式标注；`method` 枚举 `map-reduce` 显式启用（默认 fast 逐字节不变，G4）；行号 0 基贯通 evidence.read；产物总 rune ≤ 预算口径；config/k8s/编排零改（config 字符串经装配层 `ParseMethod` 自动放行，教学面归步骤 2）；实现期修正三处：行预算按渲染整行口径（#i 前缀含，防系统性超支）、尾注/溢出悲观预留入片节记账、稀有论域列规则不继承 0.999 均匀性阈（超均匀列极稀有值深误杀，补钉板回归） |
 
   产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
@@ -123,7 +129,7 @@
 
 ## 下一步
 
-**下一项**：**0.1.4 已立项待开工**（2026-09-10 产品完备批：持久化 / 流式 / map-reduce 三功能目录，plan 见笔记 `plan/0.1.4/`）。步骤排序与开工由维护者裁决（中期答辩后排期）。
+**下一项**：**0.1.4 map-reduce 步骤 2（接线与教学面）**：k8s 工具 Spec / tower prompt 教学同步（超巨表可切 map-reduce 全覆盖）+ `aruing.example.yaml` 注释；config 零改（枚举经装配层 `summary.ParseMethod` 自动放行）；步骤 1（纯函数核心）已实现于 feat/0.1.4-map-reduce-core，plan 见笔记 `plan/0.1.4/map-reduce/2026-9-21-map-reduce-core.md`（三决策评审定稿：片数候选循环方案 B / 片间均匀 / 单 PR）。**并行裁决项**：streaming（分支 feat/streaming-output，PR #148 未合并）是否随 0.1.4 交付由维护者裁决；版本级集成验证（`make check` + `make smoke-all`）随收尾例行执行（裁决 2026-09-18：smoke-all 不再作欠账项）后打 tag 发布。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`；0.1.4 已立项三项不再列此处）：
 
@@ -142,7 +148,7 @@
 | 正式诊断读回 | **已落地（beta6）**：`RunLedger` 进程内 |
 | 深解 / 回灌 | **已落地（beta6/7）** |
 | 配置文件 | **已落地（beta8）**：文件 → env → CLI |
-| 澄清挂起 | **已落地（beta9）**：`Suspension`/`Outcome` + resolve clarify + `Resume`；进程内、退出即丢 |
+| 澄清挂起 | **已落地（beta9）**：`Suspension`/`Outcome` + resolve clarify + `Resume`；步骤 2 起快照落盘 `suspended/`，跨进程恢复（重启后同会话首条回复即 Resume） |
 | 会否推倒 core/tools | **否** |
 | 单轮期禁止事项 | 动编排/工具/角色时仍对照笔记 `plan/archive/0.0.1/0.0.1-beta2/2026-7-22.md` §4 |
 

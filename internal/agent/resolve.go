@@ -34,25 +34,25 @@ const (
 // 进程内结构，不作为持久化实体；未来存储层若需恢复过程态再提升字段
 type ResolveState struct {
 	// 当前运行的问题结构，含已回填系统编号的节点
-	Query core.Query
+	Query core.Query `json:"query"`
 	// 本阶段已执行的任务，含编排发放的编号与参数
-	Tasks []core.Task
+	Tasks []core.Task `json:"tasks,omitempty"`
 	// 本阶段已登记的证据，含编排发放的编号与工具返回内容
-	Evidence []core.Evidence
+	Evidence []core.Evidence `json:"evidence,omitempty"`
 	// 已完成的工具调用次数，用于预算控制
-	Round int
+	Round int `json:"round"`
 	// 允许的工具调用上限
-	MaxRounds int
+	MaxRounds int `json:"maxRounds"`
 	// 用户澄清答复累积（Resume 重跑时注入）；优先据此消歧
-	Clarifications []string
+	Clarifications []string `json:"clarifications,omitempty"`
 }
 
 // 定位驱动向用户澄清的请求内容
 type ClarifyRequest struct {
 	// 面向用户的问题
-	Question string
+	Question string `json:"question"`
 	// 可选候选列表，可空
-	Options []string
+	Options []string `json:"options,omitempty"`
 }
 
 // 定位驱动提议的一次工具调用，尚未分配任务编号

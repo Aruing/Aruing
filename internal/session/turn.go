@@ -18,6 +18,9 @@ type TurnResult struct {
 	RunID string
 	// 本轮若跑了诊断则非空
 	Report *core.Report
+	// 本轮诊断产生的证据（完成时全量，挂起时为已产生的部分证据）；与账本同源，
+	// 供调用方输出与评测记录消费，不作为落库依据（落库走账本）
+	Evidence []core.Evidence
 }
 
 // 本轮「业务上怎么答」的可注入接口；写库只在会话服务轮次内完成
@@ -48,6 +51,9 @@ type RespondOutput struct {
 	RunID string
 	// 本轮若诊断完成则非空；澄清挂起时为空
 	Report *core.Report
+	// 本轮诊断产生的证据（完成时全量，挂起时为已产生的部分证据）；
+	// 供调用方输出与评测记录消费，不作为落库依据（落库走账本）
+	Evidence []core.Evidence
 	// 深层压缩交接摘要；非空时在助手消息前写入检查点
 	// 存储层仍保留压缩前全量历史，检查点是增补不是替换
 	CheckpointContent string
@@ -171,6 +177,7 @@ func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnRes
 		AssistantMessage: assistantMsg,
 		RunID:            out.RunID,
 		Report:           out.Report,
+		Evidence:         out.Evidence,
 	}, nil
 }
 

@@ -16,7 +16,7 @@
 | --- | --- |
 | **智能基线** | 观察 → 思考 → **调工具** → 观察 → 回答。「集群装了什么」「这个服务怎么配的」这类问题都基于实时集群数据作答。 |
 | **诊断专长** | 根因类提问升格为正式管道：假设 → 任务 → **Evidence** → **Verdict**（必须引用 Evidence）→ **Report**。没有「我觉得是 X」——只有带工具痕迹的结论。 |
-| **多轮对话** | 同会话追问；既往正式诊断可按 `RunID` 深读细解，不编造证据。 |
+| **多轮对话** | 同会话追问；会话与诊断记录落盘（默认 `~/.aruing/data`），重启不丢——`aruing chat --session <id>` 跨进程续聊；既往正式诊断可按 `RunID` 深读细解，不编造证据。`aruing run` 同样建单轮会话，报告可同法续聊追问。 |
 
 工具经共享 **Registry / Dispatcher**（shell-less kubectl 后端 + 授权 Policy）。模型输出永远不冒充 Evidence。
 
@@ -26,7 +26,7 @@
 
 **`0.1.3` —— 证据信息增益驱动的取证决策 + 分层记忆。** 调查阶段由取证决策循环驱动（贝叶斯信念、EIG 排序动作选择、MSPRT 序贯停止——`agent.acquire.method` 可在同一二进制内切 ReAct / 随机 / 最低成本 / 串行基线臂），长会话采用信任分层记忆视图：诊断与证据索引卡常驻可寻址、近期轮次原文保留、中段历史预算内压缩、分层检索按需回灌证据 raw 预览（`agent.memory.method` 可切 last-N / 平铺摘要基线臂）。评测栈新增探针装置（`aruing probe`，20/50 轮脚本化长会话 + 尾部探针）、③层全池化抽样 + LLM 辅助评 + 人工一致率（`judge --sample-total/--rubric-llm/--agree`）与矩阵驱动器（`make eval-sweep` / `make probe-sweep`，含断点续跑与 manifest）。0.1.0–0.1.1 的能力全部保留：真集群 + 真 LLM 诊断、交互式终端对话、证据导航、澄清挂起与恢复、代表性投影、一行安装与自更新。
 
-尚未构建（计划 0.2+）：npm 分发、磁盘持久化（会话进程内、退出即丢）、流式响应、带审批的写工具、多集群、Web UI。路线图见 [`docs/project-state.md`](docs/project-state.md)。
+尚未构建（计划 0.1.4/0.2+）：流式响应、带审批的写工具、多集群、Web UI、npm 分发。路线图见 [`docs/project-state.md`](docs/project-state.md)。
 
 已随 [`v0.1.3`](https://github.com/Aruing/Aruing/releases/tag/v0.1.3) 发布（2026-09-05；release notes 含 0.1.2 取证决策全部增量）。
 
@@ -97,7 +97,8 @@ cp aruing.example.yaml playground/config.yaml   # 填 llm.*（已 gitignore）
 
 ```bash
 ./bin/aruing run --format json why is demo-api in default unreachable
-./bin/aruing chat --session sess_xxx check redis again   # 续会话
+./bin/aruing chat --session sess_xxx check redis again   # 跨进程续会话（会话落盘不丢）
+./bin/aruing sessions                                    # 列历史会话（纯读取，不须 LLM）
 ./bin/aruing chat --ui app                               # 全屏模式
 ```
 

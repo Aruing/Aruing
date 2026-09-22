@@ -31,6 +31,8 @@ type DiagnoseResponder struct {
 	executor RunExecutor
 	// 正式诊断结果账本；产品与测试路径均须注入
 	ledger RunLedger
+	// 可选；挂起快照存储（run 一次性进程，挂起必须落盘才能跨进程恢复）
+	suspensions SuspensionStore
 }
 
 // 绑定发号器、诊断执行器与运行账本
@@ -42,10 +44,26 @@ func NewDiagnoseResponder(factory *core.Factory, executor RunExecutor, ledger Ru
 	}
 }
 
+// 可选注入挂起快照存储；不注入时行为与进程内形态一致
+func (r *DiagnoseResponder) SetSuspensionStore(store SuspensionStore) {
+	r.suspensions = store
+}
+
 // 建运行（填会话编号与问题）→ 执行 → 完成时落账本并拼诊断回复；挂起时返回澄清正文
 func (r *DiagnoseResponder) Respond(ctx context.Context, in RespondInput) (RespondOutput, error) {
 	if r == nil {
 		return RespondOutput{}, fmt.Errorf("diagnose responder is nil")
 	}
-	return Escalate(ctx, r.factory, r.executor, r.ledger, in.SessionID, in.UserText)
+	out, err := Escalate(ctx, r.factory, r.executor, r.ledger, in.SessionID, in.UserText)
+	if err != nil {
+		return RespondOutput{}, err
+	}
+	// run 进程随后即退出：挂起快照必须落盘，否则澄清答复无处可恢复；
+	// 落盘失败 = 挂起必丢，明确失败优于带着澄清问题静默退出（#18）
+	if out.Mode == ModeClarify {
+		if perr := PersistSuspension(ctx, r.executor, r.suspensions, in.SessionID, out.RunID); perr != nil {
+			return RespondOutput{}, perr
+		}
+	}
+	return out, nil
 }

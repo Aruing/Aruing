@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/Aruing/Aruing/internal/agent"
@@ -65,15 +66,18 @@ type tooling struct {
 
 // 组装工具注册表与调度器；集群命令可用时注册集群工具与 evidence.read
 // llmClient 可为 nil；仅 tools.projection.method=llm-rerank 时必需（构造 C4 重排器，实验专用）
-func buildTooling(toolsCfg config.Tools, llmClient llm.Client) (tooling, error) {
+// spool 可为 nil（内存形态不开 spill）；磁盘路径由调用方先开存储再组装工具
+func buildTooling(toolsCfg config.Tools, llmClient llm.Client, spool tools.SpoolStore) (tooling, error) {
 	registry := tools.NewRegistry()
-	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg, llmClient)
+	k8sRegistered, err := maybeRegisterK8s(registry, toolsCfg, llmClient, spool)
 	if err != nil {
 		return tooling{}, err
 	}
 
 	obsIndex := tools.NewObservationIndex()
-	evidenceRead, err := tools.NewEvidenceReadTool(obsIndex, registry)
+	// evidence.read 与 Tower 共用同一轮内索引；spool 随磁盘路径注入，
+	// 带盘上引用的超巨观察可翻到截断点之后（内存路径 nil，navError 引导重查）
+	evidenceRead, err := tools.NewEvidenceReadTool(obsIndex, registry, spool)
 	if err != nil {
 		return tooling{}, fmt.Errorf("create evidence.read tool: %w", err)
 	}
@@ -98,7 +102,7 @@ func buildTooling(toolsCfg config.Tools, llmClient llm.Client) (tooling, error) 
 // MaxStdoutBytes 零值时由 k8s 包默认（1MiB）
 // method=llm-rerank 时必须提供 llm 客户端构造重排器（C4 对照臂）：
 // 启动期明确报错，不静默回退机械方法（#18 精神）
-func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient llm.Client) (bool, error) {
+func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient llm.Client, spool tools.SpoolStore) (bool, error) {
 	path := toolsCfg.KubectlPath
 	if path == "" {
 		looked, err := exec.LookPath("kubectl")
@@ -130,6 +134,7 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient
 		MaxTimeout:     2 * time.Minute,
 		MaxStdoutBytes: toolsCfg.MaxStdoutBytes,
 		Projection:     projOpts,
+		Spool:          spool,
 	})
 	if err != nil {
 		return false, nil
@@ -142,7 +147,8 @@ func maybeRegisterK8s(registry *tools.Registry, toolsCfg config.Tools, llmClient
 
 // 组装编排器：必须大模型齐全，无假实现回退
 // 第二返回值为可选的用量跟踪器（llm.UsageTracker）；适配器未实现时为 nil，评测记录里 token 段为空
-func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer) (*agent.Orchestrator, llm.UsageTracker, error) {
+// spool 可为 nil（不开超巨输出盘上留存）
+func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Writer, spool tools.SpoolStore) (*agent.Orchestrator, llm.UsageTracker, error) {
 	if factory == nil {
 		return nil, nil, fmt.Errorf("orchestrator requires a factory")
 	}
@@ -154,7 +160,7 @@ func newOrchestrator(factory *core.Factory, cfg config.Config, progress io.Write
 	if err != nil {
 		return nil, nil, fmt.Errorf("build llm client: %w", err)
 	}
-	toolsGraph, err := buildTooling(cfg.Tools, client)
+	toolsGraph, err := buildTooling(cfg.Tools, client, spool)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -192,13 +198,15 @@ type sessionStack struct {
 	tower *agent.TowerResponder
 	// 编排器（LastRunStats 逐诊断统计）
 	orch *agent.Orchestrator
+	// 会话与消息存储（供退出前关闭磁盘句柄）
+	store session.Store
 	// 诊断账本（内嵌 RunRecord 组装与 from_ledger 展开的权威源）
 	ledger session.RunLedger
 	// token 用量跟踪器（适配器未实现时为 nil）
 	tracker llm.UsageTracker
 }
 
-// 组装多轮对话会话栈：内存存储、诊断账本与基线塔
+// 组装多轮对话会话栈：存储按数据目录分派（产品路径磁盘默认）、诊断账本与基线塔
 // 无大模型配置时硬失败
 func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Writer) (*session.Service, error) {
 	st, err := newSessionStackFull(factory, cfg, progress)
@@ -206,6 +214,32 @@ func newSessionStack(factory *core.Factory, cfg config.Config, progress io.Write
 		return nil, err
 	}
 	return st.service, nil
+}
+
+// 按数据目录分派存储实现：空 → 内存（仅测试与编程式装配），非空 → 磁盘。
+// 磁盘实现打开即建目录（0700）并扫索引；产品路径的 DataDir 由加载链填默认，永不空。
+// 挂起快照存储与 spool 留存同源分派：内存路径均返回 nil（不持久化，行为同进程内形态）
+func openStores(ctx context.Context, dataDir string) (session.Store, session.RunLedger, session.SuspensionStore, tools.SpoolStore, error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return store.NewMemoryStore(), store.NewMemoryRunLedger(), nil, nil, nil
+	}
+	st, err := store.NewDiskStore(ctx, dataDir)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	ledger, err := store.NewDiskRunLedger(ctx, dataDir)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	susp, err := store.NewDiskSuspensionStore(ctx, dataDir)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	spool, err := store.NewDiskSpoolStore(ctx, dataDir)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return st, ledger, susp, spool, nil
 }
 
 // 组装会话栈全量句柄（newSessionStack 的全量形态）
@@ -221,7 +255,12 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 	if err != nil {
 		return nil, fmt.Errorf("build llm client: %w", err)
 	}
-	toolsGraph, err := buildTooling(cfg.Tools, client)
+	// 存储先开（spool 留存随磁盘路径注入工具层），工具图后建
+	st, ledger, susp, spool, err := openStores(context.Background(), cfg.Storage.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("open stores %s: %w", cfg.Storage.DataDir, err)
+	}
+	toolsGraph, err := buildTooling(cfg.Tools, client, spool)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +284,6 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 		return nil, acqErr
 	}
 
-	ledger := store.NewMemoryRunLedger()
 	tower, err := agent.NewTowerResponder(
 		llm.NewLabelingClient(client, "tower"),
 		factory,
@@ -261,15 +299,18 @@ func newSessionStackFull(factory *core.Factory, cfg config.Config, progress io.W
 	if memErr := configureMemory(tower, cfg); memErr != nil {
 		return nil, memErr
 	}
+	// 挂起快照跨进程恢复：磁盘路径落盘 + 轮首自盘恢复；内存路径 nil 不持久化
+	tower.SetSuspensionStore(susp)
 	if cfg.Debug {
 		tower.SetProgress(progress)
 	}
 	// tower 用角色标签客户端包装，token 记账归口到同一底层客户端适配器
 	tracker, _ := client.(llm.UsageTracker)
 	return &sessionStack{
-		service: session.NewService(store.NewMemoryStore(), factory, tower),
+		service: session.NewService(st, factory, tower),
 		tower:   tower,
 		orch:    orch,
+		store:   st,
 		ledger:  ledger,
 		tracker: tracker,
 	}, nil

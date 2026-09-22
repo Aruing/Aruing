@@ -84,7 +84,7 @@ scenarios/<name>/
 make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 ```
 
-> 注：aruing 当前 session 是**进程内内存**（进程退出即丢），所以跨两次 `make lab-chat` 调用**接不回**上一次会话——多轮必须在一次进程里完成（即上面的交互模式）。磁盘持久化是后续版本候选。
+> 注：会话已落盘（`lab-chat` 默认数据目录 `scenarios/.data/<NAME>`，与用户数据目录 `~/.aruing/data` 隔离）。跨两次 `make lab-chat` 调用可用 `SESSION=sess_xxx` 接回上一次会话续聊（首次调用时 stderr 的 `session:` 行合出编号）；不带 SESSION 则每次新开会话。
 
 **通过** = `expect.md` 中「应」基本满足且无严重「不应」。LLM 措辞不要求逐字匹配。
 

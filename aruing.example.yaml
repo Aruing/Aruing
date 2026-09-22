@@ -51,5 +51,16 @@ tui:
   theme: auto
   mode: inline
 
+# Disk persistence for sessions and the diagnostic run ledger.
+# Layout: one directory per session — session.jsonl (header + append-only
+# entries) plus runs/<runId>.json per formal diagnosis. Restart-safe by
+# default; deleting a session = deleting its directory.
+# Env: ARUING_STORAGE_DATA_DIR; CLI: --data-dir (chat / run / probe).
+# The probe command isolates itself in a process temp dir unless --data-dir
+# is given explicitly.
+storage:
+  # Empty = default ~/.aruing/data (resolved by the config loader)
+  data_dir: ""
+
 # Print Tower / orchestrator progress to stderr (same as ARUING_DEBUG=1 / --verbose)
 debug: false

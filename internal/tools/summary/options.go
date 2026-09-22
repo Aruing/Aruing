@@ -38,6 +38,10 @@ const (
 	// C4 LLM 重排对照臂：经 Rerank 回调让模型选行（实验专用，须显式配置且装配重排器）
 	// 选行后的装入与标注仍是机械的；选行本身是模型行为，不进产品默认路径（#19）
 	MethodLLMRerank
+	// 两遍分片全覆盖：Pass 1 全局频次基准 → 片内全局基准投影 → Reduce 归并 + 溢出显式标注
+	// （arc《工具输出导航》Step 4 / L4）；专门能力非默认出口——贵、慢、片间采样稀，
+	// 能 narrow / 单遍投影解决就不该用（arc 脊柱 4），显式配置才启用
+	MethodMapReduce
 )
 
 // methodNames 配置字符串到方法的映射；名字一经使用不再改动（config / env / bench 依赖）
@@ -49,6 +53,7 @@ var methodNames = map[string]Method{
 	"head-tail":       MethodHeadTail,
 	"uniform":         MethodUniform,
 	"llm-rerank":      MethodLLMRerank,
+	"map-reduce":      MethodMapReduce,
 }
 
 // ParseMethod 解析配置字符串为方法
@@ -59,7 +64,7 @@ func ParseMethod(s string) (Method, error) {
 	}
 	m, ok := methodNames[s]
 	if !ok {
-		return MethodFast, fmt.Errorf("unknown projection method %q (want one of fast, greedy, greedy-knapsack, full, head-tail, uniform, llm-rerank)", s)
+		return MethodFast, fmt.Errorf("unknown projection method %q (want one of fast, greedy, greedy-knapsack, full, head-tail, uniform, llm-rerank, map-reduce)", s)
 	}
 	return m, nil
 }

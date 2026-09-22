@@ -43,6 +43,10 @@ func LoadFile(path string) (Config, error) {
 			Mode:      strings.TrimSpace(fc.TUI.Mode),
 			ThemeFile: strings.TrimSpace(fc.TUI.ThemeFile),
 		},
+		// 存储段整段带入（照同一漏拷教训：全部段都在此拷贝）
+		Storage: Storage{
+			DataDir: strings.TrimSpace(fc.Storage.DataDir),
+		},
 		Debug: fc.Debug,
 	}, nil
 }
