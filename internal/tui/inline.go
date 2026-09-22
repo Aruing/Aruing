@@ -263,6 +263,9 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 			return
 		case <-ticker.C:
 			prog.spinnerTick()
+		case <-ctx.Done():
+			prog.spinnerStop()
+			return
 		}
 	}
 }

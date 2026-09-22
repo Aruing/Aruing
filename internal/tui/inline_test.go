@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/session"
@@ -250,6 +251,37 @@ func TestInlineStreamWriteError(t *testing.T) {
 	if err != nil || len(msgs) != 1 {
 		t.Fatalf("write failure committed: %v, %v", msgs, err)
 	}
+}
+
+// 父级退出不能依赖上游及时响应取消，否则整个行内界面会卡在 spinner 循环
+func TestInlineParentCancel(t *testing.T) {
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	producerDone := make(chan struct{})
+	svc, _, sid := newStreamService(t, func(ctx context.Context, _ func(string) error) (session.RespondOutput, error) {
+		close(blocked)
+		<-release
+		close(producerDone)
+		return session.RespondOutput{}, ctx.Err()
+	})
+	ctx, cancel := context.WithCancel(t.Context())
+	var out strings.Builder
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		waitTurn(ctx, &out, mustLoadStyles("dark"), nil, svc, sid, "question", NewTurnProgress(nil))
+	}()
+	<-blocked
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		close(release)
+		<-done
+		t.Fatal("waitTurn did not return after parent cancellation")
+	}
+	close(release)
+	<-producerDone
 }
 
 // 恒定写入失败的终端
