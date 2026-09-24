@@ -86,6 +86,10 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 
 > 注：会话已落盘（`lab-chat` 默认数据目录 `scenarios/.data/<NAME>`，与用户数据目录 `~/.aruing/data` 隔离）。跨两次 `make lab-chat` 调用可用 `SESSION=sess_xxx` 接回上一次会话续聊（首次调用时 stderr 的 `session:` 行合出编号）；不带 SESSION 则每次新开会话。
 
+### 场景级 chat 环境（chat-env）
+
+`scenarios/<name>/chat-env`（可选，`KEY=VALUE` 行，`#` 开头为注释）：存在时 `make lab-chat` 与 `make smoke-all` 的 chat 调用自动注入这些环境变量（值不得含空白）。无该文件行为不变。用途：验收需要非默认产品配置的场景——如 `bigtable-fleet` 注入 `ARUING_TOOLS_PROJECTION_METHOD=map-reduce`（全覆盖分片投影，显式启用非默认方法）。
+
 **通过** = `expect.md` 中「应」基本满足且无严重「不应」。LLM 措辞不要求逐字匹配。
 
 ## 已知场景
@@ -96,6 +100,7 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 | `svc-wrong-selector` | Service selector 与 Pod label 不一致 | 「访问不到」类；应查到 endpoints 空 |
 | `same-name-multi-ns` | 两个 ns 同名 Deployment（一好一坏），提示词不带 ns | cases 多轮：`01-default` 歧义并列；`02-investigate-clarify` 挂起反问→答复→续出报告（beta19 链路） |
 | `log-time-window` | 业务容器周期性故意崩溃重启 | logs `--timestamps` + `evidence.read` 时间窗切片（beta17 链路） |
+| `bigtable-fleet` | CRD 大表 3000 行，CrashLoopBackOff×30 散布 + 共享坏 image tag（数据面故障，无真实容器） | map-reduce 全覆盖分片投影（0.1.4 步骤 4）；须 chat-env 注入投影方法验收 |
 
 ## 约束
 

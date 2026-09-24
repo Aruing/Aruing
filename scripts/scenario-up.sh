@@ -30,7 +30,13 @@ kind get kubeconfig --name "$cluster" > "$kubeconfig"
 
 export KUBECONFIG="$kubeconfig"
 echo "scenario: applying manifests from $manifests"
-kubectl apply -f "$manifests"
+# 同批清单含 CRD + 其 CR 时首次 apply 会因 discovery 未就绪报「unable to recognize」
+#（CRD 已建、CR 未进）：等待已创建的 CRD Established 后重试一次；重试仍失败才报错退出
+if ! kubectl apply -f "$manifests"; then
+	echo "scenario: first apply failed; waiting for CRDs to establish, then retrying once..."
+	kubectl wait --for=condition=Established crd --all --timeout=60s >/dev/null 2>&1 || true
+	kubectl apply -f "$manifests"
+fi
 
 # 等待用户工作负载落到稳态。要求：存在非加售命名空间的 Pod，且没有任何 Pod 处于 Pending/ContainerCreating。
 # 注意：ImagePullBackOff / ErrImagePull / Running / CrashLoopBackOff 都算「已落稳」，正是我们要的坏态。
