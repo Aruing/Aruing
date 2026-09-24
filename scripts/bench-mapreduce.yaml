@@ -1,0 +1,11 @@
+# map-reduce 全覆盖对照矩阵（0.1.4 步骤 3，完成标志 ②）
+# rich-value fleet 模式：根因 = CrashLoopBackOff×K（K=N/100，多载体中权值），
+# RESTARTS/NODE 论域随 N 扩张 → 单遍投影名额挤兑随 N 显现
+# 跑法：aruing bench --matrix scripts/bench-mapreduce.yaml --out bench/results/mapreduce-bench.csv
+# 判分三档：hit（行展示）/ presence（存在性）/ zone（可达性：行本人或所在片报数地址）
+rows: [500, 1000, 2000, 5000]
+budgets: [1024, 2048, 4096]
+positions: [5, 25, 50, 75, 95]
+seeds: [1, 2, 3, 4, 5]
+methods: [fast, greedy, map-reduce, head-tail]
+root_fleet_per_100: 1

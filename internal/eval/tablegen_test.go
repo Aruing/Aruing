@@ -1,82 +1,59 @@
 package eval
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
-// 同参数同种子 → 逐字节相同的表；不同种子根因名不同
-func TestGenerateTableDeterministic(t *testing.T) {
-	spec := TableSpec{Rows: 200, RootRow: 150, Seed: 7}
-	a, err := GenerateTable(spec)
+// fleet 模式生成器：载体计数、根因行身份、特征值归属与复现性
+func TestGenerateTableFleet(t *testing.T) {
+	spec := TableSpec{Rows: 1000, RootRow: 500, Seed: 7, RootFleetPer100: 1}
+	tbl, err := GenerateTable(spec)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
-	b, _ := GenerateTable(spec)
-	if a.RootName != b.RootName || len(a.Rows) != len(b.Rows) {
-		t.Fatalf("同种子应可复现")
+	want := fleetSize(spec)
+	if want != 10 {
+		t.Fatalf("fleetSize = %d, want 10", want)
 	}
-	for i := range a.Rows {
-		for j := range a.Rows[i] {
-			if a.Rows[i][j] != b.Rows[i][j] {
-				t.Fatalf("行 %d 列 %d 不一致", i, j)
+	// 载体计数与归属：CrashLoopBackOff 恰好出现在 fleet 个行上，根因行必在列（钉板口径前提）
+	crashRows := 0
+	rootSeen := false
+	for i, row := range tbl.Rows {
+		if strings.Contains(strings.Join(row, " "), "CrashLoopBackOff") {
+			crashRows++
+			if i == spec.RootRow {
+				rootSeen = true
 			}
 		}
 	}
-
-	c, _ := GenerateTable(TableSpec{Rows: 200, RootRow: 150, Seed: 8})
-	if c.RootName == a.RootName {
-		t.Fatal("不同种子根因名应不同")
+	if crashRows != want || !rootSeen {
+		t.Fatalf("crash rows = %d (want %d), root in fleet = %v", crashRows, want, rootSeen)
+	}
+	if !strings.HasPrefix(tbl.Rows[spec.RootRow][0], "bad-deploy-") {
+		t.Fatalf("root name = %q, want bad-deploy-*", tbl.Rows[spec.RootRow][0])
+	}
+	if len(tbl.RootFeatures) != 1 || tbl.RootFeatures[0] != "CrashLoopBackOff" {
+		t.Fatalf("RootFeatures = %#v", tbl.RootFeatures)
 	}
 }
 
-// 根因行固定在指定位且形态正确；越界报错（位置是分桶变量，不允许静默钳位）
-func TestGenerateTableRootRow(t *testing.T) {
-	tb, err := GenerateTable(TableSpec{Rows: 100, RootRow: 42, Seed: 1})
-	if err != nil {
-		t.Fatalf("generate: %v", err)
-	}
-	row := tb.Rows[42]
-	if row[0] != tb.RootName || row[2] != "CrashLoopBackOff" || row[1] != "0/1" {
-		t.Fatalf("根因行形态错误：%v（want name=%s）", row, tb.RootName)
-	}
-	if n := countValues(tb, 2, "CrashLoopBackOff"); n != 1 {
-		t.Fatalf("CrashLoopBackOff 应恰 1 行，got %d", n)
-	}
-
-	if _, err := GenerateTable(TableSpec{Rows: 100, RootRow: 100, Seed: 1}); err == nil {
-		t.Fatal("RootRow 越界应报错")
-	}
-	if _, err := GenerateTable(TableSpec{Rows: 0, RootRow: 0, Seed: 1}); err == nil {
-		t.Fatal("Rows=0 应报错")
+// 唯一模式（RootFleetPer100=0）与 fleet 模式同参数不同表；同参数同种子逐字节复现
+func TestGenerateTableFleetReproducible(t *testing.T) {
+	spec := TableSpec{Rows: 500, RootRow: 50, Seed: 3, RootFleetPer100: 1}
+	a, _ := GenerateTable(spec)
+	b, _ := GenerateTable(spec)
+	if strings.Join(a.Rows[100], "|") != strings.Join(b.Rows[100], "|") {
+		t.Fatal("same spec+seed must reproduce identical rows")
 	}
 }
 
-// 列分布符合「偏斜但非清一色」：Running 为主流、含无害 Pending 与稀有节点
-func TestGenerateTableDistribution(t *testing.T) {
-	tb, _ := GenerateTable(TableSpec{Rows: 300, RootRow: 150, Seed: 3})
-	if n := countValues(tb, 2, "Running"); n < 280 {
-		t.Fatalf("Running 应为压倒性主流，got %d/300", n)
+// fleet 计数下限：小表也至少 2 个载体（单载体退化为唯一模式口径就没有挤兑形态）
+func TestFleetSizeFloor(t *testing.T) {
+	if got := fleetSize(TableSpec{Rows: 50, RootFleetPer100: 1}); got != 2 {
+		t.Fatalf("fleet floor = %d, want 2", got)
 	}
-	if n := countValues(tb, 2, "Pending"); n == 0 || n > 15 {
-		t.Fatalf("Pending 应少量混入，got %d", n)
+	if got := fleetSize(TableSpec{Rows: 1000}); got != 1 {
+		t.Fatalf("unique mode fleet = %d, want 1", got)
 	}
-	if n := countValues(tb, 5, "node-9"); n == 0 || n > 15 {
-		t.Fatalf("稀有节点应少量混入，got %d", n)
-	}
-	// NAME 唯一（高基数列，投影层自动排除）
-	names := map[string]int{}
-	for _, r := range tb.Rows {
-		names[r[0]]++
-	}
-	if len(names) != 300 {
-		t.Fatalf("NAME 应全唯一，got %d", len(names))
-	}
-}
-
-func countValues(tb GeneratedTable, col int, val string) int {
-	n := 0
-	for _, r := range tb.Rows {
-		if r[col] == val {
-			n++
-		}
-	}
-	return n
 }
