@@ -122,7 +122,7 @@ make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting
 make lab-down NAME=crashloop-bad-image
 ```
 
-当前内置四个场景：`crashloop-bad-image`、`svc-wrong-selector`、`same-name-multi-ns`（含多轮澄清挂起 case）、`log-time-window`（证据时间窗切片）。`lab-chat` / `lab-kube` 自动注入 KUBECONFIG（无需手动 export）。不进 `make test` / CI；本地需 Docker + kind + kubectl。
+当前内置五个场景：`crashloop-bad-image`、`svc-wrong-selector`、`same-name-multi-ns`（含多轮澄清挂起 case）、`log-time-window`（证据时间窗切片）、`bigtable-fleet`（超大表全覆盖 map-reduce 分片投影；经场景级 `chat-env` 注入非默认投影方法）。`lab-chat` / `lab-kube` 自动注入 KUBECONFIG（无需手动 export）。不进 `make test` / CI；本地需 Docker + kind + kubectl。
 
 ### 配置与本地 LLM
 

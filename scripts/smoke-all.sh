@@ -51,6 +51,17 @@ scn_case_prompts() {
 	awk '/^[[:space:]]*[0-9]+\.[[:space:]]/ { sub(/^[[:space:]]*[0-9]+\.[[:space:]]*/, ""); print }' "$f" | while IFS= read -r l; do scn_strip_prompt "$l"; done
 }
 
+# chat_env_args <scenario> → 场景带 chat-env（KEY=VALUE 行，# 注释）时逐行输出 K=V，
+# 供 chat 调用的 env 前缀注入（无该文件输出空，行为不变；值不得含空白——约定见 scenarios/README.md）
+chat_env_args() {
+	local f="$ARUING_SCN_DIR/$1/chat-env" line
+	[ -f "$f" ] || return 0
+	while IFS= read -r line; do
+		case "$line" in '' | \#*) continue ;; esac
+		printf '%s\n' "$line"
+	done <"$f"
+}
+
 # run_step <label> <logfile> <cmd...> → 执行并落 log；打印 ok/FAIL；返回命令退出码
 run_step() {
 	local label="$1" log="$2"; shift 2
@@ -173,6 +184,7 @@ run_cases() { # <scenario>
 		if [[ $total -gt 0 ]]; then
 			echo "exit" >>"$prompts_tmp"
 			run_step chat "$log" env KUBECONFIG="$PWD/scenarios/.kube/$scn.yaml" \
+				$(chat_env_args "$scn") \
 				"$PWD/bin/aruing" chat --data-dir "$smoke_data" <"$prompts_tmp" && chat_ok=1 || all_ok=1
 		fi
 		rm -f "$prompts_tmp"
@@ -241,6 +253,7 @@ for name in "${names[@]}"; do
 				scn_ok=1
 				chat_state="SKIP"
 			elif run_step chat "$log" env KUBECONFIG="$PWD/scenarios/.kube/$name.yaml" \
+				$(chat_env_args "$name") \
 				"$PWD/bin/aruing" chat "$msg"; then
 				chat_state="ok"
 			else
