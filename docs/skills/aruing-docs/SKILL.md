@@ -62,15 +62,15 @@ description: Use when adding, updating, reviewing, or restructuring documentatio
 
 固定部分（按顺序，使用 `##`）：
 
-1. **当前阶段**：阶段名 + 一句话目标（如 "把假角色逐个换成真实现"）
-2. **工作单元**：表格，列 `# / 模块 / 状态 / 备注`，状态用 ✅ / ⏳ / ❌ / 未开始
-3. **已完成 PR**：列表，每条 `#编号 标题（commit）`
+1. **当前阶段**：只写**进行中**的里程碑：定位一句话 + 功能状态表（多功能版本每功能一行：状态 / 摘要 / PR 号）+ 版本级完成标志一句话
+2. **版本履历**：已交付版本**一行一条**（版本 / 主题一句话 / tag / 笔记仓归档指针）；关里程碑时旧「当前阶段」块压缩为本表一行。不写多段历史块——里程碑细节的家在笔记仓 `plan/archive/`，发版说明在 Releases，PR/commit 历史在 `git log`
+3. **工作单元**：表格，列 `# / 模块 / 状态 / 备注`，状态用 ✅ / ⏳ / ❌ / 未开始；**只保留当前版本的单元行**，历史版本行随关里程碑删除（git log 是权威）
 4. **下一步**：明确写下一个该做什么、为什么；若触碰 Tool 接线 / Resolver 多轮 / 编排，点名须遵守 architecture #15–#17
 5. **编排与多轮**（若决策已确认）：当前是否单轮、是否延后 Session、是否禁止固化直线契约；详细链接笔记 plan
 6. **当前硬约束摘要**：含信任边界与编排相关条目，链接到 `docs/architecture.md` 硬约束段
-7. **预留问题入口**：按类别（P/L/C/S/**O**）列出编号 + 一句话，详细表格链接到 `arui-note/aruing/plan/`
+7. **预留问题入口**：按类别（P/L/C/S/**O**）列出编号 + 一句话，详细表格链接到笔记仓 plan
 
-长度：约 50~100 行。每个 PR 合并时更新，是 AI 工具的 5 分钟对齐入口
+长度：约 50~100 行。每个 PR 合并时更新，是 AI 工具的 5 分钟对齐入口。**禁止历史编年块**：已完成版本的交付叙事、实验数字、评审过程不属于当前状态，其家在笔记仓归档与历程；删除前核对「只在 project-state 出现」的观察结论，没有下家的先迁入笔记仓再删
 
 ### `docs/README.md`
 
@@ -120,11 +120,11 @@ description: Use when <触发条件>. Triggered by <示例任务>.
 | 改 `internal/core/*.go` 的 exported type 字段或新增结构 | `architecture.md` 核心数据结构段 | 同步字段表 |
 | 改 `internal/agent/orchestrator.go` 角色接口签名 | `architecture.md` 模块职责段 + 诊断流程段 | 同步职责表 / 流程图 |
 | 新增 `internal/<新包>/` | `architecture.md` 模块职责表 | 加一行 |
-| 新增 / 替换角色实现（如 FakeParser → LLMParser） | `project-state.md` 工作单元表 + 已完成 PR | 状态置 ✅，加 PR 编号 |
+| 新增 / 替换角色实现（如 FakeParser → LLMParser） | `project-state.md` 工作单元表 | 状态置 ✅ + PR 编号（当前版本表内行） |
 | 新增 / 修改 / 删除硬约束 | `architecture.md` 硬约束段；若是关键的 3~5 条，同步 `README.md` 关键约束摘要 + `project-state.md` 当前硬约束摘要段 | 三处联动 |
 | 改信任边界（如新增证据来源类型） | `architecture.md` 信任边界段 | 同步 |
-| 完成工作单元 | `project-state.md` 工作单元表 + 已完成 PR 列表 + 下一步 | 三处同步 |
-| 阶段切换（如 beta2 → beta3） | `project-state.md`（重写）+ `README.md` / `README.zh-CN.md` 当前阶段段 | 三处联动 |
+| 完成工作单元 | `project-state.md` 工作单元表 + 下一步 | 状态置 ✅ + PR 号；下一项切换 |
+| 里程碑关闭 / 阶段切换 | `project-state.md` + `README.md` / `README.zh-CN.md` 当前阶段段 | 旧里程碑块压缩为「版本履历」一行 + 工作单元历史行删除 + 当前阶段重写为新里程碑；README 双语同 PR 同步 |
 | 创建 / 修改 skill | 本 skill 的 §Skill 自身规范；若改的是文档规范本身，同步本 skill | 遵守元规范 |
 | 改 `README.md` / `README.zh-CN.md` 任一侧 | 另一侧 README | 同 PR 同步（结构 + 语义） |
 
