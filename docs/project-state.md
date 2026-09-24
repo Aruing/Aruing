@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-09-24（结构收敛：历史版本块压缩为「版本履历」一行一版，工作单元表只留当前版本，规范见 `docs/skills/aruing-docs`；beta21 收尾观察迁至笔记仓归档）
+> 最后更新：2026-09-24（二）（结构收敛：历史版本块压缩为「版本履历」一行一版，工作单元表只留当前版本，规范见 `docs/skills/aruing-docs`；streaming 随版交付裁决已并入；beta21 收尾观察迁至笔记仓归档）
 
 ## 当前阶段
 
@@ -11,7 +11,7 @@
 | 功能 | 状态 | 摘要 |
 | --- | --- | --- |
 | persistence | ✅ 关闭（2026-09-18） | 磁盘存储地基 / 挂起快照跨进程 Resume / 超巨输出 spill 双写 + 盘读翻页 / `aruing sessions` 会话发现（#145 #146 #149 #150 #151；集成分支经 #157 回归 main）；专项真集群冒烟通过 |
-| map-reduce | ✅ 关闭（2026-09-24） | 大表全覆盖两遍分片投影（#155 #158 #159 #161）；完成标志三绿：真场景真 LLM 不漏 / bench 机械对照断崖 vs 平坦 / 默认路径逐字节不变；bigtable-fleet 场景进例行 smoke-all |
+| map-reduce | ✅ 关闭（2026-09-24） | 大表全覆盖两遍分片投影（#155 #158 #159 #161）；完成标志三绿：真场景真 LLM 不漏 / bench 机械对照断崖 vs 平坦 / 默认路径逐字节不变；bigtable-fleet 场景进例行 smoke-all；功能历程已蒸馏笔记 `历程/0.1.4/` |
 | streaming | 🚧 收线中 | 随版交付已裁决（2026-09-24）；S1–S4 在分支 `feature/stream-out`（#148 #152 #154 #156）未进 main，待集成 PR 回归 + 功能头三标志验证（全链逐字渲染 / 中断无半截消息 / 真 LLM 正负路径 smoke） |
 
 版本级完成标志：三功能全关 + `make check` / `make smoke-all` 场景全绿 → 打 tag `v0.1.4` 发布（production 流程）。
@@ -47,7 +47,7 @@
 
 ## 下一步
 
-**下一项**：**0.1.4 收尾**：persistence 与 map-reduce 已关闭（见上表），剩余三件——① streaming 集成收线（随版交付已裁决 2026-09-24；分支 `feature/stream-out`，S1–S4 已并入 #148/#152/#154/#156，未进 main）：集成 PR 回归 main + 按功能头三标志验证关闭（S1–S4 全链逐字渲染 / 中断无半截消息 / 真 LLM 正负路径 smoke）；② 版本级集成验证 `make check` + `make smoke-all` 场景全绿（含新场景 bigtable-fleet，chat-env 自动走 map-reduce 臂；裁决 2026-09-18：smoke-all 不再作欠账项）；③ 打 tag `v0.1.4` 发布（production 流程）。
+**下一项**：**streaming 收线进 main**（0.1.4 第三个功能，随版交付已裁决 2026-09-24）：分支 `feature/stream-out`（S1–S4 已并入 #148/#152/#154/#156，llm token 流 → 角色流式 → Turn 返 stream → TUI 增量渲染）经集成 PR 回归 main（参照 persistence #157 先例），收线后按 streaming 功能头完成标志验证（S1–S4 全链真会话逐字渲染 / 流式中断无半截消息 / 真 LLM 正负路径 smoke）并关闭功能。随后版本收尾：版本级集成验证 `make check` + `make smoke-all` 场景全绿（含新场景 bigtable-fleet，chat-env 自动走 map-reduce 臂；裁决 2026-09-18：smoke-all 不再作欠账项）→ 打 tag `v0.1.4` 发布（production 流程）。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`；0.1.4 已立项三项不再列此处）：
 
