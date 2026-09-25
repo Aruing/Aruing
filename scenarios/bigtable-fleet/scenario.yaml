@@ -1,0 +1,12 @@
+name: bigtable-fleet
+kind_cluster_name: aruing-sc-bigtable-fleet
+namespace: fleet
+# 给人看的坏态提示；脚本不解析本文件（chat-env 才是脚本消费的环境注入面）
+notes: "0.1.4 map-reduce 步骤 4 验收场景：CRD 大表 3000 行，CrashLoopBackOff×30 散布（每 100 行第 97 位）+ 共享坏 image tag；论域扩张与 bench rich-value fleet 常数对齐。故障在 CR 数据面（无真实容器崩溃），根因经 describe 可见；本场景须 chat-env 注入 map-reduce 投影方法验收"
+# 判分真值（judge 非本场景验收路径，仅登记保持四元组惯例；散布载体取首位代表）
+ground_truth:
+  resource_type: appfleet
+  resource_name: app-0097z
+  namespace: fleet
+  fault_type: scattered-crashloop-bad-image
+  fault_signature: [CrashLoopBackOff, v1_faulty]

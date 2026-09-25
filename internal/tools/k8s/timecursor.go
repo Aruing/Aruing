@@ -31,20 +31,29 @@ func leadingTimestamp(line string) (time.Time, bool) {
 	return ts, true
 }
 
-// 时间窗过滤：全部行带可解析的行首 RFC3339 时间戳才过滤；任一行不可解析即整体失败
-// since/until 为 RFC3339 闭区间，至少一个非空；返回过滤后行集与窗内首末时间戳
-func filterTimeWindow(lines []string, since, until string) ([]string, string, string, error) {
+// 解析时间窗参数（RFC3339；至少一个非空时调用），内存过滤与盘上流式过滤共用
+func parseTimeWindow(since, until string) (time.Time, time.Time, error) {
 	var sinceT, untilT time.Time
 	var err error
 	if since != "" {
 		if sinceT, err = time.Parse(time.RFC3339, since); err != nil {
-			return nil, "", "", fmt.Errorf("invalid since %q: %w", since, err)
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid since %q: %w", since, err)
 		}
 	}
 	if until != "" {
 		if untilT, err = time.Parse(time.RFC3339, until); err != nil {
-			return nil, "", "", fmt.Errorf("invalid until %q: %w", until, err)
+			return time.Time{}, time.Time{}, fmt.Errorf("invalid until %q: %w", until, err)
 		}
+	}
+	return sinceT, untilT, nil
+}
+
+// 时间窗过滤：全部行带可解析的行首 RFC3339 时间戳才过滤；任一行不可解析即整体失败
+// since/until 为 RFC3339 闭区间，至少一个非空；返回过滤后行集与窗内首末时间戳
+func filterTimeWindow(lines []string, since, until string) ([]string, string, string, error) {
+	sinceT, untilT, err := parseTimeWindow(since, until)
+	if err != nil {
+		return nil, "", "", err
 	}
 
 	first, last := "", ""

@@ -16,7 +16,7 @@ Ask in natural language. The agent reasons, calls cluster tools for real evidenc
 | --- | --- |
 | **Always-on baseline** | Observe → think → **call tools** → observe → answer. Grounded in live cluster data for “what’s installed?”, “how is this service configured?”, and similar questions. |
 | **Diagnostic specialty** | On root-cause asks, escalate into a formal pipeline: hypothesis → tasks → **Evidence** → **Verdict** (must cite Evidence) → **Report**. No “I think it’s X” without a tool trail. |
-| **Multi-turn chat** | Same session follow-ups; prior formal runs can be re-read by `RunID` for deeper explanation without inventing evidence. |
+| **Multi-turn chat** | Same session follow-ups; sessions and diagnostic records persist to disk (default `~/.aruing/data`), so a session survives restarts — `aruing chat --session <id>` picks up where you left off; prior formal runs can be re-read by `RunID` for deeper explanation without inventing evidence. `aruing run` creates a one-turn session too, so its reports are resumable the same way. |
 
 Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend, policy for auth). Model output never pretends to be Evidence.
 
@@ -26,7 +26,7 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 **`0.1.3` — evidence-driven acquire loop + tiered memory.** Investigations are driven by an evidence-information-gain decision loop (Bayesian beliefs, EIG-ranked actions, MSPRT stopping — `agent.acquire.method` switches to ReAct / random / cheapest / serial baselines in one binary), and long conversations keep a tiered memory view: run/evidence index cards stay addressable, recent turns stay verbatim, mid-history compacts under budget, and layered retrieval rehydrates raw evidence previews on demand (`agent.memory.method` switches to last-N / flat-summary baselines). The evaluation stack grew a probe harness (`aruing probe`, 20/50-round scripted sessions with tail probes), pooled layer-3 rubric sampling with LLM-assisted scoring and human agreement (`judge --sample-total/--rubric-llm/--agree`), and matrix drivers (`make eval-sweep`, `make probe-sweep`) with resume guards and manifests. Everything from 0.1.0–0.1.1 still applies: real-cluster + real-LLM diagnosis, interactive terminal chat, evidence navigation, clarify-suspend/resume, representative projection, one-line install and self-update.
 
-Not yet built (planned 0.2+): npm distribution, disk persistence (sessions are in-memory and lost on exit), streaming responses, write tools with approval, multi-cluster, Web UI. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
+Not yet built (planned 0.1.4/0.2+): streaming responses, write tools with approval, multi-cluster, Web UI, npm distribution. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
 Shipped in release [`v0.1.3`](https://github.com/Aruing/Aruing/releases/tag/v0.1.3) (2026-09-05; notes cover the 0.1.2 acquire-loop increments too).
 
@@ -97,7 +97,8 @@ Other examples:
 
 ```bash
 ./bin/aruing run --format json why is demo-api in default unreachable
-./bin/aruing chat --session sess_xxx check redis again   # resume a session
+./bin/aruing chat --session sess_xxx check redis again   # resume a session (persists across restarts)
+./bin/aruing sessions                                    # list saved sessions (pure read, no LLM)
 ./bin/aruing chat --ui app                               # fullscreen mode
 ```
 
@@ -121,7 +122,7 @@ make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting
 make lab-down NAME=crashloop-bad-image
 ```
 
-Four scenarios ship today: `crashloop-bad-image`, `svc-wrong-selector`, `same-name-multi-ns` (incl. a multi-turn clarify-suspend case), `log-time-window` (evidence time-window slicing). `lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
+Five scenarios ship today: `crashloop-bad-image`, `svc-wrong-selector`, `same-name-multi-ns` (incl. a multi-turn clarify-suspend case), `log-time-window` (evidence time-window slicing), `bigtable-fleet` (oversized-table full-coverage map-reduce projection; a scenario-level `chat-env` file injects the non-default projection method). `lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
 
 ### Configuration & local LLM
 

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -134,6 +136,65 @@ func reasonHitsSignature(reason, resourceName string, signatures []string) bool 
 // 服务表格投影对比实验（投影是纯函数，判定也是纯函数：行级包含）
 func ProjectionHit(summaryText, resourceName string) bool {
 	return strings.Contains(strings.ToLower(summaryText), strings.ToLower(resourceName))
+}
+
+// ProjectionZoneHit 可达性判分：投影是否给出覆盖根因行的可一步跟进地址
+// 两档满足其一即真：①根因行本人被展示（最强地址，行级包含）；②分片全覆盖形态下，
+// 根因行所在片区间出现特征值报数/代表行，或该片稀有报数行存在（计数面含根因行——
+// G2 的机械兑底：值清单可被 RareListMax 截断，但片统计全量，模型可 evidence.read
+// 该片区间一步跟进）。单遍方法无片结构，退化为 ①
+// 片头/报数格式与 summary.mapreduce 的 mrHeaderFmt / mrRareFmt 同步；改渲染格式须同步此处
+func ProjectionZoneHit(summaryText, resourceName string, rootRow int, features []string) bool {
+	if ProjectionHit(summaryText, resourceName) {
+		return true
+	}
+	lowered := strings.ToLower(summaryText)
+	for _, m := range shardHeaderRe.FindAllStringSubmatchIndex(lowered, -1) {
+		from, _ := strconv.Atoi(lowered[m[2]:m[3]])
+		to, _ := strconv.Atoi(lowered[m[4]:m[5]])
+		if rootRow < from || rootRow > to {
+			continue
+		}
+		bodyStart, bodyEnd := m[1], len(lowered)
+		if next := shardHeaderRe.FindStringIndex(lowered[m[1]:]); next != nil {
+			bodyEnd = m[1] + next[0]
+		}
+		body := lowered[bodyStart:bodyEnd]
+		for _, f := range features {
+			if f != "" && strings.Contains(body, strings.ToLower(f)) {
+				return true
+			}
+		}
+		if rareCountRe.MatchString(body) {
+			return true
+		}
+	}
+	return false
+}
+
+// 片头行区间正则：行号 0 基、闭区间上界（与 mrHeaderFmt 的「行 a–b（n 行）」对齐）
+var shardHeaderRe = regexp.MustCompile(`── 片 \d+/\d+ · 行 (\d+)[–-](\d+)`)
+
+// 片内稀有报数行正则：命中数为正才视为提供了计数面地址（与 mrRareFmt 对齐）
+var rareCountRe = regexp.MustCompile(`稀有命中 [1-9][0-9]* 行`)
+
+// ProjectionPresence 存在性判分：根因特征值任一命中投影文本（大小写不敏感）
+// 与 ProjectionHit（根因行展示）分档：presence=true 只说明统计面看得见该值
+// （频次段或片节报数），根因行本身可能未展示——map-reduce 全覆盖的最坏出口即此形态
+// （有存在、有地址、无本人行）；两者组合才能区分「漏」的形态而非只有二值命中
+// 前提：特征值仅归属故障载体行（由生成器保证，钉板测试看守）
+// 拓展：若生成器引入更广泛的 CrashLoop 干扰行，须升级为值+计数口径（判分才不失真）
+func ProjectionPresence(summaryText string, features []string) bool {
+	if len(features) == 0 {
+		return false
+	}
+	lowered := strings.ToLower(summaryText)
+	for _, f := range features {
+		if f != "" && strings.Contains(lowered, strings.ToLower(f)) {
+			return true
+		}
+	}
+	return false
 }
 
 // RubricRow 第③层抽样评分表的一行：一条 (结论, 引用证据) 对，待人工或 LLM 辅助评

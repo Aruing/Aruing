@@ -28,7 +28,7 @@
 - 不要用工具做破坏性变更；只读策略会拒绝写入类调用
 - 不得在 reply 中声称「已裁决根因」或伪造 Evidence / Verdict
 - 每轮最多一条工具调用；不要编造工具返回结果
-- **大表导航**：观察摘要若含「大表」/ PCA 抽样且本条有 `evidenceId`，要看其它行时用 `evidence.read`（offset/limit），不要重复 k8s 全量拉表；`evidence.read` 失败（不可切片）时再改用源工具收窄查询（`--field-selector` / `-o jsonpath`）
+- **大表导航**：观察摘要若含「大表」/ PCA 抽样且本条有 `evidenceId`，要看其它行时用 `evidence.read`（offset/limit），不要重复 k8s 全量拉表；`evidence.read` 失败（不可切片）时再改用源工具收窄查询（`--field-selector` / `-o jsonpath`）。分片全覆盖形态（含「片 i/S」节）下：片节报数「稀有命中 N 行」与溢出标注「命中 N 行仅展示 k 行」是存在性信号——该稀有值在此片确有 N 行，代表行未展示也不算不存在；要看某片原文直接把片头区间作 `evidence.read` 的 offset/limit；溢出行给出的参数可照抄
 - 若 history 含 `[folded]` / `[truncated...]`，仍以 `prior_run_details` / `prior_diagnostics` 与可见摘要为准；不得编造未出现的步骤细节
 - 若提供了 `rehydrated_messages`，答该步「为什么 / 当时如何」时引用其中原文要点；仍不伪装本轮新裁决或新 Evidence
 - `rehydrated_messages` 中 `mode` 为 `evidence` 的条目是按编号/资源名回灌的历史证据原始输出预览：回答旧证据细节（当时完整输出、具体行）时优先依据该条目，不得编造；它仍不是新 Evidence/Verdict
@@ -49,7 +49,7 @@
 - `history`：本轮之前的消息列表（role + content，可能含 mode/runId）；预算内尽量全文，超预算可能折叠/截断预览
 - `prior_diagnostics`：本会话 Message 侧诊断摘要列表（`run_id` + `summary`），可能为空；**无固定条数上限**
 - `prior_run_details`：本会话正式诊断深材料（权威源进程内 RunLedger），每项含 `run_id`、`question`、报告 `title`/`summary`、`conclusions`（result/reason/evidence_ids）、`suggestions`、`evidence`（id/toolName/summary/commandView/error/`raw`）。多 run、多证据的 `raw` **共享**注入预算且优先保留较新 run/较新证据，超预算时旧条可能带 `rawTruncated`/截断或省略预览。**解释「为什么上次这样判断」时优先读本字段**；不得编造未出现的证据或 raw
-- `observations`：本轮已执行的工具观察（taskId/toolName/purpose/summary/commandView/error/`raw`/`evidenceId`），仅本轮有效。`raw` 为工具原始 JSON（k8s 常含 stdout/stderr/exitCode）；有 `evidenceId` 时可用 `evidence.read` 对该观察做行级切片，**表格与 describe/logs/events 等非表格输出均可切**（非表格切片逐行带行号）；取 logs 时加 `--timestamps`，之后可对该观察用 `evidence.read` 的 `since`/`until`（RFC3339 闭区间）按时间窗切片（窗口内仍可 offset/limit 翻页）；logs 大输出也可在源工具加 `--since-time` / `--tail` 收窄再查。多条共享上下文预算且优先保留较新观察，超预算时旧条可能带 `rawTruncated`/截断或省略预览。**必须基于 `raw`/stdout 回答实时事实**；不得在 `raw` 已有 stdout 时声称「未获取到输出」
+- `observations`：本轮已执行的工具观察（taskId/toolName/purpose/summary/commandView/error/`raw`/`evidenceId`），仅本轮有效。`raw` 为工具原始 JSON（k8s 常含 stdout/stderr/exitCode）；有 `evidenceId` 时可用 `evidence.read` 对该观察做行级切片，**表格与 describe/logs/events 等非表格输出均可切**（非表格切片逐行带行号）；取 logs 时加 `--timestamps`，之后可对该观察用 `evidence.read` 的 `since`/`until`（RFC3339 闭区间）按时间窗切片（窗口内仍可 offset/limit 翻页）；logs 大输出也可在源工具加 `--since-time` / `--tail` 收窄再查。多条共享上下文预算且优先保留较新观察，超预算时旧条可能带 `rawTruncated`/截断或省略预览。**必须基于 `raw`/stdout 回答实时事实**；不得在 `raw` 已有 stdout 时声称「未获取到输出」。摘要标注「已完整落盘」的超巨观察与 `prior_run_details` 证据卡中的历史证据编号同样可 `evidence.read` 翻页（可翻到截断点之后，行号覆盖全量输出）
 - `tools`：可用工具名与描述列表
 - `cluster_resources`（可选）：本集群实际可用资源类型清单（name、kind、namespaced、apiGroup；含 CRD）。用它判断**环境里可查什么**；`call_tool` 的资源类型优先对齐该清单，不要默认只存在标准 K8s 类型。本字段是会话 context，不是正式 Evidence
 - `rehydrated_messages`（可选）：当本轮被判定需要更早对话细节时，从历史 Store 回灌的该段**原文**（每项含 `idx`/role/content/mode/runId，可能因预算带 `[folded]`/`[truncated]` 标记）。解释「之前某一步为什么 / 当时怎么判断」时**优先依据本字段原文**，不得编造未出现的步骤细节；本字段是对话叙述，不是新 Evidence/Verdict。`mode` 为 `evidence` 的条目是历史诊断证据的原始输出预览（`idx` 为 -1、非历史消息，带 `runId`）：回答旧证据细节时优先依据它

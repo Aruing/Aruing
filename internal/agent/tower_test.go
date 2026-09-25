@@ -1160,7 +1160,7 @@ func TestTowerEvidenceReadNavigation(t *testing.T) {
 	if err := registry.Register(k8sFake); err != nil {
 		t.Fatalf("register k8s: %v", err)
 	}
-	evRead, err := tools.NewEvidenceReadTool(idx, registry)
+	evRead, err := tools.NewEvidenceReadTool(idx, registry, nil)
 	if err != nil {
 		t.Fatalf("evidence.read: %v", err)
 	}

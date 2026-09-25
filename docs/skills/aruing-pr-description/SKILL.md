@@ -39,7 +39,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 3. 识别架构影响
 
-以下任一条件成立时，`#### 架构影响` 标"有"，并用一句话简述：
+以下任一条件成立时，`#### 4. 架构影响` 标"有"，并用一句话简述：
 
 - 改了 `internal/core/*.go` 的 exported type 字段或新增结构
 - 改了 `internal/agent/orchestrator.go` 角色接口签名
@@ -52,7 +52,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 4. 识别破坏性变更
 
-以下任一条件成立时，`#### 破坏性变更` 标"有"，并简述影响范围：
+以下任一条件成立时，`#### 5. 破坏性变更` 标"有"，并简述影响范围：
 
 - 删除或重命名 exported type / 函数 / 字段
 - 改了 exported 函数签名
@@ -63,7 +63,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 5. 判定该同步哪些文档
 
-按 `aruing-docs` §更新时机 的映射表判断本 PR 是否触发文档同步。在 `#### 检查` 段如实反映：
+按 `aruing-docs` §更新时机 的映射表判断本 PR 是否触发文档同步。在 `#### 6. 检查` 段如实反映：
 
 - 触发了哪些文档更新（说明已做）
 - 没触发任何文档更新（说明"不适用"）
@@ -71,7 +71,7 @@ git diff main...HEAD -- docs/architecture.md docs/project-state.md docs/skills/ 
 
 ### 6. 填充模板
 
-用下面的模板。所有标题必须是 `####`，不允许 `#`、`##`、`###`
+用下面的模板。所有标题必须是 `####` 且带递增序号索引（`1.` `2.` `3.`…，与模板一致），不允许 `#`、`##`、`###`
 
 ### 6.5 PR 前对抗自检（含新增/修改代码的 PR）
 
@@ -101,6 +101,36 @@ git diff <base>...HEAD --stat -- internal/ cmd/ | tail -1
 
 步骤设计文档预估超限时，应在设计内预排 PR 切分（见笔记仓《工作流约定》步骤节）。
 
+### 6.7 标题与用语规范（公开仓内容边界）
+
+PR 标题与描述面向公开仓的所有读者（贡献者、AI 工具、外部访客），不是笔记仓的内部通信。遵守《工作流约定》「仓库内容边界」：笔记仓代称与排期坐标不进公开仓，需要交代时用工程语言展开，或指向 note 仓路径
+
+**标题**：
+
+- **统一英文**：`<type>: <english subject>`。`feat:` / `fix:` 等前缀本身即英文，标题属对外面，与「README 默认英文 + docs 中文」同一分工；描述正文仍中文为主
+- 祈使语气、小写开头（专有名词与标识符除外）、句末无句号；整条 ≤ 72 字符，超长先砍修饰词，不砍宾语
+- 只写做了什么，不写内部步骤编号与里程碑坐标括号注记（如 `（0.1.4 persistence 步骤 2）`）
+
+**用语黑名单**（标题与描述正文共用，出现即视为未过闸门）：
+
+| 类别 | 禁用示例 | 正确做法 |
+| --- | --- | --- |
+| 步骤 / 功能目录坐标 | `0.1.4 步骤 N`、`S1–S4`、`腿 A`、`步骤 3b` | 移到「关联」段 note 仓 plan 路径，标题与正文不出现 |
+| 实验臂代称 | `D1` / `D2` / `B3`、`统一实验批` | 展开为工程语言（last-N baseline arm、ReAct baseline arm…）；config 枚举值本身可写（`agent.memory.method=d1-last-n`），代称不行 |
+| 符号速记 | `①层 ②层 ③层`、`λ₁/λ₂`、`L0/L1/L2` | 展开为实际概念（rubric 抽样判分层、确定性寻址 / LLM 兜底定位…） |
+| 流程黑话 | `钉板`、`分诊`、`断崖`、`收线`、`兜底`、`提级`、`降位`、`随版交付` | 用普通工程语言改写（固定为回归测试 / 评审意见分类处置 / 能力断崖式下跌…） |
+
+**允许**：产品事实（config 键与枚举值、模块路径、公开文档概念如 `evidence.read` / spool）；note 仓**路径**引用（放「关联」段），不内联其内容与代称
+
+**正反例**（取自历史 PR 改写）：
+
+| ❌ 历史 | ✅ 改写 |
+| --- | --- |
+| `feat: 挂起快照持久化——跨进程 Resume + DiskStore.Close（0.1.4 persistence 步骤 2）` | `feat: persist suspension snapshots across restarts` |
+| `feat: 超巨输出 spill 腿 A——捕获留存（0.1.4 persistence 步骤 3a）` | `feat: spill oversized tool output to disk` |
+| `feat: tier-aware 组装器与记忆方法开关（0.1.3 步骤 2）` | `feat: tier-aware history assembly with method switch` |
+| `feat: B3 ReAct 对比臂 + 决策轨迹插桩（0.1.2 步骤 5，统一实验批前置）` | `feat: add ReAct baseline arm and decision traces` |
+
 ### 7. 创建 PR
 
 创建前先过本地闸门：
@@ -113,13 +143,13 @@ lint 不绿时停下修（只修本分支引入的问题，不做全仓顺手重
 
 ```bash
 gh pr create --base main --head <当前分支名> \
-  --title "<commit message 主题或一句话概括>" \
+  --title "<英文 subject，按 §6.7 标题与用语规范>" \
   --body "<模板内容>" \
   --assignee @me \
   --label "<按第 8 步映射，每个 label 一个 --label 标志>"
 ```
 
-- `--title` 用本分支第一个 commit 的主题，或基于工作内容一句话改写
+- `--title` 按 §6.7 生成英文 subject；分支 commit 主题不符合规范时改写，不照抄
 - `--body` 用第 6 步填好的模板原文
 - 不要在 `--body` 里转义 `####`（GitHub 会正常渲染 markdown）
 - 如果分支还没 push，先 `git push -u origin <分支名>`
@@ -154,47 +184,49 @@ gh pr create --base main --head <当前分支名> \
 ## 模板
 
 ```markdown
-#### 类型
+#### 1. 类型
 
 <开放标签，可多个>
 
-#### 工作内容
+#### 2. 工作内容
 
 <一句话，不超过 2 行>
 
-#### 改动范围
+#### 3. 改动范围
 
 <简短描述改了哪几块，不列具体文件路径；reviewer 直接看 github diff>
 
-#### 架构影响
+#### 4. 架构影响
 
 <无 / 有：简述>
 
-#### 破坏性变更
+#### 5. 破坏性变更
 
 <无 / 有：简述>
 
-#### 检查
+#### 6. 检查
 
 - [ ] 已按 `aruing-docs` §更新时机 同步相关文档（如适用，说明哪些；不适用则写"不适用"）
 
-#### 关联
+#### 7. 关联
 
 - 工作单元：<#编号 或 "计划外">
+- note 仓 plan：<路径 或 无；内部步骤坐标 / 设计出处落这里，不进标题与正文>
 - 预留问题：<P/L/C/S-x 或 无>
 - 相关 PR：<#编号 或 无>
 ```
 
 ## 约束
 
-- 所有标题必须 `####`，不允许 `#`、`##`、`###`
+- 所有段标题必须 `####` 且带递增序号索引（`1.` `2.` `3.`…，与模板一致），不允许 `#`、`##`、`###`
 - "工作内容"一句话，不展开细节（细节在 commit message）
 - "改动范围"简短描述，不列具体文件路径
 - "架构影响"和"破坏性变更"必填，"无"也要写明
 - "改动范围"不超过 6 条 bullet
+- **PR 标题统一英文**，遵 §6.7；标题与描述正文不得出现笔记仓内部代称与步骤坐标（黑名单见 §6.7），内部追溯放「关联」段 note 仓 plan 路径
 - 不复制笔记仓内容（笔记仓链接放"关联"即可）
 - 不替作者勾选 checkbox，由作者自己确认后勾
-- 中文为主，技术术语保留英文
+- 描述正文中文为主，技术术语保留英文（例外：PR 标题统一英文，见 §6.7）
 
 ## 不做的事
 

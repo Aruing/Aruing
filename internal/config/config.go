@@ -26,6 +26,8 @@ type Config struct {
 	Agent Agent
 	// 终端交互主题（dark | light | auto）；空等同 auto
 	TUI TUI
+	// 磁盘存储配置（会话与诊断账本落盘）
+	Storage Storage
 	// 是否输出基线塔与编排调试进度到标准错误（调试环境变量或命令行详细开关）
 	Debug bool
 }
@@ -141,6 +143,15 @@ type TUI struct {
 	ThemeFile string `yaml:"theme_file"`
 }
 
+// 磁盘存储配置
+//
+// 会话与诊断账本落盘的数据目录；空值由加载链填默认（与 ~/.aruing/bin 安装族同根）。
+// 对应环境变量 ARUING_STORAGE_DATA_DIR
+type Storage struct {
+	// 数据根目录（会话单元目录的父目录）；加载后为空仅见于直接构造配置的测试装配
+	DataDir string `yaml:"data_dir"`
+}
+
 // 配置文件反序列化用的根形状，仅本包内部使用
 type fileConfig struct {
 	// 大模型访问参数段
@@ -151,6 +162,8 @@ type fileConfig struct {
 	Agent Agent `yaml:"agent"`
 	// 终端交互主题段
 	TUI TUI `yaml:"tui"`
+	// 磁盘存储段
+	Storage Storage `yaml:"storage"`
 	// 是否输出调试进度
 	Debug bool `yaml:"debug"`
 }
@@ -199,6 +212,9 @@ func LoadFrom(getenv func(string) string) Config {
 		TUI: TUI{
 			Theme: strings.TrimSpace(getenv("ARUING_TUI_THEME")),
 			Mode:  strings.TrimSpace(getenv("ARUING_TUI_MODE")),
+		},
+		Storage: Storage{
+			DataDir: strings.TrimSpace(getenv("ARUING_STORAGE_DATA_DIR")),
 		},
 		Debug: parseBoolEnv(getenv("ARUING_DEBUG")),
 	}
@@ -322,6 +338,11 @@ func MergeEnvLookup(base Config, lookup func(string) (string, bool)) Config {
 	if v, ok := lookup("ARUING_TUI_MODE"); ok {
 		if t := strings.TrimSpace(v); t != "" {
 			out.TUI.Mode = t
+		}
+	}
+	if v, ok := lookup("ARUING_STORAGE_DATA_DIR"); ok {
+		if t := strings.TrimSpace(v); t != "" {
+			out.Storage.DataDir = t
 		}
 	}
 	if v, ok := lookup("ARUING_DEBUG"); ok {
