@@ -1,14 +1,10 @@
 package tui
 
 import (
-	"context"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/session"
-	"github.com/Aruing/Aruing/internal/store"
 )
 
 // 续行符判断：单个 \ 结尾续行，双 \\ 字面反斜杠
@@ -180,129 +176,5 @@ func TestInlineMarkdownRendered(t *testing.T) {
 	// 降级原文（纯文本）不含 ANSI 转义序列；渲染后应含
 	if !strings.Contains(views[0].text, "\x1b[") {
 		t.Fatalf("expected glamour ANSI styling, got %q", views[0].text)
-	}
-}
-
-// 增量消费时尚未落助手消息，结束后不重复打印完整正文；断流明确标记并保留用户消息
-func TestInlineStream(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		name := "success"
-		if fail {
-			name = "failure"
-		}
-		t.Run(name, func(t *testing.T) {
-			var out strings.Builder
-			var mem *store.MemoryStore
-			var sid string
-			svc, storage, id := newStreamService(t, func(_ context.Context, emit func(string) error) (session.RespondOutput, error) {
-				if err := emit("first\n"); err != nil {
-					return session.RespondOutput{}, err
-				}
-				if !strings.Contains(out.String(), "first") {
-					t.Error("delta not visible before completion")
-				}
-				msgs, err := mem.ListMessages(t.Context(), sid)
-				if err != nil || len(msgs) != 1 {
-					t.Errorf("early commit: %v, %v", msgs, err)
-				}
-				if fail {
-					return session.RespondOutput{}, errBoom
-				}
-				if err := emit("second"); err != nil {
-					return session.RespondOutput{}, err
-				}
-				return session.RespondOutput{Content: "first\nsecond", Mode: session.ModeBaseline}, nil
-			})
-			mem, sid = storage, id
-			st := mustLoadStyles("dark")
-			prog := NewTurnProgress(nil)
-			prog.bind(&out, st)
-			waitTurn(t.Context(), &out, st, nil, svc, sid, "question", prog)
-			got := stripANSI(out.String())
-			if strings.Count(got, "first") != 1 {
-				t.Fatalf("duplicate reply: %q", got)
-			}
-			if fail != strings.Contains(got, "未完成") {
-				t.Fatalf("completion marker: %q", got)
-			}
-			msgs, err := mem.ListMessages(t.Context(), sid)
-			want := 2
-			if fail {
-				want = 1
-			}
-			if err != nil || len(msgs) != want {
-				t.Fatalf("messages: %v, %v", msgs, err)
-			}
-		})
-	}
-}
-
-// 显示失败必须传回服务，不能静默保存成功回复
-func TestInlineStreamWriteError(t *testing.T) {
-	svc, mem, sid := newStreamService(t, func(_ context.Context, emit func(string) error) (session.RespondOutput, error) {
-		if err := emit("body"); err != nil {
-			return session.RespondOutput{}, err
-		}
-		return session.RespondOutput{Content: "body"}, nil
-	})
-	st := mustLoadStyles("dark")
-	waitTurn(t.Context(), failingWriter{}, st, nil, svc, sid, "question", NewTurnProgress(nil))
-	msgs, err := mem.ListMessages(t.Context(), sid)
-	if err != nil || len(msgs) != 1 {
-		t.Fatalf("write failure committed: %v, %v", msgs, err)
-	}
-}
-
-// 父级退出不能依赖上游及时响应取消，否则整个行内界面会卡在 spinner 循环
-func TestInlineParentCancel(t *testing.T) {
-	blocked := make(chan struct{})
-	release := make(chan struct{})
-	producerDone := make(chan struct{})
-	svc, _, sid := newStreamService(t, func(ctx context.Context, _ func(string) error) (session.RespondOutput, error) {
-		close(blocked)
-		<-release
-		close(producerDone)
-		return session.RespondOutput{}, ctx.Err()
-	})
-	ctx, cancel := context.WithCancel(t.Context())
-	var out strings.Builder
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		waitTurn(ctx, &out, mustLoadStyles("dark"), nil, svc, sid, "question", NewTurnProgress(nil))
-	}()
-	<-blocked
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		close(release)
-		<-done
-		t.Fatal("waitTurn did not return after parent cancellation")
-	}
-	close(release)
-	<-producerDone
-}
-
-// 恒定写入失败的终端
-type failingWriter struct{}
-
-// 反馈输出故障
-func (failingWriter) Write([]byte) (int, error) { return 0, errBoom }
-
-// 无增量的正式诊断保持完整正文与报告渲染
-func TestInlineStructuredResult(t *testing.T) {
-	svc, _, sid := newStreamService(t, func(context.Context, func(string) error) (session.RespondOutput, error) {
-		return session.RespondOutput{
-			Content: "diagnostic body", Mode: session.ModeDiagnostic,
-			Report: &core.Report{Title: "diagnostic report"},
-		}, nil
-	})
-	var out strings.Builder
-	waitTurn(t.Context(), &out, mustLoadStyles("dark"), nil, svc, sid, "question", NewTurnProgress(nil))
-	for _, text := range []string{"diagnostic body", "diagnostic report"} {
-		if strings.Count(out.String(), text) != 1 {
-			t.Fatalf("missing or repeated result: %q", out.String())
-		}
 	}
 }

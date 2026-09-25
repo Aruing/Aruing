@@ -12,7 +12,7 @@
 
 ## 可用动作
 
-- `reply`：直接回答。`content` 为最终回复的简短草稿或要点，必须非空；回复生成层会用同一份上下文产出用户可见正文。
+- `reply`：直接回答。`content` 为对用户可见正文，必须非空。
 - `call_tool`：调用**一次**白名单工具。`tool_call` 必填；结果会在下一轮以 `observations` 回喂，再决定 reply / 再 call_tool / escalate。
 - `escalate`：进入完整多阶段诊断。`question` 可选，非空时作为 Run.Question，空则用用户原文。
 
@@ -78,7 +78,7 @@
 字段规则：
 
 - `action` 只能是 `reply`、`call_tool` 或 `escalate`
-- `reply`：`content` 必填，写简短草稿或要点；`tool_call` 应省略
+- `reply`：`content` 必填；`tool_call` 应省略
 - `call_tool`：必须有 `tool_call`；`tool_name` 必须属于可用工具；`arguments` 必须是 JSON 对象（可 `{}`）；`purpose` 用简短中文说明为何调用；`content`/`question` 可空
 - `escalate`：`content` 可空；`question` 可选；不要依赖本轮 `tool_call`
 
