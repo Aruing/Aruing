@@ -29,6 +29,13 @@ type Responder interface {
 	Respond(ctx context.Context, in RespondInput) (RespondOutput, error)
 }
 
+// StreamingResponder 在保持完整业务提交语义的同时，逐段输出最终自然语言正文
+// emit 不得承载结构化角色 JSON、工具参数或诊断中间态；调用方取消时实现必须停止上游生成
+// 增量回调须同步串行执行，方法返回后不得继续调用；仅成功时返回完整应答内容
+type StreamingResponder interface {
+	RespondStream(ctx context.Context, in RespondInput, emit func(delta string) error) (RespondOutput, error)
+}
+
 // 交给应答器的本轮输入
 // 历史为本轮用户消息写入前的列表（不含本轮用户句），用户原文为当前句
 type RespondInput struct {
@@ -108,6 +115,21 @@ func (s *Service) NewSession(ctx context.Context) (*Session, error) {
 // 传给应答器的历史不含本轮用户句
 // 检查点正文非空时先落检查点，再落助手回复；两者均进存储层全量时间线
 func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnResult, error) {
+	return s.turn(ctx, sessionID, userText, nil)
+}
+
+// 逐段同步消费最终回复；回调返回错误会取消上游，调用方也可通过上下文取消
+// 增量仅供展示，成功返回后结果才代表完整落库；回调须及时返回且不得重入同一会话
+// 不支持流式或回调为空时在写用户消息前失败，不回退成整块应答
+func (s *Service) TurnStream(ctx context.Context, sessionID, userText string, emit func(string) error) (TurnResult, error) {
+	if emit == nil {
+		return TurnResult{}, fmt.Errorf("turn stream: consumer is required")
+	}
+	return s.turn(ctx, sessionID, userText, emit)
+}
+
+// 两种入口共用历史读取与完整提交顺序，流式应答失败时只保留已写用户消息
+func (s *Service) turn(ctx context.Context, sessionID, userText string, emit func(string) error) (TurnResult, error) {
 	if err := ctx.Err(); err != nil {
 		return TurnResult{}, fmt.Errorf("turn: %w", err)
 	}
@@ -116,6 +138,16 @@ func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnRes
 	}
 	if sessionID == "" {
 		return TurnResult{}, fmt.Errorf("turn: session id is required")
+	}
+	respond := s.responder.Respond
+	if emit != nil {
+		streamer, ok := s.responder.(StreamingResponder)
+		if !ok {
+			return TurnResult{}, fmt.Errorf("turn stream: responder does not support streaming")
+		}
+		respond = func(ctx context.Context, in RespondInput) (RespondOutput, error) {
+			return streamResponse(ctx, streamer, in, emit)
+		}
 	}
 
 	// 先确认会话存在，再读历史，避免对不存在会话写消息
@@ -138,12 +170,15 @@ func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnRes
 		return TurnResult{}, fmt.Errorf("append user message: %w", err)
 	}
 
-	out, err := s.responder.Respond(ctx, RespondInput{
+	out, err := respond(ctx, RespondInput{
 		SessionID: sessionID,
 		UserText:  userText,
 		History:   history,
 	})
 	if err != nil {
+		return TurnResult{}, fmt.Errorf("respond: %w", err)
+	}
+	if err = ctx.Err(); err != nil {
 		return TurnResult{}, fmt.Errorf("respond: %w", err)
 	}
 
@@ -179,6 +214,39 @@ func (s *Service) Turn(ctx context.Context, sessionID, userText string) (TurnRes
 		Report:           out.Report,
 		Evidence:         out.Evidence,
 	}, nil
+}
+
+// 记住首次消费失败，即使上游忽略回调错误也不允许提交；子上下文通知上游停止生成
+func streamResponse(ctx context.Context, responder StreamingResponder, in RespondInput, emit func(string) error) (RespondOutput, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var consumerErr error
+	out, err := responder.RespondStream(ctx, in, func(delta string) error {
+		if consumerErr != nil {
+			return consumerErr
+		}
+		consumerErr = ctx.Err()
+		if consumerErr == nil {
+			consumerErr = emit(delta)
+		}
+		if consumerErr == nil {
+			consumerErr = ctx.Err()
+		}
+		if consumerErr != nil {
+			cancel()
+		}
+		return consumerErr
+	})
+	if consumerErr != nil {
+		return RespondOutput{}, consumerErr
+	}
+	if err != nil {
+		return RespondOutput{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return RespondOutput{}, err
+	}
+	return out, nil
 }
 
 // 用编号工厂组装一条消息实体（尚未落库）

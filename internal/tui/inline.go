@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
 	"time"
 
@@ -74,6 +75,9 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	fmt.Fprintln(out, st.system.Render("多行输入：shift+enter / option+enter（终端支持时）/ 行尾 \\ + 回车；exit / Ctrl+D 退出"))
 
 	for {
+		if ctx.Err() != nil {
+			return nil
+		}
 		text, err := readMultiline(rl, keys)
 		if err != nil {
 			// io.EOF（Ctrl+D）或 ErrInterrupt（Ctrl+C）：正常退出
@@ -197,55 +201,64 @@ func continuation(line string) (content string, more bool) {
 	return line + "\n", false
 }
 
-// 等待一轮 Turn 完成：期间单行 spinner 动画（经 TurnProgress 协调器，与进度行
-// 同屏重绘：进度行落屏时 spinner 让位、重画到最新行下方）；完成后 print 助手 / 错误（留痕）
-// 容错：Turn 失败 print 错误后返回，外层循环继续读输入（不杀会话）
-// spinner 与回复同属助手块：块首空行读 spacing.assistantTop，spinner 行完成后被内容原位替换
-// 流式留位（#20）：流式落地时本函数扩展为逐 chunk print 留痕，循环结构不变
+// 等待并展示一轮流式应答；增量写入失败反馈给会话层，禁止提交未成功消费的回复
+// 读取输入结束后终端已恢复正常模式，生成期间的中断信号只取消本轮
+// 已显示片段失败时明确标记为未完成；完整诊断与澄清继续走原有渲染路径
 func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRenderer, svc *session.Service, sessionID, text string, prog *TurnProgress) {
-	turnCtx, cancel := context.WithCancel(ctx)
+	turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
-	turnCh := make(chan turnMsg, 1)
-
 	ticker := time.NewTicker(spinnerInterval)
 	defer ticker.Stop()
-	// 助手块首：空行 + （称呼开启时）称呼行 + spinner 首帧（协调器接管 spinner 行）。
-	// Turn goroutine 必须在 spinnerStart 之后启动：否则多核下首条进度可能在 spinner
-	// 上屏前直达终端，落到块首空行/称呼行上方，破坏屏序
 	printGap(out, st.spacing.assistantTop)
 	if st.labels.enabled {
 		fmt.Fprint(out, st.assistant.Render(st.labels.assistant), "\n")
 	}
 	prog.spinnerStart(st)
-	go func() {
-		result, err := svc.Turn(turnCtx, sessionID, text)
-		turnCh <- turnMsg{result: result, err: err}
-	}()
+	events := startStream(ctx, turnCtx, svc, sessionID, text)
+	hasDelta := false
+	_, height, _ := term.GetSize(int(os.Stdout.Fd()))
+	if height < 2 {
+		height = 24
+	}
+	view := inlineStreamView{width: terminalWidth(), height: height}
 	for {
 		select {
-		case msg := <-turnCh:
-			// 清 spinner 行（上方空行与称呼行保留；进度行已是留痕），内容从原位接排
-			prog.spinnerStop()
-			// ctx 已取消时 Turn 多半返回 context canceled：静默退出，不打印伪错误
-			// （select 在 turnCh 与 ctx.Done 同时就绪时随机选中，需显式优先取消）
-			if turnCtx.Err() != nil {
+		case msg, ok := <-events:
+			if !ok {
+				prog.spinnerStop()
+				fmt.Fprintln(out, st.err.Render("\n已中断：本轮未完成"))
 				return
 			}
-			if msg.err != nil {
-				// 错误不是助手发言：无进度行时称呼行紧邻 spinner，擦除它再印错误
-				// （与 app 模式 renderHistory 一致）；有进度行时称呼行领衔的是这次调查，
-				// 保留不动——擦相邻行会销毁最后一条进度留痕
-				if st.labels.enabled && prog.progressLines() == 0 {
-					erasePrevLine(out)
+			if msg.ack != nil {
+				var writeErr error
+				if turnCtx.Err() != nil {
+					writeErr = turnCtx.Err()
+				} else if msg.delta != "" {
+					prog.spinnerStop()
+					hasDelta = true
+					writeErr = view.append(out, st, md, msg.delta)
 				}
-				fmt.Fprintln(out, st.err.Render("错误 ")+msg.err.Error())
-			} else {
-				for _, mv := range renderAssistant(md, msg.result) {
-					// 正文整行经 assistant 样式项渲染，无称呼前缀（称呼行由 labels 开启时单独输出）
+				msg.ack <- writeErr
+				continue
+			}
+			prog.spinnerStop()
+			if hasDelta {
+				fmt.Fprintln(out)
+			}
+			if msg.final.err != nil {
+				if hasDelta {
+					fmt.Fprintln(out, st.err.Render("未完成：")+msg.final.err.Error())
+				} else {
+					if st.labels.enabled && prog.progressLines() == 0 {
+						erasePrevLine(out)
+					}
+					fmt.Fprintln(out, st.err.Render("错误 ")+msg.final.err.Error())
+				}
+			} else if !hasDelta {
+				for _, mv := range renderAssistant(md, msg.final.result) {
 					fmt.Fprint(out, st.assistant.Render(mv.text), "\n")
 				}
 			}
-			// 助手块收尾空行（默认 0；主题可配）
 			printGap(out, st.spacing.assistantBottom)
 			return
 		case <-ticker.C:

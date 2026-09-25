@@ -1,6 +1,6 @@
 // 适配实现：把厂商无关的客户端接口桥接到常见聊天补全兼容协议
 //
-// 本文件是唯一导入兼容开发包的位置，供应商细节被锁在这里
+// 本文件与流式适配文件共同隔离兼容开发包，供应商细节不进入角色层
 // 将来新增原生协议适配器时，新增一个文件实现同一客户端接口即可，不改动本文件主体逻辑
 package llm
 
@@ -45,6 +45,7 @@ func NewClient(cfg Config) (Client, error) {
 		api:        openai.NewClientWithConfig(ocfg),
 		model:      normalized.Model,
 		maxRetries: normalized.MaxRetries,
+		timeout:    normalized.Timeout,
 		usage:      make(map[string]UsageTotals),
 	}, nil
 }
@@ -104,7 +105,11 @@ func (t forceNonStreamTransport) RoundTrip(req *http.Request) (*http.Response, e
 			return io.NopCloser(bytes.NewReader(body)), nil
 		}
 	}
-	return base.RoundTrip(req)
+	resp, err := base.RoundTrip(req)
+	if err == nil {
+		protectStreamBody(req, resp)
+	}
+	return resp, err
 }
 
 // 若对象未设置流式字段，则补为假；解析失败则原样返回
@@ -141,6 +146,10 @@ type client struct {
 	// 按调用方标签聚合的 token 用量；仅成功请求计入（含重试成功前的失败尝试不计）
 	usageMu sync.Mutex
 	usage   map[string]UsageTotals
+	// 流式调用整体时限，包含重试与消费
+	timeout time.Duration
+	// 包含失败尝试与未知用量的流式统计
+	streamUsage map[string]StreamTotals
 }
 
 // 请求一次纯文本生成，直接返回模型正文
