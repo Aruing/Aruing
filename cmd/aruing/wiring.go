@@ -343,11 +343,7 @@ func buildLLMRoles(client llm.Client, factory *core.Factory, specs []tools.ToolS
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm verifier: %w", err)
 	}
-	reporterClient, err := llm.NewCollectingClient(llm.NewLabelingClient(client, "reporter"))
-	if err != nil {
-		return orchestratorRoles{}, fmt.Errorf("build streaming reporter client: %w", err)
-	}
-	reporter, err := agent.NewLLMReporter(reporterClient, factory)
+	reporter, err := agent.NewLLMReporter(llm.NewLabelingClient(client, "reporter"), factory)
 	if err != nil {
 		return orchestratorRoles{}, fmt.Errorf("build llm reporter: %w", err)
 	}

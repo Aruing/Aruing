@@ -19,11 +19,7 @@ type labelingClient struct {
 // NewLabelingClient 返回给请求补标签的客户端包装
 // label 为空时等同直接透传（不再补标签）
 func NewLabelingClient(inner Client, label string) Client {
-	base := &labelingClient{inner: inner, label: label}
-	if stream, ok := inner.(Streamer); ok {
-		return &labelingStreamer{labelingClient: base, stream: stream}
-	}
-	return base
+	return &labelingClient{inner: inner, label: label}
 }
 
 // Generate 转发纯文本生成，转发前补标签
@@ -40,19 +36,4 @@ func (c *labelingClient) GenerateJSON(ctx context.Context, req Request, out any)
 		req.Label = c.label
 	}
 	return c.inner.GenerateJSON(ctx, req, out)
-}
-
-// 仅在底层确实支持流式时暴露该能力
-type labelingStreamer struct {
-	*labelingClient
-	// 底层流式能力，标签在调用前补齐
-	stream Streamer
-}
-
-// 逐块透传并保留显式标签，不增加缓存或重试
-func (c *labelingStreamer) Stream(ctx context.Context, req StreamRequest, emit func(string) error) (StreamSummary, error) {
-	if req.Label == "" {
-		req.Label = c.label
-	}
-	return c.stream.Stream(ctx, req, emit)
 }

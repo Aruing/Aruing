@@ -33,10 +33,6 @@ func TestTowerRespondMemoryDispatch(t *testing.T) {
 
 	newTower := func(t *testing.T, method string, lastN int, capture *string) *TowerResponder {
 		client := newMockLLMClient(t, func(w http.ResponseWriter, r *http.Request) {
-			if isTowerReplyRequest(t, r) {
-				writeChatCompletion(w, "好的")
-				return
-			}
 			var reqBody struct {
 				Messages []struct {
 					Role    string `json:"role"`
