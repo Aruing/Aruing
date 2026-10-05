@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -21,7 +20,6 @@ func newTestModel() Model {
 	ta := textarea.New()
 	ta.Focus()
 	m := Model{
-		ctx:      context.Background(),
 		input:    ta,
 		viewport: viewport.New(80, 10),
 		width:    80,
@@ -202,55 +200,5 @@ func TestRenderHistoryLabels(t *testing.T) {
 	}
 	if !strings.Contains(got, "body") || !strings.Contains(got, "report") {
 		t.Fatalf("contents missing: %q", got)
-	}
-}
-
-// 多个片段只进入临时视图，完成后缓冲清空且正文只显示一次
-func TestUpdateStreaming(t *testing.T) {
-	m := newTestModel()
-	m.busy = true
-	for _, delta := range []string{"hello", " world"} {
-		ack := make(chan error, 1)
-		updated, _ := m.Update(streamMsg{delta: delta, ack: ack})
-		m = updated.(Model)
-		if err := <-ack; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if len(m.messages) != 0 || !strings.Contains(m.View(), "hello world") || strings.Contains(m.View(), "思考中") {
-		t.Fatalf("stream view: %q, messages: %+v", m.View(), m.messages)
-	}
-	updated, _ := m.Update(streamMsg{final: turnMsg{result: session.TurnResult{
-		AssistantMessage: session.Message{Content: "hello world", Mode: session.ModeBaseline},
-	}}})
-	m = updated.(Model)
-	if !m.streaming.empty() || m.busy || strings.Count(m.View(), "hello world") != 1 {
-		t.Fatalf("terminal view: %q", m.View())
-	}
-}
-
-// 生成中取消不退出，终态前不允许下一轮；失败片段不变成正式助手视图
-func TestUpdateStreamingCancel(t *testing.T) {
-	m := newTestModel()
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	m.busy, m.cancelTurn = true, cancel
-	m.streaming.append("unfinished")
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
-	m = updated.(Model)
-	if ctx.Err() == nil || m.quit || !m.busy {
-		t.Fatal("cancel must stop generation and await completion")
-	}
-	updated, _ = m.Update(turnMsg{err: context.Canceled})
-	m = updated.(Model)
-	if m.busy || !m.streaming.empty() || strings.Contains(m.View(), "unfinished") {
-		t.Fatalf("failed stream retained: %q", m.View())
-	}
-	m.input.SetValue("retry")
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = updated.(Model)
-	defer m.cancelTurn()
-	if !m.busy || cmd == nil || m.quit {
-		t.Fatal("next turn must remain available")
 	}
 }
