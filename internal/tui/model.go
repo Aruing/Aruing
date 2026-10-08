@@ -11,7 +11,6 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/glamour"
 
 	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/session"
@@ -51,7 +50,7 @@ type Model struct {
 	tuiTheme  string // 配置主题（dark | light | auto）；空同 auto
 
 	styles styles
-	md     *glamour.TermRenderer // markdown 渲染器；WindowSizeMsg 到达后按宽度建
+	md     *markdownRenderer // markdown 渲染器；WindowSizeMsg 到达后按宽度建
 
 	messages  []msgView
 	input     textarea.Model
@@ -208,7 +207,7 @@ func syncViewport(m *Model) {
 		if m.styles.labels.enabled {
 			draft.WriteString(m.styles.assistant.Render(m.styles.labels.assistant) + "\n")
 		}
-		draft.WriteString(m.styles.assistant.Render(renderMarkdown(m.md, m.streaming.view())))
+		draft.WriteString(m.styles.assistant.Render(renderStreamingMarkdown(m.md, m.streaming.view())))
 		history += draft.String()
 	}
 	m.viewport.SetContent(history)
@@ -258,7 +257,7 @@ func renderHistory(m *Model) string {
 }
 
 // 用 markdown 渲染器把一轮 Turn 结果渲染为消息视图（正文 + 诊断报告）
-func renderAssistant(r *glamour.TermRenderer, res session.TurnResult) []msgView {
+func renderAssistant(r *markdownRenderer, res session.TurnResult) []msgView {
 	var views []msgView
 	if c := strings.TrimSpace(res.AssistantMessage.Content); c != "" {
 		views = append(views, msgView{kind: "assistant", text: renderMarkdown(r, c)})

@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/ergochat/readline"
 	"golang.org/x/term"
 
@@ -204,7 +203,7 @@ func continuation(line string) (content string, more bool) {
 // 等待并展示一轮流式应答；增量写入失败反馈给会话层，禁止提交未成功消费的回复
 // 读取输入结束后终端已恢复正常模式，生成期间的中断信号只取消本轮
 // 已显示片段失败时明确标记为未完成；完整诊断与澄清继续走原有渲染路径
-func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRenderer, svc *session.Service, sessionID, text string, prog *TurnProgress) {
+func waitTurn(ctx context.Context, out io.Writer, st styles, md *markdownRenderer, svc *session.Service, sessionID, text string, prog *TurnProgress) {
 	turnCtx, cancel := signal.NotifyContext(ctx, os.Interrupt)
 	defer cancel()
 	ticker := time.NewTicker(spinnerInterval)
@@ -243,6 +242,11 @@ func waitTurn(ctx context.Context, out io.Writer, st styles, md *glamour.TermRen
 			}
 			prog.spinnerStop()
 			if hasDelta {
+				if msg.final.err == nil {
+					if err := view.render(out, st, md, msg.final.result.AssistantMessage.Content); err != nil {
+						fmt.Fprintln(out, st.err.Render("排版失败：")+err.Error())
+					}
+				}
 				fmt.Fprintln(out)
 			}
 			if msg.final.err != nil {
@@ -279,7 +283,7 @@ func terminalWidth() int {
 }
 
 // 按主题与宽建 markdown 渲染器；建不起来（理论不可达）降级 nil，renderMarkdown 返回原文
-func buildRenderer(tuiTheme string, width int) *glamour.TermRenderer {
+func buildRenderer(tuiTheme string, width int) *markdownRenderer {
 	md, err := newMarkdownRenderer(tuiTheme, width)
 	if err != nil {
 		return nil //nolint:staticcheck // 降级是有意的

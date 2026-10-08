@@ -229,6 +229,35 @@ func TestUpdateStreaming(t *testing.T) {
 	}
 }
 
+// 全屏视图也延后表格列宽计算，完成后由正式消息替换临时行
+func TestUpdateStreamingTable(t *testing.T) {
+	m := newTestModel()
+	var err error
+	m.md, err = newMarkdownRenderer("dark", 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.busy = true
+	body := "| Name | Description |\n| --- | --- |\n| alpha | small |"
+	ack := make(chan error, 1)
+	updated, _ := m.Update(streamMsg{delta: body, ack: ack})
+	m = updated.(Model)
+	if err := <-ack; err != nil {
+		t.Fatal(err)
+	}
+	live := stripANSI(m.View())
+	if !strings.Contains(live, "alpha | small") || strings.Contains(live, "│") {
+		t.Fatalf("live table: %q", live)
+	}
+	updated, _ = m.Update(streamMsg{final: turnMsg{result: session.TurnResult{
+		AssistantMessage: session.Message{Content: body, Mode: session.ModeBaseline},
+	}}})
+	m = updated.(Model)
+	if !m.streaming.empty() || !strings.Contains(stripANSI(m.View()), "│") {
+		t.Fatalf("final table not formatted: %q", m.View())
+	}
+}
+
 // 生成中取消不退出，终态前不允许下一轮；失败片段不变成正式助手视图
 func TestUpdateStreamingCancel(t *testing.T) {
 	m := newTestModel()

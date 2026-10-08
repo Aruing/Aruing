@@ -253,6 +253,33 @@ func TestInlineStreamWriteError(t *testing.T) {
 	}
 }
 
+// 表格内容在提交前可见，成功结束时再按完整正文排版
+func TestInlineStreamTableFinal(t *testing.T) {
+	md, err := newMarkdownRenderer("dark", 60)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	body := "| Name | Description |\n| --- | --- |\n| alpha | small |"
+	svc, _, sid := newStreamService(t, func(_ context.Context, emit func(string) error) (session.RespondOutput, error) {
+		if err := emit(body); err != nil {
+			return session.RespondOutput{}, err
+		}
+		live := stripANSI(out.String())
+		if !strings.Contains(live, "alpha | small") || strings.Contains(live, "│") {
+			t.Errorf("live table: %q", live)
+		}
+		return session.RespondOutput{Content: body, Mode: session.ModeBaseline}, nil
+	})
+	st := mustLoadStyles("dark")
+	prog := NewTurnProgress(nil)
+	prog.bind(&out, st)
+	waitTurn(t.Context(), &out, st, md, svc, sid, "question", prog)
+	if !strings.Contains(stripANSI(out.String()), "│") {
+		t.Fatalf("final table not formatted: %q", out.String())
+	}
+}
+
 // 父级退出不能依赖上游及时响应取消，否则整个行内界面会卡在 spinner 循环
 func TestInlineParentCancel(t *testing.T) {
 	blocked := make(chan struct{})
