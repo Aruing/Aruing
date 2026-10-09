@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Aruing/Aruing/internal/agent"
+	"github.com/Aruing/Aruing/internal/agent/acquire"
 	"github.com/Aruing/Aruing/internal/agent/agenttest"
 	"github.com/Aruing/Aruing/internal/core"
 )
@@ -464,6 +465,37 @@ func TestReplanAcquireReproposedUsesFreshPrior(t *testing.T) {
 	}
 	if math.Abs(weights[1]-0.5*0.1) > 1e-9 || math.Abs(weights[2]-0.5*0.9) > 1e-9 {
 		t.Fatalf("fresh weights = %v, want 0.05/0.45", weights[1:])
+	}
+}
+
+// fresh 空时旧侧权重和为 replanOldShare（0.5）也照常建信念（pr-agent R1 证伪钉板）：
+// NewBelief 只要求正有限权重、内部归一化——「要求和 1 否则拒绝」的声称不成立；
+// 无新假设 = 保留旧假设相对后验，正是重规划语义
+func TestReplanAcquireFreshEmptyKeepsBelief(t *testing.T) {
+	old := []core.Hypothesis{
+		{ID: "h_1", Statement: "方向一"},
+		{ID: "h_2", Statement: "方向二"},
+	}
+	post := []float64{0.8, 0.2}
+
+	merged, weights := agent.MergeReplanWeights(old, post, nil)
+	if len(merged) != 2 || len(weights) != 2 {
+		t.Fatalf("merged = %d weights = %d, want 2/2", len(merged), len(weights))
+	}
+	var sum float64
+	for _, w := range weights {
+		sum += w
+	}
+	if math.Abs(sum-0.5) > 1e-9 {
+		t.Fatalf("weights sum = %.4f, want 0.5（旧侧整体缩放到 replanOldShare）", sum)
+	}
+	b, err := acquire.NewBelief(weights)
+	if err != nil {
+		t.Fatalf("NewBelief 拒绝非归一权重（设计语义为内部归一化）：err=%v", err)
+	}
+	got := b.Posterior()
+	if math.Abs(got[0]-0.8) > 1e-9 || math.Abs(got[1]-0.2) > 1e-9 {
+		t.Fatalf("posterior = %v, want [0.8 0.2]（相对权重保持）", got)
 	}
 }
 

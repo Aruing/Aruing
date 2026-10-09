@@ -331,6 +331,33 @@ llm:
 	}
 }
 
+// 无 LLM 的只读命令加载链：不校验大模型三件套（与 LoadResolvedWith 的差异点），
+// 其余解析（文件 / 环境覆盖 / 数据目录默认）与主链一致。
+// 环境变量经注入查找隔离：测试机若设置了 ARUING_STORAGE_DATA_DIR，
+// 真实环境查找会覆盖文件值使断言翻转（环境依赖性 flake）
+func TestLoadResolvedNoLLM(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte("storage:\n  data_dir: /tmp/aruing-list-test\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, used, err := loadResolvedBase(path, ResolveOptions{
+		LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if used != path {
+		t.Fatalf("used=%q", used)
+	}
+	if cfg.Storage.DataDir != "/tmp/aruing-list-test" {
+		t.Fatalf("data dir=%q", cfg.Storage.DataDir)
+	}
+}
+
 // TUI.Mode 随环境变量加载与覆盖；空值默认
 func TestTUIModeEnv(t *testing.T) {
 	cfg := LoadFrom(func(k string) string {
@@ -376,5 +403,70 @@ func TestLoadFileCarriesTUISection(t *testing.T) {
 	}
 	if cfg.TUI.Theme != "dark" || cfg.TUI.Mode != "app" || cfg.TUI.ThemeFile != "theme.yaml" {
 		t.Fatalf("tui section lost: %+v", cfg.TUI)
+	}
+}
+
+// 数据目录解析：空值填默认（home 直下与安装族同根）、环境变量覆盖、文件段带入
+func TestStorageDataDir(t *testing.T) {
+	t.Parallel()
+
+	// 默认填充走注入的主目录，不依赖真实环境；无 LLM 时校验报错但配置已返回
+	cfg, _, err := LoadResolvedWith("", ResolveOptions{
+		Cwd:         t.TempDir(),
+		UserHomeDir: "/home/tester",
+		LookupEnv:   func(string) (string, bool) { return "", false },
+	})
+	if err == nil {
+		t.Fatal("want LLM validation error")
+	}
+	// 数据目录默认值在 LLM 校验前已填好（产品路径永远磁盘）
+	if cfg.Storage.DataDir != filepath.Join("/home/tester", ".aruing", "data") {
+		t.Fatalf("default data dir: %q", cfg.Storage.DataDir)
+	}
+
+	// 环境变量覆盖默认
+	cfg, _, err = LoadResolvedWith("", ResolveOptions{
+		Cwd:         t.TempDir(),
+		UserHomeDir: "/home/tester",
+		LookupEnv: func(k string) (string, bool) {
+			switch k {
+			case "ARUING_STORAGE_DATA_DIR":
+				return "/data/env", true
+			case "ARUING_LLM_BASE_URL":
+				return "https://x/v1", true
+			case "ARUING_LLM_API_KEY":
+				return "k", true
+			case "ARUING_LLM_MODEL":
+				return "m", true
+			}
+			return "", false
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Storage.DataDir != "/data/env" {
+		t.Fatalf("env data dir: %q", cfg.Storage.DataDir)
+	}
+
+	// 文件 storage 段带入（漏拷防护：段必须在 LoadFile 出现）
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(path, []byte(`
+llm:
+  base_url: https://x/v1
+  api_key: k
+  model: m
+storage:
+  data_dir: /data/from-file
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgFromFile, _, errFromFile := LoadResolvedWith(path, ResolveOptions{UserHomeDir: "/home/tester"})
+	if errFromFile != nil {
+		t.Fatal(errFromFile)
+	}
+	if cfgFromFile.Storage.DataDir != "/data/from-file" {
+		t.Fatalf("file data dir: %q", cfg.Storage.DataDir)
 	}
 }

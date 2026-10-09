@@ -49,6 +49,7 @@ Commands:
   update           Self-update to the latest release (npm installs: npm update -g aruing)
   run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
+  sessions        List saved sessions: id, times, message count, first question
   judge            Score eval records against scenario ground truth
   bench            Run the mechanical projection benchmark (no LLM, no cluster)
   probe            Drive one scripted long session with tail probes (experiment rig)
@@ -104,6 +105,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runRun(args[1:], stdout, stderr)
 	case "chat":
 		return runChat(args[1:], stdout, stderr)
+	case "sessions":
+		return runSessions(args[1:], stdout, stderr)
 	case "judge":
 		return runJudge(args[1:], stdout, stderr)
 	case "bench":
@@ -142,6 +145,7 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	configPath := fs.String("config", "", "path to config YAML (or ARUING_CONFIG / search paths)")
 	verbose := fs.Bool("verbose", false, "print orchestrator progress to stderr (same as ARUING_DEBUG=1)")
 	evalJSON := fs.String("eval-json", "", "write an evaluation record (JSON) to this path; suspended and failed runs are recorded too")
+	dataDir := fs.String("data-dir", "", "data directory for session persistence (overrides storage.data_dir / default ~/.aruing/data)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: aruing run [flags] <question>")
 		fmt.Fprintln(stderr, "")
@@ -173,30 +177,43 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 	if *verbose {
 		cfg.Debug = true
 	}
+	// 显式数据目录优先（同 --verbose 覆盖模式）；空则沿用加载链默认
+	if d := strings.TrimSpace(*dataDir); d != "" {
+		cfg.Storage.DataDir = d
+	}
 	// 会话开始前打印生效配置来源、模型与 k8s 连接信息，便于确认覆盖结果与集群归属
 	ci := resolveCluster(context.Background(), cfg.Tools, defaultKubectlContext)
 	writeStartupBanner(stderr, usedPath, cfg, ci)
 
 	factory := core.NewFactory()
-	runID, err := factory.NewID("run")
-	if err != nil {
-		return fmt.Errorf("create run ID: %w", err)
-	}
-	now := factory.Now()
-	run := core.Run{
-		ID:        runID,
-		Question:  question,
-		Status:    core.RunStatusRunning,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
 
-	orchestrator, tracker, err := newOrchestrator(factory, cfg, stderr)
+	// 存储先开：spool 留存随磁盘路径注入工具层，编排器组装时带上
+	st, ledger, susp, spoolStore, err := openStores(context.Background(), cfg.Storage.DataDir)
+	if err != nil {
+		return formatRunError(fmt.Errorf("open stores: %w", err))
+	}
+	// 退出前归还磁盘句柄（内存实现无 Close，不受影响）
+	defer closeStores(st)
+
+	orchestrator, tracker, err := newOrchestrator(factory, cfg, stderr, spoolStore)
 	if err != nil {
 		return formatRunError(fmt.Errorf("build orchestrator: %w", err))
 	}
+	// run 与 chat 统一为会话模型：单次 run 也建会话（一问一答），产物落盘可经
+	// aruing chat --session 续聊追问；诊断执行仍走同一编排器与调度器（#17）。
+	// 挂起快照落盘：run 进程随后即退出，落盘后澄清问题才能跨进程恢复
+	diagnose := session.NewDiagnoseResponder(factory, orchestrator, ledger)
+	diagnose.SetSuspensionStore(susp)
+	svc := session.NewService(st, factory, diagnose)
+	sess, err := svc.NewSession(context.Background())
+	if err != nil {
+		return formatRunError(fmt.Errorf("create session: %w", err))
+	}
+	fmt.Fprintf(stderr, "session: %s\n", sess.ID)
+
 	start := time.Now()
-	// 评测记录三路径全落盘（成功 / 挂起 / 失败）：失败 run 全量报告是统计纪律
+	// 运行编号在轮次内由升级内核发放，轮次成功后回填；失败路径评测记录无运行编号
+	runID := ""
 	emitEval := func(completed bool, errMsg string, report *core.Report, evidence []core.Evidence) {
 		if *evalJSON == "" {
 			return
@@ -213,7 +230,7 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 			method = m.String()
 		}
 		rec := eval.BuildRunRecord(
-			run.ID, question, cfg.LLM.Model, cfg.Tools.Projection.Method,
+			runID, question, cfg.LLM.Model, cfg.Tools.Projection.Method,
 			eval.AcquireRecordInfo{
 				Method:    method,
 				MaxRounds: cfg.Agent.Acquire.MaxRounds,
@@ -230,29 +247,26 @@ func runRun(args []string, stdout, stderr io.Writer) error {
 		}
 	}
 
-	outcome, err := orchestrator.Execute(context.Background(), run)
+	result, err := svc.Turn(context.Background(), sess.ID, question)
 	if err != nil {
 		emitEval(false, err.Error(), nil, nil)
 		return formatRunError(fmt.Errorf("execute diagnosis: %w", err))
 	}
-	if outcome.Suspension != nil {
-		// 单次 run 无会话环：澄清挂起时把问题打印到标准错误并退出非零
-		emitEval(false, "suspended waiting for user clarification", nil, outcome.Evidence)
-		fmt.Fprintf(stderr, "需要澄清才能继续（run %s）：\n%s\n", outcome.Suspension.RunID, outcome.Suspension.Question)
-		if len(outcome.Suspension.Options) > 0 {
-			for _, opt := range outcome.Suspension.Options {
-				fmt.Fprintf(stderr, "  - %s\n", opt)
-			}
-		}
-		fmt.Fprintln(stderr, "提示：在 chat 会话中回复可恢复；单次 run 无交互环。")
+	runID = result.RunID
+
+	// 澄清挂起：单次 run 无交互环，打印问题退出；跨进程挂起恢复归后续挂起快照步骤
+	if result.AssistantMessage.Mode == session.ModeClarify {
+		emitEval(false, "suspended waiting for user clarification", nil, result.Evidence)
+		fmt.Fprintf(stderr, "需要澄清才能继续（run %s）：\n%s\n", result.RunID, result.AssistantMessage.Content)
+		fmt.Fprintf(stderr, "提示：aruing chat --session %s 可带上下文续聊；挂起诊断的跨进程恢复在后续版本交付。\n", sess.ID)
 		return fmt.Errorf("diagnosis suspended waiting for user clarification")
 	}
-	if outcome.Report == nil {
-		emitEval(false, "empty outcome", nil, outcome.Evidence)
+	if result.Report == nil {
+		emitEval(false, "empty outcome", nil, result.Evidence)
 		return formatRunError(fmt.Errorf("execute diagnosis: empty outcome"))
 	}
-	emitEval(true, "", outcome.Report, outcome.Evidence)
-	return writeReport(stdout, *format, *outcome.Report, outcome.Evidence)
+	emitEval(true, "", result.Report, result.Evidence)
+	return writeReport(stdout, *format, *result.Report, result.Evidence)
 }
 
 // writeEvalRecord 把评测记录以 JSON 落盘；父目录不存在时创建
@@ -308,6 +322,7 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	configPath := fs.String("config", "", "path to config YAML (or ARUING_CONFIG / search paths)")
 	verbose := fs.Bool("verbose", false, "print Tower debug progress to stderr (same as ARUING_DEBUG=1)")
 	uiMode := fs.String("ui", "", "interactive chat UI: inline|app (overrides tui.mode config; default inline)")
+	dataDir := fs.String("data-dir", "", "data directory for session persistence (overrides storage.data_dir / default ~/.aruing/data)")
 	fs.Usage = func() {
 		fmt.Fprintln(stderr, "Usage: aruing chat [flags] [question]")
 		fmt.Fprintln(stderr, "")
@@ -345,6 +360,10 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	if m := strings.TrimSpace(*uiMode); m != "" {
 		cfg.TUI.Mode = m
 	}
+	// 显式数据目录优先（同 --verbose 覆盖模式）；空则沿用加载链默认
+	if d := strings.TrimSpace(*dataDir); d != "" {
+		cfg.Storage.DataDir = d
+	}
 	// 会话开始前打印生效配置来源、模型与 k8s 连接信息，便于确认覆盖结果与集群归属
 	ci := resolveCluster(context.Background(), cfg.Tools, defaultKubectlContext)
 	writeStartupBanner(stderr, usedPath, cfg, ci)
@@ -353,10 +372,13 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 	// 进度协调器：编排/Tower 的 progress 行先落到这里；inline 模式绑定终端后
 	// 与 spinner 同屏重绘，其余模式（单句 / stdin 行 / app）透传 stderr 维持现状
 	progress := tui.NewTurnProgress(stderr)
-	svc, err := newSessionStack(factory, cfg, progress)
+	stack, err := newSessionStackFull(factory, cfg, progress)
 	if err != nil {
 		return formatRunError(err)
 	}
+	svc := stack.service
+	// 退出前归还磁盘句柄（内存实现无 Close，不受影响）
+	defer closeStores(stack.store)
 
 	ctx := context.Background()
 	sessionID := strings.TrimSpace(*sessionIDFlag)
@@ -388,6 +410,14 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 
 	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回
 	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI, progress)
+}
+
+// 退出前关闭磁盘存储句柄（P2-3 生命周期收口）；内存实现无 Close 不受影响，
+// 关闭失败不阻断退出（写路径无缓冲，内容已入页缓存）
+func closeStores(st session.Store) {
+	if c, ok := st.(io.Closer); ok {
+		_ = c.Close()
+	}
 }
 
 // 非 tty stdin 行模式：每行一 Turn，同会话；空行忽略，exit/quit 停止。

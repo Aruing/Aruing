@@ -1,10 +1,21 @@
 package tools
 
+import "io"
+
 // 可切片后端：从证据原始输出中机械切出一页（offset/limit），不解释取值含义
 // 实现方解析本工具写入的 Raw 形态；无法解析或不支持时返回错误
 type Slicer interface {
 	// 按查询从 raw 切片；offset 为行起点（0 基），limit 为最多行数
 	Slice(raw []byte, q SliceQuery) (SliceView, error)
+}
+
+// 盘上延伸切片器：观察 Raw 带盘上留存引用（StdoutSpoolRef 探测命中）时，
+// 从完整 stdout 只读流切页，可翻到内存内联截断点之后（#18）
+// raw 为观察原始 JSON，实现方自行解析自身形态与引用统计；实现方须流式扫描，
+// 不得把盘上内容全量驻内存（#19 切片是机械投影）
+type SpoolSlicer interface {
+	// spool 为该观察 spool 文件打开后的完整 stdout 只读流；行号与 total 覆盖全量输出
+	SliceSpool(raw []byte, q SliceQuery, spool io.Reader) (SliceView, error)
 }
 
 // 切片查询：行级窗口 + 可选时间窗

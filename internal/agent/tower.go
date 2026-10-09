@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/Aruing/Aruing/internal/core"
@@ -27,6 +28,12 @@ import (
 
 //go:embed prompts/tower.md
 var towerPromptTemplate string
+
+//go:embed prompts/tower-reply.md
+var towerReplyPromptTemplate string
+
+// 底层客户端未提供真实流式能力时返回，调用方不得把整块结果冒充增量
+var ErrTowerStreamingUnsupported = errors.New("tower streaming requires llm streaming support")
 
 const (
 	// 单次决策业务级重试上限（非法动作、空正文、非法工具等）
@@ -47,8 +54,10 @@ const (
 // 不持有跨轮可变状态；每次应答独立决策
 // 轮内观察索引可选：有则基线工具观察写入 evidenceId，供 evidence.read 切片
 type TowerResponder struct {
-	// 大模型客户端，用于结构化决策
+	// 大模型客户端，用于结构化路由与阻塞式最终回复
 	client llm.Client
+	// 可选流式能力，仅用于最终自然语言回复；结构化决策仍走完整解析
+	replyStreamer llm.Streamer
 	// 领域编号工厂，升格建运行与基线任务编号
 	factory *core.Factory
 	// 正式诊断执行器，升格时调用
@@ -73,6 +82,10 @@ type TowerResponder struct {
 	memoryOpts memoryOptions
 	// 最近一轮 Respond 的记忆观测量（只读统计，探针实验记录消费；不影响行为）
 	lastMemStats MemoryTurnStats
+	// 可选挂起快照存储：挂起落盘与跨进程恢复；空时行为与进程内形态一致
+	suspensions session.SuspensionStore
+	// 已警告过降级的会话（同会话同进程只提示一次，避免每轮重复刷屏）
+	suspensionWarned map[string]struct{}
 }
 
 // 单轮记忆组装与分层检索的观测统计（只读副本；评测侧消费，不影响应答行为）
@@ -91,6 +104,90 @@ type MemoryTurnStats struct {
 	RehydratedEvidence int
 	// 本轮注入视图时的历史消息条数
 	HistTurns int
+}
+
+// 可选注入挂起快照存储：挂起落盘 + 跨进程恢复；不注入时行为与进程内形态一致
+func (t *TowerResponder) SetSuspensionStore(store session.SuspensionStore) {
+	t.suspensions = store
+}
+
+// 自盘恢复会话挂起：读盘 → 账本守卫 → 导入进程内索引；返回恢复的运行编号（无则空串）
+// 数据层失败（读盘 / 导入校验，含坏 JSON 与版本偏差）降级为无挂起：警告一次、
+// 文件保留，本轮走正常应答（#18 可恢复路径）；执行器未实现导入能力属
+// 接线不完整（编程错误），返回错误由轮次明确失败
+func (t *TowerResponder) restoreSuspendedFromDisk(ctx context.Context, sessionID string) (string, error) {
+	if t.suspensions == nil {
+		return "", nil
+	}
+	runID, payload, found, err := t.suspensions.GetSuspension(ctx, sessionID)
+	if err != nil {
+		t.warnSuspensionOnce(sessionID, "读取挂起快照失败，本轮按无挂起继续（文件保留，可检查数据目录）: %v", err)
+		return "", nil
+	}
+	if !found {
+		return "", nil
+	}
+	// 账本守卫：快照对应的运行已完成（恢复完成落账后来不及删文件的崩溃残留）
+	// → 删文件走正常轮，不重复消费已完成诊断
+	switch rec, gerr := t.ledger.Get(ctx, runID); {
+	case gerr == nil && rec.RunID == runID:
+		t.progressf("tower: stale suspension %s already completed, clearing", runID)
+		if cerr := session.ClearSuspension(ctx, t.suspensions, sessionID); cerr != nil {
+			t.warnSuspensionOnce(sessionID, "清理已完成挂起快照失败: %v", cerr)
+		}
+		return "", nil
+	case errors.Is(gerr, session.ErrRunNotFound):
+		// 未完成，继续导入恢复
+	default:
+		// 账本读失败：无法排除已完成，保守降级等下轮重试
+		t.warnSuspensionOnce(sessionID, "读取诊断账本失败，本轮按无挂起继续: %v", gerr)
+		return "", nil
+	}
+	importer, ok := t.executor.(session.SuspendImporter)
+	if !ok {
+		return "", fmt.Errorf("tower: executor %T cannot import suspended snapshots (incomplete wiring)", t.executor)
+	}
+	if ierr := importer.ImportSuspended(payload); ierr != nil {
+		t.warnSuspensionOnce(sessionID, "导入挂起快照失败，本轮按无挂起继续（文件保留）: %v", ierr)
+		return "", nil
+	}
+	t.progressf("tower: restored suspended run=%s from disk", runID)
+	return runID, nil
+}
+
+// 轮末按应答出口收口挂起快照文件：澄清挂起 → 覆盖落盘；诊断完成 → 清理
+// 持久化失败不毁轮（长进程内存仍有快照）：警告降级，不阻断应答返回
+func (t *TowerResponder) settleSuspensionAfterOutcome(ctx context.Context, sessionID string, out session.RespondOutput) {
+	if t.suspensions == nil {
+		return
+	}
+	switch out.Mode {
+	case session.ModeClarify:
+		if err := session.PersistSuspension(ctx, t.executor, t.suspensions, sessionID, out.RunID); err != nil {
+			t.warnSuspensionOnce(sessionID, "挂起快照落盘失败，重启后将丢失该挂起: %v", err)
+		}
+	case session.ModeDiagnostic:
+		if err := session.ClearSuspension(ctx, t.suspensions, sessionID); err != nil {
+			t.warnSuspensionOnce(sessionID, "清理挂起快照失败: %v", err)
+		}
+	}
+}
+
+// 挂起持久化降级警告：面向用户可见，同会话同进程只提示一次（避免每轮刷屏）
+// 有进度写出写进度（详细模式 stderr），否则直接写标准错误
+func (t *TowerResponder) warnSuspensionOnce(sessionID, format string, args ...any) {
+	if t.suspensionWarned == nil {
+		t.suspensionWarned = make(map[string]struct{})
+	}
+	if _, done := t.suspensionWarned[sessionID]; done {
+		return
+	}
+	t.suspensionWarned[sessionID] = struct{}{}
+	w := t.progress
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, "aruing: "+format+"\n", args...)
 }
 
 // LastMemoryStats 返回最近一轮 Respond 的记忆观测量（只读副本）
@@ -135,8 +232,10 @@ func NewTowerResponder(
 	if err != nil {
 		return nil, err
 	}
+	replyStreamer, _ := client.(llm.Streamer)
 	return &TowerResponder{
 		client:                client,
+		replyStreamer:         replyStreamer,
 		factory:               factory,
 		executor:              executor,
 		ledger:                ledger,
@@ -197,6 +296,25 @@ func (t *TowerResponder) progressf(format string, args ...any) {
 // 每轮最多一次轻量集群资源侦察（上下文用，非正式判决证据）；失败降级为空
 // 直接回复或升格时带回检查点正文，供会话轮次落检查点消息
 func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (session.RespondOutput, error) {
+	return t.respond(ctx, in, nil)
+}
+
+// RespondStream 只流式输出最终 reply；诊断、澄清和工具中间态保持完整结果语义
+func (t *TowerResponder) RespondStream(ctx context.Context, in session.RespondInput, emit func(string) error) (session.RespondOutput, error) {
+	if t == nil {
+		return session.RespondOutput{}, errors.New("tower responder is nil")
+	}
+	if emit == nil {
+		return session.RespondOutput{}, errors.New("tower stream requires a consumer")
+	}
+	if t.replyStreamer == nil {
+		return session.RespondOutput{}, ErrTowerStreamingUnsupported
+	}
+	return t.respond(ctx, in, emit)
+}
+
+// 统一执行记忆组装、结构化路由和动作提交；emit 非空时只交给最终 reply
+func (t *TowerResponder) respond(ctx context.Context, in session.RespondInput, emit func(string) error) (session.RespondOutput, error) {
 	if err := ctx.Err(); err != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower respond: %w", err)
 	}
@@ -209,6 +327,8 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	if strings.TrimSpace(in.UserText) == "" {
 		return session.RespondOutput{}, errors.New("tower requires user text")
 	}
+	// 会话归属随 ctx 下发：工具层超巨输出 spill 据此定位会话目录
+	ctx = tools.WithSpoolScope(ctx, in.SessionID)
 
 	t.progressf("tower: session=%s history=%d user_chars=%d", in.SessionID, len(in.History), len(in.UserText))
 	// 轮首重置记忆观测量：本轮任何路径（含挂起恢复）都有可读统计
@@ -223,13 +343,23 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}()
 
 	// 挂起恢复优先：会话内有 waiting_user 的 run 时，本轮用户原文作澄清答复，不经动作决策
+	// 进程内索引优先（同进程新鲜度最高）；为空且配了快照存储时自盘恢复（跨进程）
 	if runner, ok := t.executor.(session.SuspendedRunner); ok {
-		if runID := runner.FindSuspended(in.SessionID); runID != "" {
+		runID := runner.FindSuspended(in.SessionID)
+		if runID == "" {
+			var restoreErr error
+			runID, restoreErr = t.restoreSuspendedFromDisk(ctx, in.SessionID)
+			if restoreErr != nil {
+				return session.RespondOutput{}, restoreErr
+			}
+		}
+		if runID != "" {
 			t.progressf("tower: resume suspended run=%s", runID)
 			out, resumeErr := session.Resume(ctx, runner, t.ledger, in.SessionID, runID, in.UserText)
 			if resumeErr != nil {
 				return session.RespondOutput{}, resumeErr
 			}
+			t.settleSuspensionAfterOutcome(ctx, in.SessionID, out)
 			return out, nil
 		}
 	}
@@ -239,6 +369,11 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	if listErr != nil {
 		return session.RespondOutput{}, fmt.Errorf("tower list diagnostic runs: %w", listErr)
 	}
+
+	// 轮首回灌（跨进程翻页）：账本证据带盘上留存引用的按其账本编号进本轮观察索引，
+	// 重启后旧超巨观察仍可 evidence.read 翻页（#18，版本头标志 1 末项）；
+	// 只回灌带引用条目（裁决：内存代价小），编号计入轮末 Discard
+	t.rehydrateSpooledEvidence(records, &putEvidenceIDs)
 
 	// 记忆组装按方法分派：ours = tier-aware（R 卡片锁定常驻 + W 窗口 + C 压缩）
 	// D1 / D2 为纯记忆策略实验臂——无卡片无回灌（对照口径：回灌与卡片归 ours 组件）
@@ -308,8 +443,12 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 
 		switch decision.Action {
 		case towerActionReply:
+			content, replyErr := t.generateReply(ctx, in, view, priorRuns, observations, clusterResources, rehydrated, decision.Content, emit)
+			if replyErr != nil {
+				return session.RespondOutput{}, replyErr
+			}
 			return session.RespondOutput{
-				Content:           decision.Content,
+				Content:           content,
 				Mode:              session.ModeBaseline,
 				CheckpointContent: view.CheckpointContent,
 			}, nil
@@ -322,6 +461,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 				if escErr != nil {
 					return session.RespondOutput{}, escErr
 				}
+				t.settleSuspensionAfterOutcome(ctx, in.SessionID, out)
 				out.CheckpointContent = view.CheckpointContent
 				return out, nil
 			}
@@ -346,6 +486,7 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 			if escErr != nil {
 				return session.RespondOutput{}, escErr
 			}
+			t.settleSuspensionAfterOutcome(ctx, in.SessionID, out)
 			out.CheckpointContent = view.CheckpointContent
 			return out, nil
 
@@ -355,11 +496,64 @@ func (t *TowerResponder) Respond(ctx context.Context, in session.RespondInput) (
 	}
 }
 
+// 以同一份已组装上下文生成最终回复；阻塞与流式路径只在传输方式上不同
+func (t *TowerResponder) generateReply(
+	ctx context.Context,
+	in session.RespondInput,
+	view towerContextView,
+	priorRuns []towerPriorRunDetail,
+	observations []towerObservation,
+	clusterResources []ClusterResource,
+	rehydrated []rehydratedMsg,
+	draft string,
+	emit func(string) error,
+) (string, error) {
+	contextPayload, err := buildTowerUserPayload(in, view, priorRuns, observations, t.specs, clusterResources, rehydrated)
+	if err != nil {
+		return "", fmt.Errorf("tower reply payload: %w", err)
+	}
+	payload, err := json.Marshal(struct {
+		Context json.RawMessage `json:"context"`
+		Draft   string          `json:"draft"`
+	}{Context: json.RawMessage(contextPayload), Draft: draft})
+	if err != nil {
+		return "", fmt.Errorf("tower reply payload: %w", err)
+	}
+	req := llm.Request{
+		System: towerReplyPromptTemplate,
+		User:   string(payload),
+		Label:  "tower-reply",
+	}
+
+	var content string
+	if emit == nil {
+		response, generateErr := t.client.Generate(ctx, req)
+		if generateErr != nil {
+			return "", fmt.Errorf("tower reply: %w", generateErr)
+		}
+		content = response.Content
+	} else {
+		var streamed strings.Builder
+		_, streamErr := t.replyStreamer.Stream(ctx, llm.StreamRequest{Request: req}, func(delta string) error {
+			streamed.WriteString(delta)
+			return emit(delta)
+		})
+		if streamErr != nil {
+			return "", fmt.Errorf("tower reply stream: %w", streamErr)
+		}
+		content = streamed.String()
+	}
+	if strings.TrimSpace(content) == "" {
+		return "", errors.New("tower reply is empty")
+	}
+	return content, nil
+}
+
 // 单轮决策结果（校验后）
 type towerDecision struct {
 	// 动作：直接回复、调工具或升格诊断
 	Action string
-	// 直接回复时的助手正文，其它动作可空
+	// 直接回复时的简短草稿或要点，其它动作可空
 	Content string
 	// 升格时写入运行的诊断问题；空则回退为用户原文
 	Question string
@@ -404,7 +598,7 @@ type towerObservation struct {
 type towerLLMOutput struct {
 	// 动作：直接回复、调工具或升格诊断
 	Action string `json:"action"`
-	// 直接回复时的助手正文
+	// 直接回复时的简短草稿或要点
 	Content string `json:"content"`
 	// 升格时的诊断问题
 	Question string `json:"question"`
@@ -530,6 +724,25 @@ func (t *TowerResponder) mapTowerDecision(out towerLLMOutput) towerDecision {
 		}
 	}
 	return decision
+}
+
+// 账本中带盘上留存引用的证据按其账本编号 Put 进本轮观察索引（Raw 原样，
+// evidence.read 单点探测引用）；编号进 putIDs 供轮末 Discard。
+// 索引未配置或账本为空时无操作；与记忆方法无关（导航能力，非记忆组装）
+func (t *TowerResponder) rehydrateSpooledEvidence(records []session.DiagnosticRecord, putIDs *[]string) {
+	if t.obsIndex == nil || len(records) == 0 {
+		return
+	}
+	for _, rec := range records {
+		for i := range rec.Evidence {
+			ev := &rec.Evidence[i]
+			if ev.ID == "" || len(ev.Raw) == 0 || tools.StdoutSpoolRef(ev.Raw) == nil {
+				continue
+			}
+			t.obsIndex.Put(ev.ID, tools.ObsRecord{Raw: ev.Raw, ToolName: ev.ToolName})
+			*putIDs = append(*putIDs, ev.ID)
+		}
+	}
 }
 
 // 轻量集群资源类型侦察：每轮由应答调用至多一次

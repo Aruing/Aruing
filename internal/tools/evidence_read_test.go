@@ -78,7 +78,7 @@ func TestEvidenceReadSlicesTable(t *testing.T) {
 	}
 	idx.Put("e_abc", tools.ObsRecord{Raw: json.RawMessage(`{"ok":true}`), ToolName: "fake.table"})
 
-	tool, err := tools.NewEvidenceReadTool(idx, reg)
+	tool, err := tools.NewEvidenceReadTool(idx, reg, nil)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestEvidenceReadSlicesLines(t *testing.T) {
 	}
 	idx.Put("e_logs", tools.ObsRecord{Raw: json.RawMessage(`{"ok":true}`), ToolName: "fake.logs"})
 
-	tool, err := tools.NewEvidenceReadTool(idx, reg)
+	tool, err := tools.NewEvidenceReadTool(idx, reg, nil)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestEvidenceReadSlicesLines(t *testing.T) {
 func TestEvidenceReadUnknownID(t *testing.T) {
 	idx := tools.NewObservationIndex()
 	reg := tools.NewRegistry()
-	tool, err := tools.NewEvidenceReadTool(idx, reg)
+	tool, err := tools.NewEvidenceReadTool(idx, reg, nil)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestEvidenceReadNonSlicer(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	idx.Put("e_1", tools.ObsRecord{Raw: json.RawMessage(`{}`), ToolName: "fake.noslice"})
-	tool, err := tools.NewEvidenceReadTool(idx, reg)
+	tool, err := tools.NewEvidenceReadTool(idx, reg, nil)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -207,10 +207,10 @@ func TestEvidenceReadNonSlicer(t *testing.T) {
 
 // 构造依赖缺失
 func TestNewEvidenceReadToolRequiresDeps(t *testing.T) {
-	if _, err := tools.NewEvidenceReadTool(nil, tools.NewRegistry()); err == nil {
+	if _, err := tools.NewEvidenceReadTool(nil, tools.NewRegistry(), nil); err == nil {
 		t.Fatal("expected nil index error")
 	}
-	if _, err := tools.NewEvidenceReadTool(tools.NewObservationIndex(), nil); err == nil {
+	if _, err := tools.NewEvidenceReadTool(tools.NewObservationIndex(), nil, nil); err == nil {
 		t.Fatal("expected nil registry error")
 	}
 }
@@ -288,7 +288,7 @@ func TestEvidenceReadTimeWindow(t *testing.T) {
 	}
 	idx.Put("e_ts", tools.ObsRecord{Raw: json.RawMessage(`{}`), ToolName: "fake.logs"})
 
-	tool, err := tools.NewEvidenceReadTool(idx, reg)
+	tool, err := tools.NewEvidenceReadTool(idx, reg, nil)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}
@@ -324,7 +324,7 @@ func TestEvidenceReadTimeWindowArgs(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	idx.Put("e_ts", tools.ObsRecord{Raw: json.RawMessage(`{}`), ToolName: "fake.logs"})
-	tool, err := tools.NewEvidenceReadTool(idx, reg)
+	tool, err := tools.NewEvidenceReadTool(idx, reg, nil)
 	if err != nil {
 		t.Fatalf("new: %v", err)
 	}

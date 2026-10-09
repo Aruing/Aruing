@@ -19,6 +19,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Aruing/Aruing/internal/agent"
 	"github.com/Aruing/Aruing/internal/config"
@@ -39,6 +40,7 @@ func runProbe(args []string, stdout, stderr io.Writer) error {
 	rounds := fs.Int("rounds", 20, "scripted session rounds before the probe tail (>= 1)")
 	seed := fs.Int64("seed", 1, "script generation seed (fixed seed = reproducible session script)")
 	out := fs.String("out", "", "output directory for the probe session record (default eval/results/0.1.3)")
+	dataDir := fs.String("data-dir", "", "data directory for probe session storage (default: process temp dir, keeps user data dir clean)")
 	dryRun := fs.Bool("dry-run", false, "parse spec, generate and print the turn plan, then exit (no LLM, no cluster)")
 	verbose := fs.Bool("verbose", false, "print orchestrator and tower progress to stderr (same as ARUING_DEBUG=1)")
 	fs.Usage = func() {
@@ -83,6 +85,18 @@ func runProbe(args []string, stdout, stderr io.Writer) error {
 	}
 	if *verbose {
 		cfg.Debug = true
+	}
+	// 编程式装配隔离：探针默认写进程级临时目录，不污染用户数据目录
+	// （批量实验与单进程假设也不兼容）；显式 --data-dir 时沿用指定目录
+	if d := strings.TrimSpace(*dataDir); d != "" {
+		cfg.Storage.DataDir = d
+	} else {
+		tmp, tmpErr := os.MkdirTemp("", "aruing-probe-")
+		if tmpErr != nil {
+			return fmt.Errorf("create probe data dir: %w", tmpErr)
+		}
+		cfg.Storage.DataDir = tmp
+		fmt.Fprintf(stderr, "probe data dir: %s\n", tmp)
 	}
 	ci := resolveCluster(context.Background(), cfg.Tools, defaultKubectlContext)
 	writeStartupBanner(stderr, usedPath, cfg, ci)

@@ -1,0 +1,3 @@
+# 场景级 chat 环境注入（存在则 make lab-chat 与 make smoke-all 自动注入；# 开头为注释）
+# 本场景验收对象是 map-reduce 全覆盖分片投影（完成标志 ①），非默认 fast（G4 默认不变）
+ARUING_TOOLS_PROJECTION_METHOD=map-reduce

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Aruing PR Review"
+  short_description: "pr-agent 之外的兜底 PR 审核：大 PR 分块深审、对照硬约束与常见问题族、inline 提交结构化结论"
+  default_prompt: "Use $aruing-pr-review when manually triggering a fallback review of a pull request in this repository."
+
+policy:
+  allow_implicit_invocation: false

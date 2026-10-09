@@ -101,9 +101,10 @@ func outcomeToRespond(
 	if outcome.Suspension != nil {
 		content := formatClarifyReply(outcome.Suspension)
 		return RespondOutput{
-			Content: content,
-			Mode:    ModeClarify,
-			RunID:   outcome.Suspension.RunID,
+			Content:  content,
+			Mode:     ModeClarify,
+			RunID:    outcome.Suspension.RunID,
+			Evidence: outcome.Evidence,
 		}, nil
 	}
 	if outcome.Report == nil {
@@ -120,10 +121,11 @@ func outcomeToRespond(
 		return RespondOutput{}, fmt.Errorf("put run ledger: %w", err)
 	}
 	return RespondOutput{
-		Content: formatDiagnosticReply(report),
-		Mode:    ModeDiagnostic,
-		RunID:   runID,
-		Report:  &report,
+		Content:  formatDiagnosticReply(report),
+		Mode:     ModeDiagnostic,
+		RunID:    runID,
+		Report:   &report,
+		Evidence: outcome.Evidence,
 	}, nil
 }
 

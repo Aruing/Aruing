@@ -217,7 +217,7 @@ func RunProbeSession(
 			if res.RunID == "" {
 				continue
 			}
-			info, derr := buildDiagnoseInfo(deps, opts, t.Text, res, i)
+			info, derr := buildDiagnoseInfo(ctx, deps, opts, t.Text, res, i)
 			if derr != nil {
 				return fail(i, t, derr)
 			}
@@ -279,6 +279,7 @@ func toTokenUsage(m map[string]llm.UsageTotals) map[string]TokenUsage {
 // 挂起（报告为空）记 suspended：后续轮的用户输入会被挂起恢复优先路径当作澄清答复，
 // 脚本语义由记录如实反映；token 不逐诊断拆分（全会话累计在会话级）
 func buildDiagnoseInfo(
+	ctx context.Context,
 	deps ProbeDeps,
 	opts ProbeRunOptions,
 	question string,
@@ -298,7 +299,7 @@ func buildDiagnoseInfo(
 	// 账本是报告与证据的权威源（挂起时无产物，报告侧留空）
 	var report = res.Report
 	var evidence []core.Evidence
-	if rec, err := deps.Ledger.Get(context.Background(), res.RunID); err == nil {
+	if rec, err := deps.Ledger.Get(ctx, res.RunID); err == nil {
 		if report == nil {
 			report = &rec.Report
 		}

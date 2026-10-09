@@ -246,3 +246,174 @@ func (checkpointResponder) Respond(_ context.Context, in session.RespondInput) (
 		CheckpointContent: "[checkpoint] handoff summary for tests",
 	}, nil
 }
+
+// 流式测试双用脚本控制增量与终态，阻塞入口用于准备既有历史
+type scriptedStreamResponder struct {
+	// 本轮流式应答脚本
+	stream func(context.Context, session.RespondInput, func(string) error) (session.RespondOutput, error)
+}
+
+// 阻塞路径保持可用，供两种入口交替调用
+func (s scriptedStreamResponder) Respond(_ context.Context, in session.RespondInput) (session.RespondOutput, error) {
+	return session.RespondOutput{Content: in.UserText, Mode: session.ModeBaseline}, nil
+}
+
+// 同步执行脚本，模拟真实应答器的消费契约
+func (s scriptedStreamResponder) RespondStream(ctx context.Context, in session.RespondInput, emit func(string) error) (session.RespondOutput, error) {
+	return s.stream(ctx, in, emit)
+}
+
+// 消费增量期间只有用户消息，成功后按检查点、完整回复顺序提交
+func TestTurnStreamCommit(t *testing.T) {
+	ctx := t.Context()
+	mem := store.NewMemoryStore()
+	responder := scriptedStreamResponder{stream: func(_ context.Context, in session.RespondInput, emit func(string) error) (session.RespondOutput, error) {
+		if len(in.History) != 2 || in.UserText != "next" {
+			t.Fatalf("unexpected input: %+v", in)
+		}
+		for _, delta := range []string{"完整", "回复"} {
+			if err := emit(delta); err != nil {
+				return session.RespondOutput{}, err
+			}
+		}
+		return session.RespondOutput{Content: "完整回复", Mode: session.ModeBaseline, CheckpointContent: " handoff "}, nil
+	}}
+	svc := session.NewService(mem, newTestFactory(), responder)
+	sess, err := svc.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Turn(ctx, sess.ID, "prior"); err != nil {
+		t.Fatal(err)
+	}
+	var chunks []string
+	result, err := svc.TurnStream(ctx, sess.ID, "next", func(delta string) error {
+		msgs, listErr := mem.ListMessages(ctx, sess.ID)
+		if listErr != nil || len(msgs) != 3 || msgs[2].Role != session.RoleUser {
+			t.Fatalf("premature commit: %v, %v", msgs, listErr)
+		}
+		chunks = append(chunks, delta)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := mem.ListMessages(ctx, sess.ID)
+	if err != nil || len(msgs) != 5 {
+		t.Fatalf("messages: %v, %v", msgs, err)
+	}
+	if len(chunks) != 2 || strings.Join(chunks, "") != result.AssistantMessage.Content {
+		t.Fatalf("chunks %v, result %+v", chunks, result)
+	}
+	if msgs[3].Mode != session.ModeCheckpoint || msgs[3].Content != "handoff" || msgs[4].ID != result.AssistantMessage.ID {
+		t.Fatalf("commit order: %v", msgs)
+	}
+	updated, err := mem.GetSession(ctx, sess.ID)
+	if err != nil || !updated.UpdatedAt.Equal(result.AssistantMessage.CreatedAt) {
+		t.Fatalf("session timestamp: %+v, %v", updated, err)
+	}
+}
+
+// 失败终态即使携带正文和检查点也不能落库，消费错误即使被上游吞掉也仍然失败
+func TestTurnStreamAbort(t *testing.T) {
+	failure := errors.New("stream failed")
+	for _, name := range []string{"upstream", "consumer", "cancel", "cancel without delta"} {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			mem := store.NewMemoryStore()
+			responder := scriptedStreamResponder{stream: func(streamCtx context.Context, _ session.RespondInput, emit func(string) error) (session.RespondOutput, error) {
+				out := session.RespondOutput{Content: "partial", CheckpointContent: "handoff"}
+				if name == "cancel without delta" {
+					cancel()
+					return out, nil
+				}
+				err := emit("partial")
+				if name == "upstream" {
+					return out, failure
+				}
+				if err == nil || streamCtx.Err() == nil {
+					t.Fatalf("consumer failure must cancel upstream: %v, %v", err, streamCtx.Err())
+				}
+				// 模拟错误实现继续发片段且返回成功，会话层仍须拒绝提交
+				if err := emit("ignored"); err == nil {
+					t.Fatal("lost consumer error")
+				}
+				return out, nil
+			}}
+			svc := session.NewService(mem, newTestFactory(), responder)
+			sess, err := svc.NewSession(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			result, err := svc.TurnStream(ctx, sess.ID, "question", func(string) error {
+				calls++
+				if name == "consumer" {
+					return failure
+				}
+				if name == "cancel" {
+					cancel()
+				}
+				return nil
+			})
+			want := failure
+			if strings.HasPrefix(name, "cancel") {
+				want = context.Canceled
+			}
+			if !errors.Is(err, want) || result.AssistantMessage.ID != "" || calls > 1 {
+				t.Fatalf("result %+v, error %v, calls %d", result, err, calls)
+			}
+			msgs, listErr := mem.ListMessages(t.Context(), sess.ID)
+			if listErr != nil || len(msgs) != 1 || msgs[0].Role != session.RoleUser {
+				t.Fatalf("failed turn committed output: %v, %v", msgs, listErr)
+			}
+		})
+	}
+}
+
+// 诊断与澄清可以不发增量，完整终态仍保留模式、运行编号和报告
+func TestTurnStreamStructuredResult(t *testing.T) {
+	for _, mode := range []string{session.ModeDiagnostic, session.ModeClarify} {
+		t.Run(mode, func(t *testing.T) {
+			out := session.RespondOutput{Content: "complete", Mode: mode, RunID: "run_test"}
+			if mode == session.ModeDiagnostic {
+				out.Report = &core.Report{RunID: out.RunID, Summary: "complete"}
+			}
+			responder := scriptedStreamResponder{stream: func(context.Context, session.RespondInput, func(string) error) (session.RespondOutput, error) {
+				return out, nil
+			}}
+			svc := session.NewService(store.NewMemoryStore(), newTestFactory(), responder)
+			sess, err := svc.NewSession(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := svc.TurnStream(t.Context(), sess.ID, "question", func(string) error {
+				t.Fatal("unexpected structured delta")
+				return nil
+			})
+			if err != nil || result.RunID != out.RunID || result.Report != out.Report || result.AssistantMessage.Mode != mode {
+				t.Fatalf("result %+v, error %v", result, err)
+			}
+		})
+	}
+}
+
+// 不支持流式及缺失消费者在任何消息写入前失败
+func TestTurnStreamValidation(t *testing.T) {
+	mem := store.NewMemoryStore()
+	svc := session.NewService(mem, newTestFactory(), session.EchoResponder{})
+	sess, err := svc.NewSession(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, emit := range []func(string) error{nil, func(string) error { return nil }} {
+		if _, err = svc.TurnStream(t.Context(), sess.ID, "question", emit); err == nil {
+			t.Fatal("expected validation error")
+		}
+	}
+	msgs, err := mem.ListMessages(t.Context(), sess.ID)
+	if err != nil || len(msgs) != 0 {
+		t.Fatalf("validation wrote messages: %v, %v", msgs, err)
+	}
+}

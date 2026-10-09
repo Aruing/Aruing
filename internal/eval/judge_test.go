@@ -266,3 +266,47 @@ func TestNormalizeVerdict(t *testing.T) {
 		t.Fatal("非三值应报错")
 	}
 }
+
+// 存在性判分：特征值 token 命中（大小写不敏感）；空特征与空文本不误报
+func TestProjectionPresence(t *testing.T) {
+	cases := []struct {
+		name     string
+		text     string
+		features []string
+		want     bool
+	}{
+		{"频次段命中", "STATUS: Running×99 / crashloopbackoff×1", []string{"CrashLoopBackOff"}, true},
+		{"片节报数命中", "稀有命中 3 行：STATUS=CrashLoopBackOff×3", []string{"CrashLoopBackOff"}, true},
+		{"未出现", "STATUS: Running×100", []string{"CrashLoopBackOff"}, false},
+		{"空特征", "whatever", nil, false},
+		{"空文本", "", []string{"CrashLoopBackOff"}, false},
+	}
+	for _, c := range cases {
+		if got := ProjectionPresence(c.text, c.features); got != c.want {
+			t.Errorf("%s: ProjectionPresence = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// 可达性判分：行本人、片区间值名、片区间报数三档为真；片区间不含根因行则不计数
+func TestProjectionZoneHit(t *testing.T) {
+	root := "bad-deploy-000123"
+	cases := []struct {
+		name string
+		text string
+		want bool
+	}{
+		{"根因行本人展示", "  #500  bad-deploy-000123  0/1  CrashLoopBackOff  7  5m  node-1", true},
+		{"所在片值名命中", "  ── 片 2/10 · 行 500–999（500 行）\n  稀有命中 3 行：STATUS=CrashLoopBackOff×3", true},
+		{"所在片仅报数行（值清单被 RareListMax 截断的计数面兜底）",
+			"  ── 片 2/10 · 行 500–999（500 行）\n  稀有命中 362 行：RESTARTS=12×1 / …另有 30 值见全局频次段", true},
+		{"片区间不含根因行", "  ── 片 1/10 · 行 0–499（500 行）\n  稀有命中 3 行：STATUS=CrashLoopBackOff×3", false},
+		{"所在片零报数", "  ── 片 2/10 · 行 500–999（500 行）\n  #600  work-00600  1/1  Running  0  3d  node-2", false},
+		{"无片结构无根因名", "STATUS: CrashLoopBackOff×50", false},
+	}
+	for _, c := range cases {
+		if got := ProjectionZoneHit(c.text, root, 500, []string{"CrashLoopBackOff"}); got != c.want {
+			t.Errorf("%s: ProjectionZoneHit = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

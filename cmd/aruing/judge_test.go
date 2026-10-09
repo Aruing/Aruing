@@ -92,6 +92,16 @@ func TestRunJudgeValidationAndDir(t *testing.T) {
 	}
 }
 
+// --probe 与抽样/判分/一致率 flag 组合：probe 分支早退会静默忽略它们——
+// 组合即前置报错（pr-agent R1 采纳，#138 flag 静默忽略同族）
+func TestRunJudgeProbeFlagConflicts(t *testing.T) {
+	var out, errOut bytes.Buffer
+	err := runJudge([]string{"--run-json", "x", "--scenario", "y", "--probe", "--sample", "5"}, &out, &errOut)
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("want conflict error, got err=%v out=%q", err, out.String())
+	}
+}
+
 // 假 llm 客户端：按序回放固定正文（或错误），供 rubric LLM 辅助评测试
 type fakeJudgeLLM struct {
 	responses []string

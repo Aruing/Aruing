@@ -28,26 +28,29 @@ type BenchMatrix struct {
 	Positions []int `yaml:"positions"`
 	// 随机种子；每个种子生成一张独立表实例
 	Seeds []int64 `yaml:"seeds"`
-	// 方法臂名：fast / greedy / greedy-knapsack / full / head-tail / uniform / random / simplestat
+	// 方法臂名：fast / greedy / greedy-knapsack / full / head-tail / uniform / random / simplestat / map-reduce
 	Methods []string `yaml:"methods"`
+	// 根因 fleet 密度（每 100 行故障载体数）；0 = 唯一根因行（历史矩阵口径），
+	// >0 启用 rich-value fleet 模式（论域挤兑形态，见 tablegen 头注释）
+	RootFleetPer100 int `yaml:"root_fleet_per_100"`
 }
 
-// DefaultBenchMatrix 默认全量矩阵：3×4×5×5×8 = 2400 单元，每单元毫秒级
-// 全跑不筛选：机械部分成本可忽略，全量报告（统计纪律）
+// DefaultBenchMatrix 默认全量矩阵：3×4×5×5×9 = 2700 单元，每单元毫秒级
+// 全跑不筛选：机械部分成本可忽略，全量报告（统计纪律）；fleet 密度 0 = 历史口径
 func DefaultBenchMatrix() BenchMatrix {
 	return BenchMatrix{
 		Rows:      []int{100, 200, 500},
 		Budgets:   []int{512, 1024, 2048, 4096},
 		Positions: []int{5, 25, 50, 75, 95},
 		Seeds:     []int64{1, 2, 3, 4, 5},
-		Methods:   []string{"fast", "greedy", "greedy-knapsack", "full", "head-tail", "uniform", "random", "simplestat"},
+		Methods:   []string{"fast", "greedy", "greedy-knapsack", "full", "head-tail", "uniform", "random", "simplestat", "map-reduce"},
 	}
 }
 
 // 机械臂名集合；llm-rerank 不在 bench——它需要装配 LLM 重排器，属产品路径实验
 var benchMethods = map[string]bool{
 	"fast": true, "greedy": true, "greedy-knapsack": true, "full": true,
-	"head-tail": true, "uniform": true, "random": true, "simplestat": true,
+	"head-tail": true, "uniform": true, "random": true, "simplestat": true, "map-reduce": true,
 }
 
 // Validate 校验矩阵：各维非空、数值合法、方法臂受支持
@@ -76,8 +79,11 @@ func (m BenchMatrix) Validate() error {
 			return fmt.Errorf("bench matrix: llm-rerank is not a mechanical arm (requires LLM reranker; use the product path)")
 		}
 		if !benchMethods[name] {
-			return fmt.Errorf("bench matrix: unknown method %q (want one of fast, greedy, greedy-knapsack, full, head-tail, uniform, random, simplestat)", name)
+			return fmt.Errorf("bench matrix: unknown method %q (want one of fast, greedy, greedy-knapsack, full, head-tail, uniform, random, simplestat, map-reduce)", name)
 		}
+	}
+	if m.RootFleetPer100 < 0 || m.RootFleetPer100 > 50 {
+		return fmt.Errorf("bench matrix: root_fleet_per_100 must be in [0,50], got %d", m.RootFleetPer100)
 	}
 	return nil
 }
@@ -115,9 +121,15 @@ type BenchResult struct {
 	ProjectedRows  int
 	ProjectRunes   int
 	WallMS         int64
+	// 存在性档：根因特征值在统计面（频次段/片节报数）可见，与 Hit（行展示）分档
+	Presence bool
+	// 可达性档：投影给出覆盖根因行的地址（行本人或所在片报数区间），G2 机械兑底
+	Zone bool
+	// 本单元根因 fleet 载体数（唯一模式 = 1）；追溯矩阵口径用
+	RootFleet int
 }
 
-// RunBench 展开矩阵逐单元跑：生成表 → 按方法臂渲染 → ProjectionHit 机械判分
+// RunBench 展开矩阵逐单元跑：生成表 → 按方法臂渲染 → 机械判分（Hit 行展示 / Presence 存在性）
 // 遍历序固定（N → 位置 → 预算 → 种子 → 方法），CSV 逐字节可复现（wall_ms 除外）
 func RunBench(m BenchMatrix) ([]BenchResult, error) {
 	if err := m.Validate(); err != nil {
@@ -132,7 +144,7 @@ func RunBench(m BenchMatrix) ([]BenchResult, error) {
 			}
 			for _, budget := range m.Budgets {
 				for _, seed := range m.Seeds {
-					tbl, err := GenerateTable(TableSpec{Rows: n, RootRow: rootRow, Seed: seed})
+					tbl, err := GenerateTable(TableSpec{Rows: n, RootRow: rootRow, Seed: seed, RootFleetPer100: m.RootFleetPer100})
 					if err != nil {
 						return nil, fmt.Errorf("generate table: %w", err)
 					}
@@ -153,6 +165,9 @@ func RunBench(m BenchMatrix) ([]BenchResult, error) {
 							ProjectedRows:  stats.RowsIncluded,
 							ProjectRunes:   stats.InstanceRunes,
 							WallMS:         time.Since(start).Milliseconds(),
+							Presence:       ProjectionPresence(text, tbl.RootFeatures),
+							Zone:           ProjectionZoneHit(text, tbl.RootName, rootRow, tbl.RootFeatures),
+							RootFleet:      fleetSize(TableSpec{Rows: n, RootFleetPer100: m.RootFleetPer100}),
 						})
 					}
 				}
@@ -230,9 +245,10 @@ func renderRandomArm(tbl GeneratedTable, budget int, seed int64) (string, summar
 func WriteBenchCSV(w io.Writer, results []BenchResult) error {
 	cw := csv.NewWriter(w)
 	defer cw.Flush()
+	// 尾部追加列（presence / zone / root_fleet）保持旧列序不变：既有聚合脚本按列名读，向后兼容
 	if err := cw.Write([]string{
 		"method", "N", "budget", "position_bucket", "root_row", "seed",
-		"hit", "projected_rows", "project_runes", "wall_ms",
+		"hit", "projected_rows", "project_runes", "wall_ms", "presence", "zone", "root_fleet",
 	}); err != nil {
 		return err
 	}
@@ -240,6 +256,14 @@ func WriteBenchCSV(w io.Writer, results []BenchResult) error {
 		hit := 0
 		if r.Hit {
 			hit = 1
+		}
+		presence := 0
+		if r.Presence {
+			presence = 1
+		}
+		zone := 0
+		if r.Zone {
+			zone = 1
 		}
 		if err := cw.Write([]string{
 			r.Method,
@@ -252,6 +276,9 @@ func WriteBenchCSV(w io.Writer, results []BenchResult) error {
 			fmt.Sprintf("%d", r.ProjectedRows),
 			fmt.Sprintf("%d", r.ProjectRunes),
 			fmt.Sprintf("%d", r.WallMS),
+			fmt.Sprintf("%d", presence),
+			fmt.Sprintf("%d", zone),
+			fmt.Sprintf("%d", r.RootFleet),
 		}); err != nil {
 			return err
 		}

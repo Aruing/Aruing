@@ -64,6 +64,11 @@ func runJudge(args []string, stdout, stderr io.Writer) error {
 	if *rubricLLM && *sampleTotal <= 0 {
 		return fmt.Errorf("--rubric-llm requires --sample-total N (LLM-assisted scoring applies to the sampled rubric)")
 	}
+	// 同族防线（pr-agent R1 采纳）：--probe 分支早退，与其组合的抽样/判分/一致率
+	// flag 会被静默忽略——组合即前置报错，不进默认路径
+	if *probe && (*sample > 0 || *sampleTotal > 0 || *rubricLLM || *agree) {
+		return fmt.Errorf("--probe cannot be combined with --sample, --sample-total, --rubric-llm, or --agree")
+	}
 
 	gt, gtErr := eval.LoadGroundTruth(*scenario)
 	if gtErr != nil {

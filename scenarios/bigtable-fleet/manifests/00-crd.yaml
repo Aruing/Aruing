@@ -1,0 +1,64 @@
+# bigtable-fleet 场景基底：CRD + 命名空间
+# 表载体为自定义资源（投影按输出格式解析，与 pods 表同路径，#2/#19 零特判）；
+# printer columns 形态对齐 pods 表与 bench 生成器表（NAME/READY/STATUS/RESTARTS/AGE/NODE）
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fleet
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: appfleets.demo.aruing.io
+spec:
+  group: demo.aruing.io
+  names:
+    plural: appfleets
+    singular: appfleet
+    kind: AppFleet
+    shortNames:
+      - af
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      # 不开 status 子资源：实例状态由清单直写（数据面故障注入，无控制器 reconcile）
+      additionalPrinterColumns:
+        - name: READY
+          type: string
+          jsonPath: .status.ready
+        - name: STATUS
+          type: string
+          jsonPath: .status.state
+        - name: RESTARTS
+          type: string
+          jsonPath: .status.restarts
+        - name: AGE
+          type: date
+          jsonPath: .metadata.creationTimestamp
+        - name: NODE
+          type: string
+          jsonPath: .spec.node
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                # 实例镜像：故障载体统一携带坏 tag，describe 可见即根因证据
+                image:
+                  type: string
+                # 实例所属节点（数据面字段，仅用于撑起 NODE 列的论域）
+                node:
+                  type: string
+            status:
+              type: object
+              properties:
+                ready:
+                  type: string
+                state:
+                  type: string
+                restarts:
+                  type: string

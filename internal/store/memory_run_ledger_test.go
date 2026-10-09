@@ -69,7 +69,8 @@ func TestMemoryRunLedgerIsolation(t *testing.T) {
 
 	raw := json.RawMessage(`{"a":1}`)
 	rec := session.DiagnosticRecord{
-		RunID: "run_1",
+		RunID:     "run_1",
+		SessionID: "sess_1",
 		Report: core.Report{
 			Summary:     "s",
 			Suggestions: []string{"one"},
@@ -192,5 +193,10 @@ func TestMemoryRunLedgerPutRequiresRunID(t *testing.T) {
 	err := store.NewMemoryRunLedger().Put(context.Background(), session.DiagnosticRecord{})
 	if err == nil {
 		t.Fatal("expected error")
+	}
+	// 会话编号必填与磁盘实现同契约：run 与 chat 统一为会话模型后空值是接线错误
+	err = store.NewMemoryRunLedger().Put(context.Background(), session.DiagnosticRecord{RunID: "run_x"})
+	if err == nil {
+		t.Fatal("expected error for missing session id")
 	}
 }

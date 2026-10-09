@@ -47,11 +47,11 @@ func TestRunBench(t *testing.T) {
 	}
 }
 
-// CSV 写出：表头 + 每单元一行，hit 列 0/1
+// CSV 写出：表头 + 每单元一行，hit/presence/zone 列 0/1
 func TestWriteBenchCSV(t *testing.T) {
 	res := []BenchResult{
-		{Method: "greedy", N: 100, Budget: 512, PositionBucket: 50, RootRow: 50, Seed: 1, Hit: true, ProjectedRows: 12, ProjectRunes: 500, WallMS: 1},
-		{Method: "head-tail", N: 100, Budget: 512, PositionBucket: 50, RootRow: 50, Seed: 1, Hit: false, ProjectedRows: 8, ProjectRunes: 400, WallMS: 0},
+		{Method: "greedy", N: 100, Budget: 512, PositionBucket: 50, RootRow: 50, Seed: 1, Hit: true, ProjectedRows: 12, ProjectRunes: 500, WallMS: 1, Presence: true, Zone: true, RootFleet: 1},
+		{Method: "map-reduce", N: 100, Budget: 512, PositionBucket: 50, RootRow: 50, Seed: 1, Hit: false, ProjectedRows: 8, ProjectRunes: 400, WallMS: 0, Presence: true, Zone: true, RootFleet: 10},
 	}
 	var buf bytes.Buffer
 	if err := WriteBenchCSV(&buf, res); err != nil {
@@ -61,12 +61,16 @@ func TestWriteBenchCSV(t *testing.T) {
 	if len(lines) != 3 {
 		t.Fatalf("应 1 表头 + 2 行，got %d", len(lines))
 	}
-	wantHeader := "method,N,budget,position_bucket,root_row,seed,hit,projected_rows,project_runes,wall_ms"
+	wantHeader := "method,N,budget,position_bucket,root_row,seed,hit,projected_rows,project_runes,wall_ms,presence,zone,root_fleet"
 	if lines[0] != wantHeader {
 		t.Fatalf("表头不符：%s", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], "greedy,100,512,50,50,1,1,") || !strings.HasPrefix(lines[2], "head-tail,100,512,50,50,1,0,") {
+	if !strings.HasPrefix(lines[1], "greedy,100,512,50,50,1,1,") || !strings.HasPrefix(lines[2], "map-reduce,100,512,50,50,1,0,") {
 		t.Fatalf("数据行不符：%s / %s", lines[1], lines[2])
+	}
+	// 尾部新列：presence / zone / root_fleet 逐行可迫溯矩阵口径
+	if !strings.HasSuffix(lines[1], ",1,1,1") || !strings.HasSuffix(lines[2], ",1,1,10") {
+		t.Fatalf("尾部列不符：%s / %s", lines[1], lines[2])
 	}
 }
 
@@ -75,8 +79,8 @@ func TestBenchMatrixValidate(t *testing.T) {
 	if err := DefaultBenchMatrix().Validate(); err != nil {
 		t.Fatalf("默认矩阵应合法：%v", err)
 	}
-	if got := DefaultBenchMatrix().Units(); got != 2400 {
-		t.Fatalf("默认矩阵应 2400 单元，got %d", got)
+	if got := DefaultBenchMatrix().Units(); got != 2700 {
+		t.Fatalf("默认矩阵应 2700 单元，got %d", got)
 	}
 	cases := []struct {
 		name string
@@ -122,5 +126,37 @@ methods: [greedy, random]
 	}
 	if _, err := LoadBenchMatrix(bad); err == nil {
 		t.Fatalf("非法方法应在加载期报错")
+	}
+}
+
+// 差异方向（完成标志 ② 的受控最小形态）：fleet 挤兑场景下，单遍投影中段
+// 「有存在、无地址」（presence=1 / zone=0），map-reduce「有存在、有地址」（zone=1）
+func TestBenchFleetSeparation(t *testing.T) {
+	m := BenchMatrix{
+		Rows: []int{1000}, Budgets: []int{1024}, Positions: []int{25, 50, 75},
+		Seeds: []int64{1, 2, 3}, Methods: []string{"fast", "map-reduce"},
+		RootFleetPer100: 1,
+	}
+	res, err := RunBench(m)
+	if err != nil {
+		t.Fatalf("run bench: %v", err)
+	}
+	var fastMiss, mrZone int
+	for _, r := range res {
+		if !r.Presence {
+			t.Fatalf("频次段应常显特征值（存在性）：method=%s pos=%d", r.Method, r.PositionBucket)
+		}
+		if r.Method == "map-reduce" && r.Zone {
+			mrZone++
+		}
+		if r.Method == "fast" && !r.Hit && !r.Zone {
+			fastMiss++
+		}
+	}
+	if mrZone != 9 {
+		t.Fatalf("map-reduce zone 全命中期望 9，got %d", mrZone)
+	}
+	if fastMiss == 0 {
+		t.Fatal("fast 中段应出现有存在无地址的漏（hit=zone=0）单元")
 	}
 }

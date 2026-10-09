@@ -62,6 +62,8 @@ func RenderWithStats(label string, columns []string, rows [][]string, hasMore bo
 		stats = renderUniform(&b, rows, opts.budget())
 	case MethodLLMRerank:
 		stats = renderLLMRerank(&b, columns, rows, opts)
+	case MethodMapReduce:
+		stats = renderMapReduce(&b, columns, rows, opts)
 	case MethodGreedy, MethodGreedyKnapsack:
 		stats = renderGreedy(&b, columns, rows, opts)
 	default:

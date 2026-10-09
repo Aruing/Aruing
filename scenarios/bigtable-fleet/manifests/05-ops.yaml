@@ -1,0 +1,17 @@
+# 稳态探针：lab-up 的稳态等待以「存在用户命名空间 Pod 且无 Pending/ContainerCreating」为信号，
+# CR-only 场景无 Pod 会让等待空转到超时。本探针放在独立命名空间（不进 fleet 表、不参与验收）
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fleet-ops
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: settle-probe
+  namespace: fleet-ops
+spec:
+  containers:
+    - name: settle-probe
+      image: busybox:1.36
+      command: ["sh", "-c", "tail -f /dev/null"]

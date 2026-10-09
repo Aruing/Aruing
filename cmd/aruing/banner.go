@@ -45,7 +45,16 @@ func collectBannerFields(usedPath string, cfg config.Config, ci clusterInfo) []b
 		{key: "llm_model", value: fmt.Sprintf("%s ready=%t", modelValue(cfg.LLM.Model), cfg.LLM.Ready())},
 		{key: "kubectl", value: kubectlFieldValue(ci)},
 		{key: "context", value: ci.context},
+		{key: "data", value: dataDirValue(cfg.Storage.DataDir)},
 	}
+}
+
+// 空白裁剪数据目录；空仅见于直接构造配置的测试装配
+func dataDirValue(dir string) string {
+	if p := strings.TrimSpace(dir); p != "" {
+		return p
+	}
+	return "in-memory"
 }
 
 // 空白裁剪配置路径；无文件时标 env-only
