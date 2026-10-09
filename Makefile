@@ -139,6 +139,15 @@ eval-sweep:
 probe-sweep:
 	bash scripts/probe-sweep.sh
 
+# ---------------- benchmark (0.1.5 benchmark) ----------------
+# 基准统一跑批入口：逐场景 fresh-up 起/拆 kind 集群 → 单轮诊断维（eval-sweep）+
+# 长会话维（probe-sweep，须场景 probe.yaml）→ summary.md/csv + 顶层 manifest。
+# 例: make bench-run DRYRUN=1 / make bench-run SCENARIOS="crashloop-bad-image" DIMS=probe
+.PHONY: bench-run
+
+bench-run:
+	bash scripts/bench-run.sh
+
 # 全量真集群 smoke（全部场景，严格校验）：up → chat → down，单场景失败不中断，末尾汇总。
 # 依赖 Docker/kind/kubectl + bin/aruing + LLM 配置（playground/config.yaml 或 ARUING_CONFIG）。
 smoke-all:
