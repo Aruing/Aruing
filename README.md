@@ -24,11 +24,11 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-**`0.1.3` — evidence-driven acquire loop + tiered memory.** Investigations are driven by an evidence-information-gain decision loop (Bayesian beliefs, EIG-ranked actions, MSPRT stopping — `agent.acquire.method` switches to ReAct / random / cheapest / serial baselines in one binary), and long conversations keep a tiered memory view: run/evidence index cards stay addressable, recent turns stay verbatim, mid-history compacts under budget, and layered retrieval rehydrates raw evidence previews on demand (`agent.memory.method` switches to last-N / flat-summary baselines). The evaluation stack grew a probe harness (`aruing probe`, 20/50-round scripted sessions with tail probes), pooled layer-3 rubric sampling with LLM-assisted scoring and human agreement (`judge --sample-total/--rubric-llm/--agree`), and matrix drivers (`make eval-sweep`, `make probe-sweep`) with resume guards and manifests. Everything from 0.1.0–0.1.1 still applies: real-cluster + real-LLM diagnosis, interactive terminal chat, evidence navigation, clarify-suspend/resume, representative projection, one-line install and self-update.
+**`0.1.4` — production hardening: persistence, streaming, full-coverage scans.** Everything survives restarts: sessions, messages, diagnostic ledgers (`RunLedger`), and suspended runs persist under `~/.aruing/data`; oversized tool output spills to disk and stays page-able via `evidence.read` beyond the inline truncation point; `aruing sessions` lists past conversations. Chat replies stream token-by-token in both TUI modes (inline / app) — structured reasoning is never streamed, and an interrupted stream fails cleanly with no half-committed message. Oversized tables get an optional map-reduce two-pass full-coverage projection so root causes hidden mid-table are not lost (scenario / config switch; default path unchanged). Everything from 0.1.0–0.1.3 still applies: real-cluster + real-LLM diagnosis, interactive chat, evidence navigation, clarify-suspend/resume, representative projection, acquire-loop & tiered-memory method switches, one-line install and self-update.
 
-Not yet built (planned 0.1.4/0.2+): streaming responses, write tools with approval, multi-cluster, Web UI, npm distribution. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
+Not yet built (planned 0.2+/0.3+): write tools with approval, multi-cluster, Web UI, npm distribution. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
-Shipped in release [`v0.1.3`](https://github.com/Aruing/Aruing/releases/tag/v0.1.3) (2026-09-05; notes cover the 0.1.2 acquire-loop increments too).
+Shipped in release [`v0.1.4`](https://github.com/Aruing/Aruing/releases/tag/v0.1.4) (2026-10-09).
 
 ⚠️ Only simple trials / testing are supported right now — not production-ready.
 
