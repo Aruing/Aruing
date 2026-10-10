@@ -54,14 +54,15 @@ fi
 
 overall=0
 
-fail() { # 场景级失败：记清单（#18 全量报告），批末非零退出
-    echo "  FAIL $*" | tee -a "$OUT/failures.txt" >&2
+fail() { # 场景级失败：stderr 必达；清单写入尽力而为（目录缺失/不可写不得反过来中止批，#18）
+    printf '  FAIL %s\n' "$*" >&2
+    { printf '  FAIL %s\n' "$*" >>"$OUT/failures.txt"; } 2>/dev/null || true
     overall=1
 }
 
 preflight() {
     local missing=0 b
-    for b in docker kind kubectl; do
+    for b in docker kind kubectl python3; do # python3：manifest 写入与聚合的硬依赖
         command -v "$b" >/dev/null 2>&1 || { echo "preflight: missing tool: $b"; missing=1; }
     done
     if [ ! -f "$CONFIG" ]; then
@@ -267,7 +268,9 @@ if [ "$AGG_ONLY" = "1" ]; then
 fi
 
 if [ "$DRYRUN" = "1" ]; then
-    # 干跑：只打印计划 + 透传两个 sweep 的干跑输出（单元命令与计数），零集群零 LLM
+    # 干跑：只打印计划 + 透传两个 sweep 的干跑输出（单元命令与计数），零集群零 LLM；
+    # 目录尽力建（fail() 记清单用；不可创建时清单只进 stderr）；干跑中记录到失败同样影响退出码
+    mkdir -p "$OUT" 2>/dev/null || true
     for scn in $SCENARIOS; do
         plan="fresh-up → up"
         if want_diag; then plan="$plan → diag"; fi
@@ -287,7 +290,7 @@ if [ "$DRYRUN" = "1" ]; then
         echo
     done
     echo "DRYRUN：未执行任何集群操作与 LLM 调用" >&2
-    exit 0
+    exit "$overall"
 fi
 
 # ---------- 真跑 ----------
@@ -329,6 +332,11 @@ for scn in $SCENARIOS; do
         fi
         run_step down bash "$DOWN_SCRIPT" "$scn" || fail "down-FAIL scenario=$scn"
     else
+        # up 可能半建成集群（kind create 成功而后续步骤失败）：best-effort 拆除防泄漏；
+        # 拆除失败不掩盖原始失败（残留由下次 fresh-up 兑底清除）
+        if scn_kind_exists "$cluster"; then
+            run_step best-effort-down bash "$DOWN_SCRIPT" "$scn" || true
+        fi
         fail "up-FAIL scenario=$scn (skip both dims; see $OUT/bench-run.stdout.log)"
     fi
     echo
