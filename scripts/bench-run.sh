@@ -65,10 +65,13 @@ case "$RUBRIC_LLM" in
 *) scn_die "RUBRIC_LLM must be 0 or 1 (got: $RUBRIC_LLM)" ;;
 esac
 case "$RUBRIC_N" in
-'' | *[!0-9]*) scn_die "RUBRIC_N must be a non-negative integer (got: $RUBRIC_N)" ;;
+'' | *[!0-9]* | 0?*) scn_die "RUBRIC_N must be a decimal integer without leading zeros (got: $RUBRIC_N)" ;;
 esac
-case "$RUBRIC_SEED" in
-'' | *[!0-9-]*) scn_die "RUBRIC_SEED must be an integer (got: $RUBRIC_SEED)" ;;
+# 种子允许负号；剥去后同样禁止非数字与前导零（Go flag 对 08 等按 base-0 八进制解析报错，
+# 校验前置到入口，不让它海到 judge 才以 rubric-fail 暴露）
+_RUBRIC_SEED_ABS="${RUBRIC_SEED#-}"
+case "$_RUBRIC_SEED_ABS" in
+'' | *[!0-9]* | 0?*) scn_die "RUBRIC_SEED must be a decimal integer without leading zeros (got: $RUBRIC_SEED)" ;;
 esac
 want_diag() { [ "$DIMS" = "both" ] || [ "$DIMS" = "diag" ]; }
 want_probe() { [ "$DIMS" = "both" ] || [ "$DIMS" = "probe" ]; }
@@ -156,18 +159,16 @@ run_rubric() {
         echo "  rubric: SKIP（$scn 无 diag 记录）"
         return 0
     fi
-    llm=""
-    [ "$RUBRIC_LLM" = "1" ] && llm="--rubric-llm --config $CONFIG"
+    # 可选旗标走数组引号展开：CONFIG 含空格时仍为单参数（防 word-split 注入）
+    local judge_args=(judge --run-json "$recdir" --scenario "$ROOT/scenarios/$scn/scenario.yaml"
+        --sample-total "$RUBRIC_N" --seed "$RUBRIC_SEED")
+    [ "$RUBRIC_LLM" = "1" ] && judge_args+=(--rubric-llm --config "$CONFIG")
     if [ "$DRYRUN" = "1" ]; then
-        printf '  rubric: %s judge --run-json %s --scenario %s --sample-total %s --seed %s %s> diag/%s/rubric-%s.json\n' \
-            "$ARUING" "$recdir" "$ROOT/scenarios/$scn/scenario.yaml" \
-            "$RUBRIC_N" "$RUBRIC_SEED" "${llm:+$llm }" "$scn" "$scn"
+        printf '  rubric: %s %s > diag/%s/rubric-%s.json\n' \
+            "$ARUING" "${judge_args[*]}" "$scn" "$scn"
         return 0
     fi
-    if $ARUING judge --run-json "$recdir" \
-        --scenario "$ROOT/scenarios/$scn/scenario.yaml" \
-        --sample-total "$RUBRIC_N" --seed "$RUBRIC_SEED" $llm \
-        >"$rubric" 2>>"$OUT/run.rubric.stderr.log"; then
+    if $ARUING "${judge_args[@]}" >"$rubric" 2>>"$OUT/run.rubric.stderr.log"; then
         echo "  rubric=ok → diag/$scn/rubric-$scn.json"
     else
         rm -f "$rubric" # 失败不残留半截文件（断点续跑不误判已抽）
@@ -210,9 +211,9 @@ man = {
     "reps": sys.argv[13],
     "aruing": sys.argv[14],
     "started": sys.argv[15],
-    "rubric_n": sys.argv[16],
-    "rubric_seed": sys.argv[17],
-    "rubric_llm": sys.argv[18],
+    "rubric_n": int(sys.argv[16]),
+    "rubric_seed": int(sys.argv[17]),
+    "rubric_llm": int(sys.argv[18]),
 }
 with open(out + "/manifest.json", "w", encoding="utf-8") as f:
     json.dump(man, f, ensure_ascii=False, indent=2)
