@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-10-09（0.1.5 立项：对外完备批 = 评测基准升格 + npm 发包 + 运行时命令）
+> 最后更新：2026-10-09（benchmark 步骤 1：统一跑批入口 bench-run）
 
 ## 当前阶段
 
@@ -8,7 +8,7 @@
 
 | 功能 | 状态 | 摘要 |
 | --- | --- | --- |
-| benchmark 升格 | 未开始 | kind 场景 harness → 可复现评测基准：多场景 × 长会话（probe 接场景）× 判分三维矩阵，一条命令跑批出报告，产物可开源 |
+| benchmark 升格 | 进行中 | 统一跑批入口 `make bench-run` 已落（逐场景 fresh-up 起/拆集群 → 单轮诊断维 + 长会话维 → summary.md/csv + manifest）；余：③层 rubric 并入、扩场景 + probe.yaml 补齐、复现文档 |
 | npm 发包 | 未开始 | `npm i -g aruing` 三平台（darwin arm64/amd64 + linux amd64）干净环境装上即用；平台子包挂 release 管线，与 `aruing update` 拒绝自替换语义闭环 |
 | `/` 运行时命令 | 未开始 | chat（inline + app）内 `/` 前缀命令（帮助 / 会话 / 退出类，步骤设计钉最小集）；纯 TUI 层（#20），双模式一致 |
 
@@ -30,7 +30,7 @@
 
 | # | 模块 | 状态 | 备注 |
 | - | --- | --- | --- |
-| 1 | `scenarios/` + `internal/eval` + `cmd` bench/judge/probe 接线 | 未开始 | benchmark：扩场景 + 长会话（probe 接场景）+ 跑批入口 + 判分报告 + 复现文档；不进 CI 必绿 |
+| 1 | `scenarios/` + `internal/eval` + `cmd` bench/judge/probe 接线 | ⏳ | 步骤 1 统一入口 `scripts/bench-run.sh`（`make bench-run`）已落；余：③层 rubric 并入、扩场景 + probe.yaml、复现文档；不进 CI 必绿 |
 | 2 | npm 包源 + `.github/workflows/release.yml` publish 门禁 | 未开始 | 平台子包（主包 + optionalDeps）复用 release 资产与 checksums；预期零 `internal/` 改动 |
 | 3 | `internal/tui` + `cmd` chat 交互接线 | 未开始 | `/` 命令解析与执行、双模式一致、与流式共存语义（步骤设计钉） |
 
@@ -38,7 +38,7 @@
 
 ## 下一步
 
-**下一项**：起草 0.1.5 首个步骤设计（benchmark / npm / runtime-commands 三功能之一，维护者现场点；三改动面无依赖，顺序未预排）。
+**下一项**：benchmark 步骤 2–4 推进（③层 rubric 并入跑批 / 扩场景 + probe.yaml 补齐 / 复现文档，维护者现场点）；npm 与 runtime-commands 待认领并行。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）：
 
