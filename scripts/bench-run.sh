@@ -21,6 +21,11 @@
 # *.log 为调试产物不进开源集，排除清单：bench-run.stdout.log、run.rubric.stderr.log、
 # diag/*/run.stderr.log、probe/*/{run.stderr,probe.stdout}.log。
 #
+# 场景级 chat-env 注入（步骤 3）：逐场景把 scenarios/<scn>/chat-env 的 K=V 经 env
+# 前缀注入两维 sweep 调用于进程环境（单元继承生效，sweep 脚本零改动）——基准按
+# 场景声明的验收配置跑（如 bigtable-fleet 的 map-reduce 投影），无 chat-env 场景
+# 零注入；注入同时落 $OUT/scenario-env.txt 并进 summary.md 头部（留痕可复现）
+#
 # 用法：
 #   make bench-run DRYRUN=1                          # 干跑：打印计划与单元命令，零集群零 LLM
 #   make bench-run                                    # 真跑（须 Docker/kind/kubectl + LLM 配置；先 DRYRUN 核对成本）
@@ -35,6 +40,7 @@
 #   summary.md / summary.csv 聚合报告（人读 / 机器可联结）
 #   rubric-summary.csv       ③层逐场景分布（机器可联结）
 #   failures.txt             场景级失败清单（up/down/sweep/rubric/记录缺失/scrub，全量记录不静默）
+#   scenario-env.txt         场景级 chat-env 注入留痕（<scn>\tK=V，有注入才建）
 #   bench-run.stdout.log     生命周期输出（fresh-up/up/down；调试产物不进开源集）
 set -euo pipefail
 
@@ -127,13 +133,37 @@ run_step() {
     return 1
 }
 
-# run_sweep <dim> <script> <outdir> <scn> → 以单场景子集调用 sweep（参数透传，
-# 未设参数传空串 → sweep 侧 ${VAR:-default} 回落自身默认）；非零退出记失败不中断；
+# chat_env_lines <scn> → 场景 chat-env（KEY=VALUE 行，# 注释跳过）逐行输出；无文件输出空
+# 与 smoke-all 的 chat_env_args 同源语义：值不含空白（scenarios/README 约定）
+chat_env_lines() {
+    local f="$ROOT/scenarios/$1/chat-env" line
+    [ -f "$f" ] || return 0
+    while IFS= read -r line; do
+        case "$line" in '' | \#*) continue ;; esac
+        printf '%s\n' "$line"
+    done <"$f"
+}
+
+# emit_chat_env <scn> <inject> → 打印场景级注入行；真跑时追加 scenario-env.txt 留痕
+# （干跑零文件写纪律，只打印不落盘；inject 为空直接返回）
+emit_chat_env() {
+    local scn="$1" inject="${2:-}"
+    [ -n "$inject" ] || return 0
+    echo "  chat-env: 注入 $(echo $inject)"
+    if [ "$DRYRUN" != "1" ]; then
+        printf '%s\t%s\n' "$scn" "$(echo $inject)" >>"$OUT/scenario-env.txt"
+    fi
+}
+
+# run_sweep <dim> <script> <outdir> <scn> <inject> → 以单场景子集调用 sweep（参数透传，
+# 未设参数传空串 → sweep 侧 ${VAR:-default} 回落自身默认）；场景 chat-env 经 env 前缀
+# 注入子进程环境（空注入 = env 直传，行为不变；值不含空白为 scenarios/README 既有约定，
+# smoke-all 同款先例）；非零退出记失败不中断；
 # 失败消息日志引用一律 OUT 相对路径（开源清洗：绝对 OUT 不进产物）
 run_sweep() {
-    local dim="$1" script="$2" outdir="$3" scn="$4"
+    local dim="$1" script="$2" outdir="$3" scn="$4" inject="${5:-}"
     echo "---- $dim ← $(basename "$script") (OUT=$outdir)"
-    if ! SCENARIOS="$scn" OUT="$outdir" DRYRUN="$DRYRUN" FORCE="$FORCE" \
+    if ! env $inject SCENARIOS="$scn" OUT="$outdir" DRYRUN="$DRYRUN" FORCE="$FORCE" \
         METHODS="${METHODS:-}" KS="${KS:-}" ROUNDS="${ROUNDS:-}" REPS="${REPS:-}" \
         CONFIG="$CONFIG" ARUING="$ARUING" \
         bash "$script"; then
@@ -367,6 +397,15 @@ if man:
             f" · LLM 辅助评={'on' if str(man.get('rubric_llm')) == '1' else 'off'}",
         ]
 
+# 场景级 chat-env 注入留痕（真跑时 bench-run 写入；AGG_ONLY 重聚合同样呈现）
+env_path = os.path.join(out, "scenario-env.txt")
+if os.path.exists(env_path):
+    with open(env_path, encoding="utf-8") as f:
+        env_lines = [l.rstrip("\n") for l in f if l.strip()]
+    if env_lines:
+        L += ["", "场景级注入（chat-env）："]
+        L += [f"- {l.replace(chr(9), ' ← ', 1)}" for l in env_lines]
+
 # 单轮诊断：按 (场景, 方法) 聚合
 groups = {}
 for r in diag_rows:
@@ -522,13 +561,15 @@ if [ "$DRYRUN" = "1" ]; then
         if want_probe; then plan="$plan → probe"; fi
         plan="$plan → down"
         echo "[plan] $scn: $plan"
+        inject="$(chat_env_lines "$scn")"
+        emit_chat_env "$scn" "$inject"
         if want_diag; then
-            run_sweep diag "$ROOT/scripts/eval-sweep.sh" "$OUT/diag/$scn" "$scn"
+            run_sweep diag "$ROOT/scripts/eval-sweep.sh" "$OUT/diag/$scn" "$scn" "$inject"
             run_rubric "$scn"
         fi
         if want_probe; then
             if [ -f "$ROOT/scenarios/$scn/probe.yaml" ]; then
-                run_sweep probe "$ROOT/scripts/probe-sweep.sh" "$OUT/probe/$scn" "$scn"
+                run_sweep probe "$ROOT/scripts/probe-sweep.sh" "$OUT/probe/$scn" "$scn" "$inject"
             else
                 echo "  probe: SKIP（$scn 无 probe.yaml）"
             fi
@@ -562,8 +603,10 @@ for scn in $SCENARIOS; do
     fi
 
     if run_step up bash "$UP_SCRIPT" "$scn"; then
+        inject="$(chat_env_lines "$scn")"
+        emit_chat_env "$scn" "$inject"
         if want_diag; then
-            run_sweep diag "$ROOT/scripts/eval-sweep.sh" "$OUT/diag/$scn" "$scn"
+            run_sweep diag "$ROOT/scripts/eval-sweep.sh" "$OUT/diag/$scn" "$scn" "$inject"
             if [ -s "$OUT/diag/$scn/eval-sweep.csv" ]; then
                 run_rubric "$scn"
             else
@@ -572,7 +615,7 @@ for scn in $SCENARIOS; do
         fi
         if want_probe; then
             if [ -f "$ROOT/scenarios/$scn/probe.yaml" ]; then
-                run_sweep probe "$ROOT/scripts/probe-sweep.sh" "$OUT/probe/$scn" "$scn"
+                run_sweep probe "$ROOT/scripts/probe-sweep.sh" "$OUT/probe/$scn" "$scn" "$inject"
                 [ -s "$OUT/probe/$scn/probe-summary.csv" ] ||
                     fail "records-missing scenario=$scn dim=probe (probe-summary.csv 缺失或为空)"
             else

@@ -1,0 +1,12 @@
+name: oom-killed
+kind_cluster_name: aruing-sc-oom-killed
+namespace: demo
+# 给人看的坏态提示；脚本不解析本文件
+notes: "容器内存 limit 16Mi + tail /dev/zero 无限占内存 → 反复 OOMKilled 重启（describe 的 Last State 可见 Reason: OOMKilled）"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
+ground_truth:
+  resource_type: deployment
+  resource_name: demo-api
+  namespace: demo
+  fault_type: oom-killed
+  fault_signature: [OOMKilled, memory, 内存]

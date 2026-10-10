@@ -34,14 +34,15 @@ make lab-down NAME=crashloop-bad-image # 拆集群 + 清理 kubeconfig
 
 > **验收对象是 `aruing chat`**（正常使用即对话路径）。`aruing run` 单轮路径**不作单独验收**：在 `run` 下无论是反问（clarify 打问题后非零退出）还是默认输出，都视为允许。
 
-每个场景目录三件套：
+每个场景目录五件套：
 
 | 文件 | 内容 |
 | --- | --- |
 | `prompts.md` | 固定用户问法（按顺序发给 `chat`） |
 | `expect.md` | 验收：应出现 / 不应出现（人/AI 对照，非自动评分） |
 | `manifests/` | 故障清单（kubectl apply） |
-| `scenario.yaml` | 场景元数据（给人读；脚本不解析，命名按约定 `aruing-sc-<name>`） |
+| `scenario.yaml` | 场景元数据 + 真值四元组（`ground_truth`；judge 判分与 probe 真值展开消费，集群命名按约定 `aruing-sc-<name>`） |
+| `probe.yaml` | 长会话维素材（诊断请求 + 问答池 + 尾部探针，`aruing probe` / 基准 probe 维消费；缺文件时 bench-run 跳过该维度） |
 
 标准流程（`lab-chat` / `lab-kube` 已自动注入 KUBECONFIG，无需手动 export）：
 
@@ -101,6 +102,9 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 | `same-name-multi-ns` | 两个 ns 同名 Deployment（一好一坏），提示词不带 ns | cases 多轮：`01-default` 歧义并列；`02-investigate-clarify` 挂起反问→答复→续出报告（beta19 链路） |
 | `log-time-window` | 业务容器周期性故意崩溃重启 | logs `--timestamps` + `evidence.read` 时间窗切片（beta17 链路） |
 | `bigtable-fleet` | CRD 大表 3000 行，CrashLoopBackOff×30 散布 + 共享坏 image tag（数据面故障，无真实容器） | map-reduce 全覆盖分片投影（0.1.4 步骤 4）；须 chat-env 注入投影方法验收 |
+| `configmap-missing` | Deployment envFrom 引用不存在的 ConfigMap | 配置依赖：`CreateContainerConfigError` |
+| `oom-killed` | 容器内存 limit 16Mi + 无限占内存 | 资源上限：`OOMKilled` 循环 |
+| `pending-nodeselector` | nodeSelector 指向不存在的节点标签 | 调度约束：永久 Pending（up 稳态等待满 ~120s 属预期） |
 
 ## 约束
 

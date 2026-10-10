@@ -1,0 +1,34 @@
+# 探针实验规格（0.1.5 benchmark 步骤 3）：bigtable-fleet 场景的长会话脚本素材
+# 由 aruing probe 消费（scenario.yaml 同目录）；run/judge 主路径不读本文件
+# 口径同 crashloop-bad-image/probe.yaml（头部注释见彼处）
+# 注意：本场景验收依赖 map-reduce 投影（场景 chat-env 声明）；bench-run 跑批经
+# chat-env 注入生效——fast 默认投影下根因行不进证据，kth_run_pods 会落 no_facts
+name: bigtable-fleet
+diagnose_request: "请正式诊断 fleet namespace 下的 appfleet 大表：大量实例异常，排查根因并给出报告。"
+qa_pool:
+  - "fleet namespace 里大概有多少个 appfleet 实例？"
+  - "帮我看一眼 fleet namespace 的整体状态。"
+  - "appfleet 是一种什么自定义资源？"
+  - "集群里最近有没有什么异常事件？"
+  - "顺便说说大表类的资源一般怎么排查。"
+probes:
+  # 证据回灌类：考第 1 次诊断定位的故障实例名（CR 实体名，账本展开，过滤键 app-0097z）
+  - id: faulty-of-run1
+    class: evidence
+    question: "第 1 次诊断定位到的异常实例叫什么名字？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 1 }
+  # 证据链细节类：考最后一次诊断实际执行过的命令
+  - id: cmd-of-last
+    class: chain
+    question: "最后一次诊断时你跑了什么命令从大表里找根因？"
+    expect:
+      - from_ledger: { rule: kth_run_commands, k: -1 }
+  # 跨压缩综合类：对比首末诊断结论，须同时命中两次诊断的故障实例名与代表实例字面量
+  - id: first-vs-last
+    class: synthesis
+    question: "对比第一次和最后一次 fleet 大表诊断的结论，结论一致吗？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 1 }
+      - from_ledger: { rule: kth_run_pods, k: -1 }
+      - literal: "app-0097z"
