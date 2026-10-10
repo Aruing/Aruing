@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api
+  namespace: demo
+  labels:
+    app: demo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-api
+  template:
+    metadata:
+      labels:
+        app: demo-api
+    spec:
+      containers:
+        - name: demo-api
+          # busybox 只作载体：envFrom 引用不存在的 ConfigMap，kubelet 拒建容器
+          # → Pod 卡 CreateContainerConfigError，容器从不启动（配置依赖类故障）
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "3600"]
+          envFrom:
+            - configMapRef:
+                name: demo-api-config # 清单故意不创建该 ConfigMap

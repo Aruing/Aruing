@@ -1,0 +1,35 @@
+# 探针实验规格（0.1.5 benchmark 步骤 3）：same-name-multi-ns 场景的长会话脚本素材
+# 由 aruing probe 消费（scenario.yaml 同目录）；run/judge 主路径不读本文件
+# 口径同 crashloop-bad-image/probe.yaml（头部注释见彼处），一处例外见下：
+# diagnose_request 显式带 ns（team-b）——长会话维考记忆不考澄清；不带 ns 的歧义挂起
+# 会吞掉下一脚本轮当答复，污染问答分布且诊断计数不可控（挂起记 suspended、
+# kth_run 真值 no_diagnosis）。歧义/挂起链路由本场景 cases/ 验收（02-investigate-clarify）
+name: same-name-multi-ns
+diagnose_request: "请正式诊断 team-b namespace 下的 demo-api：Pod 一直起不来，排查根因并给出报告。"
+qa_pool:
+  - "集群里哪些 namespace 部署了 demo-api？"
+  - "team-a 和 team-b 的 demo-api 各自状态怎么样？"
+  - "帮我看一眼 team-b 的 demo-api 后面的 Pod 健康状况。"
+  - "集群里最近有没有镜像相关的异常？"
+  - "顺便说说 namespace 在 Kubernetes 里起什么作用。"
+probes:
+  # 证据回灌类：考第 2 次诊断故障侧的 pod 名（demo-api 前缀候选含两个 ns，账本展开）
+  - id: pod-of-run2
+    class: evidence
+    question: "第 2 次诊断里出问题的那个 pod 叫什么名字？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 2 }
+  # 证据链细节类：考第 2 次诊断实际执行过的命令
+  - id: cmd-of-run2
+    class: chain
+    question: "第 2 次诊断时你跑了什么命令确认故障？"
+    expect:
+      - from_ledger: { rule: kth_run_commands, k: 2 }
+  # 跨压缩综合类：对比首末诊断结论，须同时命中两次诊断的 pod 名并归属 team-b（故障侧 ns）
+  - id: first-vs-last
+    class: synthesis
+    question: "对比第一次和最后一次 demo-api 诊断的结论，结论一致吗？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 1 }
+      - from_ledger: { rule: kth_run_pods, k: -1 }
+      - literal: "team-b"

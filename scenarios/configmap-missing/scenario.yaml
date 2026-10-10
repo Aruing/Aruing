@@ -1,0 +1,12 @@
+name: configmap-missing
+kind_cluster_name: aruing-sc-configmap-missing
+namespace: demo
+# 给人看的坏态提示；脚本不解析本文件
+notes: "Deployment envFrom 引用不存在的 ConfigMap（demo-api-config）→ Pod 卡 CreateContainerConfigError，容器从不启动"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
+ground_truth:
+  resource_type: deployment
+  resource_name: demo-api
+  namespace: demo
+  fault_type: missing-configmap
+  fault_signature: [CreateContainerConfigError, configmap]

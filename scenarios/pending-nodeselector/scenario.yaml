@@ -1,0 +1,15 @@
+name: pending-nodeselector
+kind_cluster_name: aruing-sc-pending-nodeselector
+namespace: demo
+# 给人看的坏态提示；脚本不解析本文件
+notes: "nodeSelector 指向不存在的节点标签（workload-type=batch-node）→ Pod 永久 Pending，FailedScheduling 事件含节点不匹配"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
+# 注：本场景 up 后 scenario-up 的稳态等待会满 ~120s 才返回（永久 Pending 永不落稳，属预期不失败）
+ground_truth:
+  resource_type: deployment
+  resource_name: demo-api
+  namespace: demo
+  fault_type: unschedulable-nodeselector
+  # 签名词以实现期真跑结论为准（设计预案：场景内调词不改判分器）：锚定 manifest
+  # 确定值（workload-type / batch-node）与调度器事件原句（node affinity/selector）
+  fault_signature: [Pending, workload-type, batch-node, node affinity/selector, 不可调度]
