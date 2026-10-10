@@ -100,9 +100,11 @@ run_sweep() {
 
 write_manifest() {
     local kind_v kubectl_v model_v
-    kind_v="$(kind version 2>/dev/null | head -1 | tr -d '\r')"
-    kubectl_v="$(kubectl version --client 2>/dev/null | head -1 | tr -d '\r')"
-    model_v="$(grep -E '^[[:space:]]*model:' "$CONFIG" 2>/dev/null | head -1 | sed 's/^[[:space:]]*model:[[:space:]]*//' | tr -d '"')"
+    # 环境探测命令替换一律 || true 兜底：探测失败/无匹配时记 unknown 继续，
+    # 不得反向中止批（set -euo pipefail 下 grep 无匹配即非零）
+    kind_v="$(kind version 2>/dev/null | head -1 | tr -d '\r' || true)"
+    kubectl_v="$(kubectl version --client 2>/dev/null | head -1 | tr -d '\r' || true)"
+    model_v="$(grep -E '^[[:space:]]*model:' "$CONFIG" 2>/dev/null | head -1 | sed 's/^[[:space:]]*model:[[:space:]]*//' | tr -d '"' || true)"
     python3 - "$OUT" \
         "$(git -C "$ROOT" describe --always --dirty 2>/dev/null || echo unknown)" \
         "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
