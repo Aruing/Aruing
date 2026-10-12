@@ -26,7 +26,7 @@
 ## 从零复现
 
 ```bash
-git clone https://github.com/Aruing/Aruing.git && cd aruing
+git clone https://github.com/Aruing/Aruing.git aruing && cd aruing
 make build                 # 或 go install github.com/Aruing/Aruing/cmd/aruing@latest
 aruing connect             # 或 cp aruing.example.yaml playground/config.yaml 后填 llm.*
 make bench-run DRYRUN=1    # 干跑：逐场景生命周期计划 + 两维单元命令与计数，零集群零 LLM
