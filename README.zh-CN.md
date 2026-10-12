@@ -122,7 +122,7 @@ make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting
 make lab-down NAME=crashloop-bad-image
 ```
 
-当前内置五个场景：`crashloop-bad-image`、`svc-wrong-selector`、`same-name-multi-ns`（含多轮澄清挂起 case）、`log-time-window`（证据时间窗切片）、`bigtable-fleet`（超大表全覆盖 map-reduce 分片投影；经场景级 `chat-env` 注入非默认投影方法）。`lab-chat` / `lab-kube` 自动注入 KUBECONFIG（无需手动 export）。不进 `make test` / CI；本地需 Docker + kind + kubectl。
+当前内置八个场景：`crashloop-bad-image`、`svc-wrong-selector`、`same-name-multi-ns`（含多轮澄清挂起 case）、`log-time-window`（证据时间窗切片）、`bigtable-fleet`（超大表全覆盖 map-reduce 分片投影；经场景级 `chat-env` 注入非默认投影方法）、`configmap-missing`（启动配置缺失）、`oom-killed`（内存超限）、`pending-nodeselector`（调度约束不满足）。每场景随附 `probe.yaml`（脚本化长会话素材，基准 probe 维消费）。`lab-chat` / `lab-kube` 自动注入 KUBECONFIG（无需手动 export）。不进 `make test` / CI；本地需 Docker + kind + kubectl。
 
 ### 配置与本地 LLM
 
@@ -147,6 +147,7 @@ make lab-down NAME=crashloop-bad-image
 | [`docs/project-state.md`](docs/project-state.md) | 阶段、工作单元、下一步 |
 | [`docs/README.md`](docs/README.md) | docs/ 与私人笔记目录的分工 |
 | [`scenarios/README.md`](scenarios/README.md) | kind 故障场景：用法、cases 协议、验收 |
+| [`docs/benchmark.md`](docs/benchmark.md) | 评测基准：复现手册（依赖、步骤、参数、产物与开源清洗） |
 | [`aruing.example.yaml`](aruing.example.yaml) / [`tui.example.yaml`](tui.example.yaml) | 带注释的配置 / 主题参考 |
 | [`docs/skills/`](docs/skills) | 项目级 skill（文档/测试/注释规范、PR 描述、里程碑收尾、全量自检、真集群测试纪律、回顾审计） |
 | [`AGENTS.md`](AGENTS.md) | AI 工具约定 / skill 安装 |

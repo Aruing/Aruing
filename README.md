@@ -122,7 +122,7 @@ make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting
 make lab-down NAME=crashloop-bad-image
 ```
 
-Five scenarios ship today: `crashloop-bad-image`, `svc-wrong-selector`, `same-name-multi-ns` (incl. a multi-turn clarify-suspend case), `log-time-window` (evidence time-window slicing), `bigtable-fleet` (oversized-table full-coverage map-reduce projection; a scenario-level `chat-env` file injects the non-default projection method). `lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
+Eight scenarios ship today: `crashloop-bad-image`, `svc-wrong-selector`, `same-name-multi-ns` (incl. a multi-turn clarify-suspend case), `log-time-window` (evidence time-window slicing), `bigtable-fleet` (oversized-table full-coverage map-reduce projection; a scenario-level `chat-env` file injects the non-default projection method), `configmap-missing` (CreateContainerConfigError), `oom-killed`, `pending-nodeselector`. Every scenario ships a `probe.yaml` (scripted long-session material consumed by the benchmark probe dimension). `lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
 
 ### Configuration & local LLM
 
@@ -147,6 +147,7 @@ Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15�
 | [`docs/project-state.md`](docs/project-state.md) | Stage, work units, next step |
 | [`docs/README.md`](docs/README.md) | What lives in docs/ vs the private notebook |
 | [`scenarios/README.md`](scenarios/README.md) | Kind fault scenarios: usage, cases protocol, verification |
+| [`docs/benchmark.md`](docs/benchmark.md) | Benchmark: reproduce the evaluation baseline (deps, steps, params, artifacts) |
 | [`aruing.example.yaml`](aruing.example.yaml) / [`tui.example.yaml`](tui.example.yaml) | Annotated config / theme references |
 | [`docs/skills/`](docs/skills) | Project skills (docs, tests, comments, PR description, milestone close, self-check, cluster smoke, retrospective) |
 | [`AGENTS.md`](AGENTS.md) | AI tooling / skill install |
