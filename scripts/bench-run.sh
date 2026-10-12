@@ -42,6 +42,9 @@
 #   failures.txt             场景级失败清单（up/down/sweep/rubric/记录缺失/scrub，全量记录不静默）
 #   scenario-env.txt         场景级 chat-env 注入留痕（<scn>\tK=V，有注入才建）
 #   bench-run.stdout.log     生命周期输出（fresh-up/up/down；调试产物不进开源集）
+#
+# 漂移防线：参数或默认值变更的 PR 必须同改 docs/benchmark.md（复现手册的参数表
+# 以本脚本头注释为权威）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
