@@ -147,6 +147,7 @@ Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15�
 | [`docs/project-state.md`](docs/project-state.md) | Stage, work units, next step |
 | [`docs/README.md`](docs/README.md) | What lives in docs/ vs the private notebook |
 | [`scenarios/README.md`](scenarios/README.md) | Kind fault scenarios: usage, cases protocol, verification |
+| [`docs/benchmark.md`](docs/benchmark.md) | Benchmark: reproduce the evaluation baseline (deps, steps, params, artifacts) |
 | [`aruing.example.yaml`](aruing.example.yaml) / [`tui.example.yaml`](tui.example.yaml) | Annotated config / theme references |
 | [`docs/skills/`](docs/skills) | Project skills (docs, tests, comments, PR description, milestone close, self-check, cluster smoke, retrospective) |
 | [`AGENTS.md`](AGENTS.md) | AI tooling / skill install |
