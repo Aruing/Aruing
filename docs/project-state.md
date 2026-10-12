@@ -30,7 +30,7 @@
 
 | # | 模块 | 状态 | 备注 |
 | - | --- | --- | --- |
-| 1 | `scenarios/` + `internal/eval` + `cmd` bench/judge/probe 接线 | ✅ | 步骤 1–4 已落（#173/#174/#175 + 复现文档 PR）：bench-run 统一入口 + rubric 并入 + 开源清洗自检门 + 8 场景全 probe.yaml + chat-env 注入 + `docs/benchmark.md` 复现手册；授权小矩阵（3 场景 × ours × K3 × 20 轮）端到端验收通过；不进 CI 必绿 |
+| 1 | `scenarios/` + `internal/eval` + `cmd` bench/judge/probe 接线 | ✅ | 步骤 1–4 已落（#173/#174/#175/#176）：bench-run 统一入口 + rubric 并入 + 开源清洗自检门 + 8 场景全 probe.yaml + chat-env 注入 + `docs/benchmark.md` 复现手册；授权小矩阵（3 场景 × ours × K3 × 20 轮）端到端验收通过；不进 CI 必绿 |
 | 2 | npm 包源 + `.github/workflows/release.yml` publish 门禁 | 未开始 | 平台子包（主包 + optionalDeps）复用 release 资产与 checksums；预期零 `internal/` 改动 |
 | 3 | `internal/tui` + `cmd` chat 交互接线 | 未开始 | `/` 命令解析与执行、双模式一致、与流式共存语义（步骤设计钉） |
 
