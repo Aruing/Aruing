@@ -107,6 +107,7 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 | `configmap-missing` | Deployment envFrom 引用不存在的 ConfigMap | 配置依赖：`CreateContainerConfigError` |
 | `oom-killed` | 容器内存 limit 16Mi + 无限占内存 | 资源上限：`OOMKilled` 循环 |
 | `pending-nodeselector` | nodeSelector 指向不存在的节点标签 | 调度约束：永久 Pending（up 稳态等待满 ~120s 属预期） |
+| `shared-config-drift` | 共享 ConfigMap `DB_HOST` 漂移指向 payments ns 的坏库（orders-api 本该连 demo ns 的 `orders-db`） | 高难·双诱饵：canary 坏镜像 + payments-db OOMKilled 均须证据排除；症状对象 ≠ 根因对象（envFrom → ConfigMap 回溯） |
 
 ## 约束
 

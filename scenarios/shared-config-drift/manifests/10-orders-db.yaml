@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-db
+  namespace: demo
+  labels:
+    app: orders-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-db
+  template:
+    metadata:
+      labels:
+        app: orders-db
+    spec:
+      containers:
+        - name: orders-db
+          # 健康对照对象：orders-api 本该连的库（同 ns 常驻、Running）。
+          # busybox sleep 不监听端口——证据面（get/describe）只见其健康；
+          # 本场景考根因识别（DB_HOST 指错），不考连通性（冻结决策 8）
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "3600"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-db
+  namespace: demo
+  labels:
+    app: orders-db
+spec:
+  selector:
+    app: orders-db
+  ports:
+    - port: 5432
+      targetPort: 5432
