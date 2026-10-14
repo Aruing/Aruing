@@ -111,6 +111,7 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 | `pending-nodeselector` | nodeSelector 指向不存在的节点标签 | 调度约束：永久 Pending（up 稳态等待满 ~120s 属预期） |
 | `shared-config-drift` | 共享 ConfigMap `DB_HOST` 漂移指向 payments ns 的坏库（orders-api 本该连 demo ns 的 `orders-db`） | 高难·双诱饵：canary 坏镜像 + payments-db OOMKilled 均须证据排除；症状对象 ≠ 根因对象（envFrom → ConfigMap 回溯） |
 | `rollout-stuck` | v2 模板就绪探针自检端口抄错（8081≠8080）→ 滚动发布卡死（3×v1 Ready + 1×v2 永不 ready） | 高难·诱饵：HPA 因无 metrics-server 报错（无辜但顺口）；两代 RS 状态理解 + 排除顺口凶手 |
+| `quota-vs-scheduler` | ResourceQuota 满（ledger-api 占用 requests.cpu 1/1），新 Deployment 单 pod 请求超全额度 → 准入被拒、无 Pod 对象 | 高难·诱饵：同对象 nodeSelector 指向真实存在的标签；admission 拒 vs 调度 Pending 的证据形态判别 |
 
 ## 约束
 

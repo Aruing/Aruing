@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-api
+  namespace: billing
+  labels:
+    app: ledger-api
+spec:
+  replicas: 1
+  progressDeadlineSeconds: 120
+  selector:
+    matchLabels:
+      app: ledger-api
+  template:
+    metadata:
+      labels:
+        app: ledger-api
+    spec:
+      # 与 payment-svc 相同的 nodeSelector——诱饵排除证据：同条件健康对象，
+      # 证明该选择器不阻塞调度（kubernetes.io/os=linux 为节点标准标签）
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: ledger-api
+          # 既有健康工作负载：requests 恰占满配额（1/1）——「满」状态的来源；
+          # 单副本无竞争者，quota 先行 apply 后必被 admit（1 ≤ 1）
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "3600"]
+          resources:
+            requests:
+              cpu: "1"
