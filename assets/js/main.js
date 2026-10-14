@@ -148,6 +148,8 @@
     onEvidence: function (i, data, pos) {
       if (!overlay) return;
       var ev = data.evidence[i];
+      var narrow = window.innerWidth < 640;
+      var cw = narrow ? 230 : 330;
       var el = document.createElement('div');
       el.className = 'chip';
       var code = document.createElement('code');
@@ -157,8 +159,7 @@
       sub.textContent = ev[1] + ' · captured';
       el.appendChild(code); el.appendChild(sub);
       var side = pos.x < window.innerWidth * 0.55 ? 1 : -1;
-      var cw = 330;
-      var x = side > 0 ? pos.x + 52 : pos.x - 52 - cw;
+      var x = side > 0 ? pos.x + (narrow ? 34 : 52) : pos.x - (narrow ? 34 : 52) - cw;
       var y = pos.y - 16 - i * 58;
       el.style.left = clampX(x, cw) + 'px';
       el.style.top = clampY(y, 58) + 'px';
@@ -178,6 +179,8 @@
     },
     onReport: function (data, pos) {
       if (!overlay) return;
+      var narrow = window.innerWidth < 640;
+      var cw = narrow ? 250 : 300;
       var el = document.createElement('div');
       el.className = 'rcard';
       var head = document.createElement('div');
@@ -195,9 +198,9 @@
       fix.appendChild(b);
       fix.appendChild(document.createTextNode(data.report.fix));
       el.appendChild(head); el.appendChild(root); el.appendChild(ver); el.appendChild(fix);
-      var cw = 300, ch = 150;
+      var ch = narrow ? 170 : 150;
       var side = pos.x < window.innerWidth * 0.55 ? 1 : -1;
-      var x = side > 0 ? pos.x + 46 : pos.x - 46 - cw;
+      var x = side > 0 ? pos.x + (narrow ? 34 : 46) : pos.x - (narrow ? 34 : 46) - cw;
       var y = pos.y - 30;
       el.style.left = clampX(x, cw) + 'px';
       el.style.top = clampY(y, ch) + 'px';

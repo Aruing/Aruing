@@ -147,6 +147,12 @@ a { color: inherit; text-decoration: none; }
 #nodeTip .t-bad { color: var(--red); }
 #nodeTip .t-warn { color: var(--amber); }
 
+@media (max-width: 640px) {
+  .chip { max-width: 230px; font-size: 10.5px; }
+  .rcard { width: 250px; }
+  #ticker { font-size: 11px; right: 10px; bottom: 10px; }
+}
+
 /* report card */
 .rcard {
   position: fixed; z-index: 64;

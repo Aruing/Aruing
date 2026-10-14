@@ -589,13 +589,15 @@
       usedGroups[cells[this.incidents[u].cellIdx].group] = 1; // one per service puff
     }
     var cand = [];
+    var mx = Math.min(250, this.w * 0.28);       // responsive side margins —
+    var myB = Math.min(190, this.h * 0.22);      // hard 250px is empty on phones
     for (var i = 0; i < cells.length; i++) {
       var c = cells[i];
       if (used[i]) continue;
       if (usedGroups[c.group]) continue;      // concurrent anomalies hit different services
       if (c.sx == null || c.sd < 0.6) continue; // skip far, unreadable cells
-      if (c.sx < 250 || c.sx > this.w - 250) continue;
-      if (c.sy < 70 || c.sy > this.h - 190) continue;
+      if (c.sx < mx || c.sx > this.w - mx) continue;
+      if (c.sy < 70 || c.sy > this.h - myB) continue;
       cand.push(i);
     }
     if (!cand.length) return -1;
