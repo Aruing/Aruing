@@ -95,6 +95,8 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 
 **通过** = `expect.md` 中「应」基本满足且无严重「不应」。LLM 措辞不要求逐字匹配。
 
+**高难场景例外**（场景表故障列标「高难」者）：此类场景的设计目标是考出诊断区分度，agent 主结论停在诱饵属有效数据、不阻塞 smoke——三段（up / chat / down）绿即过；深度判定以 `lab-chat` 手动验收对照 expect 与 bench 判分为准。
+
 ## 已知场景
 
 | 场景 | 故障 | 测什么 |
