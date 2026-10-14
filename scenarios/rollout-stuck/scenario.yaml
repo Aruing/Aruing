@@ -1,0 +1,19 @@
+name: rollout-stuck
+kind_cluster_name: aruing-sc-rollout-stuck
+namespace: shop
+# 给人看的坏态提示；脚本不解析本文件
+# 诱饵清单：shop ns HPA web-api 因集群无 metrics-server 报 FailedGetResourceMetric /
+# 拿不到 CPU 指标（无辜但顺口：报错真实显眼，但 rollout 卡在「新代不 ready」而非
+# 「扩不动」，且 HPA 无指标时零动作、不扰动副本数）。
+# signature 唯一性：8081/8080/readiness/probe/就绪探针/探针/健康检查/自检 只属于根因
+# （v2 就绪探针端口错配）；诱饵词（HPA / metrics-server / metrics / 扩容）不进 signature；
+# resource_name 取 v2 容器名 web-api-v2（诱饵答案必点名 Deployment 名、不涉容器名，
+# manifest 实名兼判分锚）——停在诱饵的结论必 miss（判分锚设计见步骤 plan 决策 4）
+notes: "症状：web-api 新版本滚动发布卡死（3×v1 Ready + 1×v2 Running 0/1 永卡）。根因：v2 模板就绪探针自检端口抄错（httpGet /healthz 8081，容器实际监听 8080 → connection refused）。诱饵：HPA 报 no metrics-server，与发布卡死无关，须证据排除。"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；resource_name 与 manifests 实名一致
+ground_truth:
+  resource_type: deployment-container
+  resource_name: web-api-v2
+  namespace: shop
+  fault_type: rollout-readiness-port-mismatch
+  fault_signature: [8081, 8080, readiness, probe, 就绪探针, 探针, 健康检查, 自检]
