@@ -1,0 +1,32 @@
+# 探针实验规格（0.1.5 hard-scenarios）：rollout-stuck 场景的长会话脚本素材
+# 由 aruing probe 消费（scenario.yaml 同目录）；run/judge 主路径不读本文件
+# 口径同 crashloop-bad-image/probe.yaml（头部注释见彼处）
+name: rollout-stuck
+diagnose_request: "请正式诊断 shop namespace 下的 web-api：新版本发布半小时一直卡住没有进展，排查根因并给出报告。"
+qa_pool:
+  - "shop namespace 里现在跑着哪些工作负载？"
+  - "web-api 现在的发布进度到哪一步了？"
+  - "web-api 的 HPA 现在是什么状态？"
+  - "web-api 一共有几个 ReplicaSet，分别什么状态？"
+  - "shop namespace 最近有哪些异常事件？"
+probes:
+  # 证据回灌类：考第 3 次诊断查出的未就绪（0/1）pod 名（带随机后缀，账本展开）
+  - id: pod-of-run3
+    class: evidence
+    question: "第 3 次诊断查出的没有就绪的 pod 叫什么名字？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 3 }
+  # 证据链细节类：考最后一次诊断实际执行过的命令
+  - id: cmd-of-last
+    class: chain
+    question: "最后一次诊断时你跑了什么命令拿到关键证据？"
+    expect:
+      - from_ledger: { rule: kth_run_commands, k: -1 }
+  # 跨压缩综合类：对比首末诊断结论，须同时命中两次诊断的 pod 名与资源名
+  - id: first-vs-last
+    class: synthesis
+    question: "对比第一次和最后一次 web-api 发布卡死的诊断结论，一致吗？"
+    expect:
+      - from_ledger: { rule: kth_run_pods, k: 1 }
+      - from_ledger: { rule: kth_run_pods, k: -1 }
+      - literal: "web-api"

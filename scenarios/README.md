@@ -110,6 +110,7 @@ make lab-chat NAME=crashloop-bad-image     # 不带 MSG → 交互多轮
 | `oom-killed` | 容器内存 limit 16Mi + 无限占内存 | 资源上限：`OOMKilled` 循环 |
 | `pending-nodeselector` | nodeSelector 指向不存在的节点标签 | 调度约束：永久 Pending（up 稳态等待满 ~120s 属预期） |
 | `shared-config-drift` | 共享 ConfigMap `DB_HOST` 漂移指向 payments ns 的坏库（orders-api 本该连 demo ns 的 `orders-db`） | 高难·双诱饵：canary 坏镜像 + payments-db OOMKilled 均须证据排除；症状对象 ≠ 根因对象（envFrom → ConfigMap 回溯） |
+| `rollout-stuck` | v2 模板就绪探针自检端口抄错（8081≠8080）→ 滚动发布卡死（3×v1 Ready + 1×v2 永不 ready） | 高难·诱饵：HPA 因无 metrics-server 报错（无辜但顺口）；两代 RS 状态理解 + 排除顺口凶手 |
 
 ## 约束
 
