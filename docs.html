@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Docs — Aruing</title>
+<meta name="description" content="How Aruing works: innate and adaptive response layers, a real chat session, and one-line install.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12.5' fill='none' stroke='%233fd9c6' stroke-width='1.6'/%3E%3Ccircle cx='13' cy='14' r='4.5' fill='%233fd9c6'/%3E%3Ccircle cx='21' cy='20' r='2' fill='%23ffd98a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/css/style.css?v=split13">
+</head>
+<body data-page="docs">
+
+<header class="dnav">
+  <a class="brand" href="index.html" aria-label="Back to Aruing home">
+    <svg width="24" height="24" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="12.5" fill="none" stroke="#3fd9c6" stroke-width="1.5" opacity=".9"/>
+      <circle cx="13" cy="14" r="4.5" fill="#3fd9c6"/>
+      <circle cx="21" cy="20" r="1.9" fill="#ffd98a"/>
+    </svg>
+    <span>aruing · docs</span>
+  </a>
+  <nav class="links">
+    <a href="#immunity">how it works</a>
+    <a href="#demo">demo</a>
+    <a href="#install">install</a>
+  </nav>
+  <a class="gh" href="https://github.com/Aruing/aruing" target="_blank" rel="noopener">GitHub ↗</a>
+</header>
+
+<main class="docs-main">
+
+  <section class="wrap docs-intro">
+    <p class="eyebrow">aruing · v0.1.4</p>
+    <h2>Evidence, not vibes.</h2>
+    <p class="lead">A Kubernetes ops agent that answers with tools and evidence. Ask in natural
+      language; get root causes with a traceable evidence chain.
+      The <a class="inline-link" href="index.html">immersive cluster stage →</a> runs on the home page.</p>
+  </section>
+
+  <!-- ══════════════════ HOW IT WORKS ══════════════════ -->
+  <section id="immunity" class="wrap reveal">
+    <p class="eyebrow">how it works</p>
+    <h2>Innate and adaptive —<br>an immune system for ops.</h2>
+    <p class="lead">Two layers of response, exactly like biology: a fast always-on patrol for routine
+      questions, and a forced evidence-adjudication chain when you need the root cause.</p>
+
+    <div class="cards">
+      <article class="card">
+        <div class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/>
+            <path d="M12 12 L18 6"/><circle cx="16.5" cy="16.5" r="1" fill="currentColor" stroke="none"/>
+          </svg>
+        </div>
+        <h3>Always-on patrol</h3>
+        <p>Observe → think → <b>call tools</b> → answer. Routine questions — “what’s installed?”,
+          “how is this configured?” — get answers grounded in live cluster data, never stale docs.</p>
+        <p class="bio">≈ innate immunity</p>
+      </article>
+
+      <article class="card">
+        <div class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3l7 3v5c0 4.4-3 8.4-7 10-4-1.6-7-5.6-7-10V6z"/><path d="M9 12l2 2 4-4.5"/>
+          </svg>
+        </div>
+        <h3>Forced adjudication</h3>
+        <p>Ask for a root cause and aruing escalates into a formal chain: hypothesis → tasks →
+          <b>Evidence</b> → <b>Verdict</b> → Report. No “I think it’s X” without a tool trail.</p>
+        <p class="bio">≈ adaptive immunity</p>
+      </article>
+
+      <article class="card">
+        <div class="ic">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6"/>
+            <path d="M5 12v6c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6v-6"/>
+          </svg>
+        </div>
+        <h3>Memory that survives</h3>
+        <p>Sessions, messages and diagnostic ledgers persist to disk. Come back tomorrow and ask
+          “why was redis slow last night?” — the evidence is still there, still citable.</p>
+        <p class="bio">≈ immune memory</p>
+      </article>
+    </div>
+
+    <p class="immune-note">The metaphor is load-bearing, not decoration: containers are cells, faults are
+      pathogens and mutations, reports are antibodies, and the run ledger is immune memory.</p>
+  </section>
+
+  <!-- ══════════════════ DEMO ══════════════════ -->
+  <section id="demo" class="wrap reveal">
+    <p class="eyebrow">demo</p>
+    <h2>Ask anything.<br>Get receipts.</h2>
+    <p class="lead">A real session shape: a baseline patrol escalates into a formal diagnosis, files the
+      report to the ledger, and answers follow-ups by re-reading its own evidence.</p>
+
+    <div class="theater">
+      <div class="t-bar">
+        <i></i><i></i><i></i><span>aruing chat — demo</span>
+        <button id="replay" type="button" title="replay">↻ replay</button>
+      </div>
+      <div id="chatBody" class="t-body"></div>
+    </div>
+
+    <div class="gallery">
+      <figure class="shot">
+        <div class="frame">
+          <div class="scan"></div>
+          <div class="skel"><b style="width:34%"></b><b style="width:88%"></b><b style="width:71%"></b><b style="width:55%"></b></div>
+          <span class="rec">REC</span>
+          <span class="tag">crashloop-bad-image</span>
+        </div>
+        <figcaption><b>One-shot root cause</b> — <span class="mono">aruing run</span> on a CrashLoopBackOff;
+          verdict + cited evidence in a single turn.</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="frame">
+          <div class="scan"></div>
+          <div class="skel"><b style="width:52%"></b><b style="width:76%"></b><b style="width:40%"></b></div>
+          <span class="rec">REC</span>
+          <span class="tag">same-name-multi-ns</span>
+        </div>
+        <figcaption><b>Clarify, suspend, resume</b> — an ambiguous ask; aruing asks one question,
+          suspends the run, resumes with your answer in the same evidence chain.</figcaption>
+      </figure>
+      <figure class="shot">
+        <div class="frame">
+          <div class="scan"></div>
+          <div class="skel"><b style="width:90%"></b><b style="width:83%"></b><b style="width:86%"></b><b style="width:64%"></b><b style="width:78%"></b></div>
+          <span class="rec">REC</span>
+          <span class="tag">bigtable-fleet</span>
+        </div>
+        <figcaption><b>Big tables, full coverage</b> — a 600-pod fleet where the root cause hides
+          mid-table; map-reduce projection keeps it visible, raw evidence pages on demand.</figcaption>
+      </figure>
+    </div>
+    <p class="gallery-note">Motion capture in progress — recordings will drop into these frames.</p>
+  </section>
+
+  <!-- ══════════════════ INSTALL ══════════════════ -->
+  <section id="install" class="wrap reveal">
+    <p class="eyebrow">install</p>
+    <h2>One line to a<br>guarded cluster.</h2>
+
+    <div class="install-box">
+      <div class="cmd-row">
+        <code id="installCmd">curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.sh | bash</code>
+        <button id="copy" type="button">copy</button>
+      </div>
+      <p class="hint">Then run <span class="mono">aruing connect</span> to point it at any
+        OpenAI-compatible LLM. Upgrades: <span class="mono">aruing update</span>.</p>
+      <div class="reqs">
+        <span class="req">macOS / Linux</span>
+        <span class="req">kubectl</span>
+        <span class="req">any OpenAI-compatible LLM</span>
+        <span class="req">Go 1.26+ (from source)</span>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="f-left">
+    <svg width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="12.5" fill="none" stroke="#3fd9c6" stroke-width="1.5" opacity=".9"/>
+      <circle cx="13" cy="14" r="4.5" fill="#3fd9c6"/><circle cx="21" cy="20" r="1.9" fill="#ffd98a"/>
+    </svg>
+    <span>Aruing — evidence, not vibes.</span>
+  </div>
+  <div class="f-right">
+    <a href="index.html">Home</a>
+    <a href="https://github.com/Aruing/aruing" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/Aruing/aruing/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture</a>
+    <a href="https://github.com/Aruing/aruing/releases" target="_blank" rel="noopener">Releases</a>
+    <span class="dim">© 2026 · MIT</span>
+  </div>
+</footer>
+
+<script src="assets/js/main.js?v=split13"></script>
+</body>
+</html>
