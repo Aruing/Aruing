@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-exporter
+  namespace: demo
+  labels:
+    app: payments-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-exporter
+  template:
+    metadata:
+      labels:
+        app: payments-exporter
+    spec:
+      containers:
+        - name: payments-exporter
+          # 健康对照：同一 ConfigMap 的另一消费者，只消费 LOG_LEVEL、不读 DB_HOST
+          # → exporter 健康 = ConfigMap 非整体损坏，坏的是 DB_HOST 键的值
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              echo "exporter up, LOG_LEVEL=$LOG_LEVEL"
+              sleep 3600
+          envFrom:
+            - configMapRef:
+                name: app-config
