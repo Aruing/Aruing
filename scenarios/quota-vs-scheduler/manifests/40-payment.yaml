@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-svc
+  namespace: billing
+  labels:
+    app: payment-svc
+spec:
+  replicas: 2
+  progressDeadlineSeconds: 120
+  selector:
+    matchLabels:
+      app: payment-svc
+  template:
+    metadata:
+      labels:
+        app: payment-svc
+    spec:
+      # 诱饵：标签实际存在于节点（kubernetes.io/os=linux 为标准标签），若 Pod
+      # 真被创建并不会卡调度——顺口归因「选不到节点」须被证据排除（对照
+      # ledger-api 同选择器健康 + 无 Pod 对象未到调度阶段）
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: payment-svc
+          # 症状载体：单 pod 请求即超全额度（2 > 1）→ admission 必拒且与两
+          # Deployment 相对 apply 顺序无关（被拒不占额度，ledger 必被 admit）；
+          # RS 控制器 FailedCreate 循环，事件含 exceeded quota 原文
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "3600"]
+          resources:
+            requests:
+              cpu: "2"

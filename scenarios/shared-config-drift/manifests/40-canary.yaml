@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api-canary
+  namespace: demo
+  labels:
+    app: orders-api-canary
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-api-canary
+  template:
+    metadata:
+      labels:
+        # 不在 orders-api Service selector（app=orders-api）内，不接任何流量
+        app: orders-api-canary
+    spec:
+      containers:
+        - name: orders-api-canary
+          # 诱饵①：现场最显眼的故障（镜像拉取失败），但与 orders-api 崩溃无关——
+          # orders-api 容器已启动并打日志（CrashLoop），canary 从未启动过（ImagePullBackOff）
+          image: busybox:no-such-tag-2026
+          imagePullPolicy: Always
+          command: ["sleep", "3600"]

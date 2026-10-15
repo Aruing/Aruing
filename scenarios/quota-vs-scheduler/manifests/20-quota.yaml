@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: compute-resources
+  namespace: billing
+spec:
+  # 根因锚：硬额 1 CPU，被 ledger-api 恰好占满（used 1/1）；admission 对之后
+  # 创建的 Pod 做纯算术判定（used + request > hard 即拒，被拒不占额度）。
+  # 只列 requests.cpu：Pod 须显式设 requests.cpu，其余资源不受约束
+  hard:
+    requests.cpu: "1"

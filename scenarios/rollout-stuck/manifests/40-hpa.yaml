@@ -1,0 +1,23 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web-api
+  namespace: shop
+spec:
+  # 诱饵：HPA 因集群无 metrics-server 拿不到 CPU 指标，必报
+  # FailedGetResourceMetric / no metrics-server 类事件——报错真实显眼（顺口凶手），
+  # 但与发布卡死无关：rollout 卡在「新代不 ready」而非「扩不动」；且 HPA 无指标时
+  # 零动作、不扰动副本数（确定性保持）
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: web-api
+  minReplicas: 3
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70

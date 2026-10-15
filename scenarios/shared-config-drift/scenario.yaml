@@ -1,0 +1,17 @@
+name: shared-config-drift
+kind_cluster_name: aruing-sc-shared-config-drift
+namespace: demo
+# 给人看的坏态提示；脚本不解析本文件
+# 诱饵清单：① demo ns orders-api-canary 坏镜像 ImagePullBackOff（最显眼，但从未启动、
+# label 不在 orders-api Service selector，与 orders-api 崩溃无关）；
+# ② payments ns payments-db OOMKilled 循环（真故障，但修它不修配置——orders-api 仍连错误的库）。
+# signature 唯一性：DB_HOST / app-config 只属于根因对象；诱饵词（OOMKilled / 镜像类）不进
+# signature，停在诱饵的结论必 miss（冻结决策 7：半对答含 signature 词判 hit 属机械判分接受口径）
+notes: "症状：demo ns orders-api CrashLoop（日志 fatal: cannot reach database）。根因：共享 ConfigMap app-config 的 DB_HOST 漂移指向 payments ns 的 payments-db（本该连 demo ns 的 orders-db）。双诱饵须证据排除：canary 坏镜像（诱饵①）+ payments-db OOM（诱饵②）。"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
+ground_truth:
+  resource_type: configmap
+  resource_name: app-config
+  namespace: demo
+  fault_type: config-drift-wrong-db-host
+  fault_signature: [DB_HOST, app-config]

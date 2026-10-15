@@ -1,16 +1,17 @@
 # 项目当前状态
 
-> 最后更新：2026-10-12（benchmark 步骤 4：复现文档 + 授权小矩阵验收）
+> 最后更新：2026-10-12（二）（0.1.5 增补第四功能 hard-scenarios 立项；benchmark 步骤 4 验收同日先落）
 
 ## 当前阶段
 
-**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 进行中**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`；定位与排序依据在笔记仓）。对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）。版本节奏：小版本递增，每个 0.1.x = 一个可用的正式实现，完成即打 tag 发布；0.2.0 = 收口版本（含全部增量）。三创新点（代表性投影 / 主动取证决策 / 分层记忆）已随 0.1.1–0.1.3 交付；产品完备地基（持久化 / 流式 / map-reduce 全覆盖）已随 **0.1.4 交付并关闭（2026-10-09）**。**当前活跃小版本：`0.1.5` 对外完备批**（2026-10-09 立项，定位与排序依据在笔记仓）：让 aruing 可被评测、可被安装、可日常用；三功能改动面互不重叠，不碰诊断 core / 编排 / 记忆 / 投影。
+**`0.2.0` / 完备不脆弱的证据型诊断助手：🚧 进行中**（远景 2026-08-21 定稿，笔记 `plan/version/0.2.0.md`；定位与排序依据在笔记仓）。对标 codex / opencode 的工程完备度（不中断、不断崖、不截断）。版本节奏：小版本递增，每个 0.1.x = 一个可用的正式实现，完成即打 tag 发布；0.2.0 = 收口版本（含全部增量）。三创新点（代表性投影 / 主动取证决策 / 分层记忆）已随 0.1.1–0.1.3 交付；产品完备地基（持久化 / 流式 / map-reduce 全覆盖）已随 **0.1.4 交付并关闭（2026-10-09）**。**当前活跃小版本：`0.1.5` 对外完备批**（2026-10-09 立项，定位与排序依据在笔记仓）：让 aruing 可被评测、可被安装、可日常用；三功能改动面互不重叠，不碰诊断 core / 编排 / 记忆 / 投影。**2026-10-12 增补第四功能 hard-scenarios（高难场景批，benchmark 场景维度补充，owner 维护者）**：4 个高难诊断场景，零 Go 代码，改动面只在 `scenarios/`。
 
 | 功能 | 状态 | 摘要 |
 | --- | --- | --- |
 | benchmark 升格 | ✅ 四步全合 | 统一跑批入口 `make bench-run`（逐场景 fresh-up → 单轮诊断维 + 长会话维 → 汇总报告）；③层 rubric 抽样并入 + 产物开源清洗（写时归一 + scrub 自检门）；场景 5→8 且 probe.yaml 全覆盖，chat-env 经 bench-run 注入两维单元；复现手册 `docs/benchmark.md`，授权小矩阵端到端验收通过（3 场景两维全绿、scrub 零命中、失败清单空）；smoke-all 全场景验证随版本级集成验证 |
 | npm 发包 | 未开始 | `npm i -g aruing` 三平台（darwin arm64/amd64 + linux amd64）干净环境装上即用；平台子包挂 release 管线，与 `aruing update` 拒绝自替换语义闭环 |
 | `/` 运行时命令 | 未开始 | chat（inline + app）内 `/` 前缀命令（帮助 / 会话 / 退出类，步骤设计钉最小集）；纯 TUI 层（#20），双模式一致 |
+| hard-scenarios 高难场景批 | 🚧 进行中 | 4 个高难场景入 `scenarios/`（配置漂移双诱饵 / 发布卡死 HPA 诱饵 / 配额 vs 调度判别 / 网络策略标签错配）：症状与根因拉开因果距离、诱饵须证据排除；零 Go 代码，自动进 smoke 与基准矩阵；步骤 1（场景 A shared-config-drift）五件套已落并过验收：lab-chat 对照 expect 命中、smoke 单场景绿、bench 小矩阵判分跑通（ours 1/5 命中，4 份 miss 均为停诱饵错答——区分度实证）；步骤 2（场景 B rollout-stuck：v2 就绪探针端口 8081≠8080 + HPA 无 metrics-server 诱饵，判分锚 = v2 容器名）五件套已合并 #179，验收全过（ours×K3×5 判分 5/5 命中）；步骤 3（场景 C quota-vs-scheduler：配额满 + 准入拒无 Pod 对象 + nodeSelector 真标签诱饵，判分锚 = quota 实名）五件套已合并 #180，验收全过；步骤 4（场景 D netpol-misfire：跨 ns 策略标签错配 + deny-all 作用域诱饵，数据面模拟重放，类型词不进 signature）五件套已落，四场景齐 |
 
 版本级完成标志一句话：基准一条命令可复现跑批（产物无私人路径）+ npm 干净环境即用（校验 / 防降级对齐 release）+ `/` 命令双模式一致且未知命令不误发为消息 + `make check` 与 `make smoke-all` 全绿 + `v0.1.5` tag（含 npm 包）。
 
@@ -33,14 +34,15 @@
 | 1 | `scenarios/` + `internal/eval` + `cmd` bench/judge/probe 接线 | ✅ | 步骤 1–4 已落（#173/#174/#175/#176）：bench-run 统一入口 + rubric 并入 + 开源清洗自检门 + 8 场景全 probe.yaml + chat-env 注入 + `docs/benchmark.md` 复现手册；授权小矩阵（3 场景 × ours × K3 × 20 轮）端到端验收通过；不进 CI 必绿 |
 | 2 | npm 包源 + `.github/workflows/release.yml` publish 门禁 | 未开始 | 平台子包（主包 + optionalDeps）复用 release 资产与 checksums；预期零 `internal/` 改动 |
 | 3 | `internal/tui` + `cmd` chat 交互接线 | 未开始 | `/` 命令解析与执行、双模式一致、与流式共存语义（步骤设计钉） |
+| 4 | `scenarios/` 4 个高难场景目录 + `scenarios/README.md` 表行 | ⏳ | 步骤 1–4（场景 A–D）五件套 + README 表行已落（A/B/C 过验收：A bench 区分度实证、B ours 5/5 命中、C 4/4 完成运行全命中；D 验收随 PR；plan 在笔记仓 `plan/0.1.5/hard-scenarios/`）；四场景齐，待功能收尾（全场景 smoke 回归）；零 `internal/` 改动 |
 
 产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
 ## 下一步
 
-**下一项**：npm 发包与 `/` 运行时命令待认领并行推进（认领时更新功能头 owner）；已认领功能按步骤设计 → 评审 → 实现流程走。
+**下一项**：hard-scenarios 收尾验收（全 12 场景 smoke 回归 + 既有 8 场景语义不变确认 → 维护者功能关闭裁决）；npm 发包与 `/` 运行时命令待认领并行推进（认领时更新功能头 owner）；已认领功能按步骤设计 → 评审 → 实现流程走。
 
-**版本收口清单**（三功能全绿后）：`make check` + `make smoke-all`（8 场景）集成验证 → README 双语 Current stage / Install 收尾同改 → `v0.1.5` tag（含 npm 包）。
+**版本收口清单**（四功能全绿后）：`make check` + `make smoke-all`（既有 8 + 高难 4 场景）集成验证 → README 双语 Current stage / Install 收尾同改 → `v0.1.5` tag（含 npm 包）。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）：
 
