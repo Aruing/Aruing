@@ -1,3 +1,8 @@
+# 与 20-webapi-v1.yaml 同名更新（两代 ReplicaSet 生成法）：kubectl apply -f 目录
+# 按文件名字典序逐文件串行 apply（非单请求批改），deployment 控制器在两文件
+# 间隔内即对 v1 建档 revision 1 RS——lab-up / smoke-all / bench-run 多次独立
+# fresh-up 实测均稳定产出两代稳态（3×v1 Ready + 1×v2 0/1）；理论竞态（控制器
+# 极端迟滞时仅单代）为已知残差，翻车预案为场景内强化 v1 先行性，不改台架脚本
 apiVersion: apps/v1
 kind: Deployment
 metadata:
