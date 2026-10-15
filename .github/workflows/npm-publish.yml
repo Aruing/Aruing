@@ -1,0 +1,61 @@
+name: Publish npm packages
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'Aruing/Aruing'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+      - name: Set npm version for trusted publishing
+        run: npm install -g npm@11.12.1
+      - name: Verify release tag and production ancestry
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node --input-type=module -e 'import {releaseVersion} from "./scripts/npm-prepare-release.mjs"; releaseVersion(process.env.RELEASE_TAG)'
+          git fetch origin production
+          git merge-base --is-ancestor HEAD origin/production
+          test "$(git rev-parse HEAD)" = "$(git rev-list -n 1 "$RELEASE_TAG")"
+      - name: Verify public assets from the same release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          for asset in checksums.txt aruing_darwin_arm64.tar.gz aruing_darwin_amd64.tar.gz aruing_linux_amd64.tar.gz; do
+            curl --fail --silent --show-error --location --head --retry 3 --max-time 120 \
+              "https://github.com/Aruing/Aruing/releases/download/$RELEASE_TAG/$asset" > /dev/null
+          done
+      - name: Test npm tooling and verify generated sources
+        run: |
+          make npm-test npm-sync
+          git diff --exit-code -- npm/
+      - name: Prepare and publish packages
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          node scripts/npm-prepare-release.mjs "$RELEASE_TAG" "$RUNNER_TEMP/npm-release"
+          node scripts/npm-publish.mjs "$RUNNER_TEMP/npm-release" "$RELEASE_TAG" --publish
