@@ -122,7 +122,7 @@ make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting
 make lab-down NAME=crashloop-bad-image
 ```
 
-当前内置八个场景：`crashloop-bad-image`、`svc-wrong-selector`、`same-name-multi-ns`（含多轮澄清挂起 case）、`log-time-window`（证据时间窗切片）、`bigtable-fleet`（超大表全覆盖 map-reduce 分片投影；经场景级 `chat-env` 注入非默认投影方法）、`configmap-missing`（启动配置缺失）、`oom-killed`（内存超限）、`pending-nodeselector`（调度约束不满足）。每场景随附 `probe.yaml`（脚本化长会话素材，基准 probe 维消费）。`lab-chat` / `lab-kube` 自动注入 KUBECONFIG（无需手动 export）。不进 `make test` / CI；本地需 Docker + kind + kubectl。
+当前内置十二个场景：`crashloop-bad-image`、`svc-wrong-selector`、`same-name-multi-ns`（含多轮澄清挂起 case）、`log-time-window`（证据时间窗切片）、`bigtable-fleet`（超大表全覆盖 map-reduce 分片投影；经场景级 `chat-env` 注入非默认投影方法）、`configmap-missing`（启动配置缺失）、`oom-killed`（内存超限）、`pending-nodeselector`（调度约束不满足），以及四个高难场景——症状与根因拉开因果距离、现场埋须证据排除的诱饵：`shared-config-drift`（配置漂移双诱饵）、`rollout-stuck`（探针端口抄错 + HPA 顺口凶手）、`quota-vs-scheduler`（配额拒绝 vs nodeSelector 诱饵）、`netpol-misfire`（跨 ns 网络策略标签错配，数据面模拟；高难判定口径见 `scenarios/README.md`）。每场景随附 `probe.yaml`（脚本化长会话素材，基准 probe 维消费）。`lab-chat` / `lab-kube` 自动注入 KUBECONFIG（无需手动 export）。不进 `make test` / CI；本地需 Docker + kind + kubectl。
 
 ### 配置与本地 LLM
 
