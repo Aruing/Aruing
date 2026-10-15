@@ -68,9 +68,9 @@ function extractBinary(archive, destination) {
 async function install(packageDir, fetchBytes = download) {
   const pkg = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
   const assets = {
-    'aruing-darwin-arm64': 'aruing_darwin_arm64.tar.gz',
-    'aruing-darwin-x64': 'aruing_darwin_amd64.tar.gz',
-    'aruing-linux-x64': 'aruing_linux_amd64.tar.gz',
+    '@aruing/aruing-darwin-arm64': 'aruing_darwin_arm64.tar.gz',
+    '@aruing/aruing-darwin-x64': 'aruing_darwin_amd64.tar.gz',
+    '@aruing/aruing-linux-x64': 'aruing_linux_amd64.tar.gz',
   };
   const asset = assets[pkg.name];
   if (!asset || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(pkg.version)) {
@@ -99,7 +99,7 @@ async function install(packageDir, fetchBytes = download) {
 module.exports = { checksumFor, download, extractBinary, install };
 if (require.main === module) {
   install(__dirname).catch(error => {
-    console.error(`aruing install: ${error.message}\nRetry: npm install -g aruing --foreground-scripts`);
+    console.error(`aruing install: ${error.message}\nRetry: npm install -g @aruing/aruing --foreground-scripts`);
     process.exitCode = 1;
   });
 }

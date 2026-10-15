@@ -10,9 +10,9 @@ const pkg = require('../package.json');
 // 使用 Node 架构名称选择平台包，不把 x64 与 Go 的 amd64 混用
 function platformPackage(platform = process.platform, arch = process.arch) {
   const names = {
-    'darwin-arm64': 'aruing-darwin-arm64',
-    'darwin-x64': 'aruing-darwin-x64',
-    'linux-x64': 'aruing-linux-x64',
+    'darwin-arm64': '@aruing/aruing-darwin-arm64',
+    'darwin-x64': '@aruing/aruing-darwin-x64',
+    'linux-x64': '@aruing/aruing-linux-x64',
   };
   const name = names[`${platform}-${arch}`];
   if (!name) throw new Error(`unsupported npm platform ${platform}/${arch}; use https://github.com/Aruing/Aruing/releases`);
@@ -33,11 +33,18 @@ function binaryPath() {
 
 // 子进程保留终端流；取消信号和退出状态传回调用方
 function run() {
+  if (process.argv[2] === 'update') {
+    const help = process.argv[3] === '--help' || process.argv[3] === '-h';
+    const message = 'aruing is managed by npm. Run: npm update -g @aruing/aruing';
+    if (help) console.log(message);
+    else { console.error(message); process.exitCode = 1; }
+    return;
+  }
   let binary;
   try {
     binary = binaryPath();
   } catch (error) {
-    console.error(`aruing: ${error.message}\nReinstall with optional dependencies and scripts enabled:\n  npm install -g aruing --include=optional --ignore-scripts=false --foreground-scripts`);
+    console.error(`aruing: ${error.message}\nReinstall with optional dependencies and scripts enabled:\n  npm install -g @aruing/aruing --include=optional --ignore-scripts=false --foreground-scripts`);
     process.exitCode = 1;
     return;
   }

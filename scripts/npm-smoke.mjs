@@ -5,7 +5,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { once } from 'node:events';
 import { spawn } from 'node:child_process';
-import { prepare, packageNames } from './npm-prepare-release.mjs';
+import { prepare, packageNames, packageDirectory, mainPackage } from './npm-prepare-release.mjs';
 
 // 异步子进程保证临时 registry 在 npm 安装期间仍能处理请求
 function command(binary, args, cwd) {
@@ -33,7 +33,7 @@ try {
   const { version } = prepare(process.argv[2], candidate);
   const packed = new Map();
   for (const name of packageNames) {
-    const directory = path.join(candidate, name);
+    const directory = path.join(candidate, packageDirectory(name));
     const [info] = JSON.parse((await checked('npm', ['pack', '--json'], directory)).stdout);
     packed.set(name, { info, directory, manifest: JSON.parse(fs.readFileSync(path.join(directory, 'package.json'))) });
   }
@@ -55,7 +55,7 @@ try {
   const prefix = path.join(temporary, 'prefix');
   const userConfig = path.join(temporary, '.npmrc');
   fs.writeFileSync(userConfig, '');
-  const main = packed.get('aruing');
+  const main = packed.get(mainPackage);
   console.log(`installing candidate npm packages for ${version} on ${process.platform}/${process.arch}`);
   await checked('npm', ['install', '-g', path.join(main.directory, main.info.filename),
     '--prefix', prefix, '--registry', `http://127.0.0.1:${registry.address().port}`,
@@ -67,7 +67,7 @@ try {
     throw new Error(`binary version mismatch: ${output}`);
   }
   const update = await command(binary, ['update'], temporary);
-  if (update.code === 0 || !update.stderr.includes('npm update -g aruing')) {
+  if (update.code === 0 || !update.stderr.includes('npm update -g @aruing/aruing')) {
     throw new Error('npm-managed binary did not refuse self-update');
   }
   for (const subcommand of ['connect', 'run', 'chat']) {
