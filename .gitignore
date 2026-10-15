@@ -3,6 +3,10 @@
 #
 # Binaries for programs and plugins
 bin/
+!npm/aruing/bin/
+!npm/aruing/bin/aruing.js
+node_modules/
+npm/*/bin/aruing
 /aruing
 *.exe
 *.exe~

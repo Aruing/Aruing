@@ -1,0 +1,31 @@
+{
+  "name": "aruing-darwin-x64",
+  "version": "0.1.5",
+  "description": "Kubernetes operations agent with traceable tool evidence",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aruing/Aruing.git",
+    "directory": "npm/aruing-darwin-x64"
+  },
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "files": [
+    "install.js",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  }
+}
