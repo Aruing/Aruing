@@ -35,3 +35,5 @@ jobs:
           for package in npm/aruing npm/aruing-*; do
             (cd "$package" && npm pack --dry-run)
           done
+      - name: Install candidate packages against a published release
+        run: make npm-smoke NPM_SMOKE_TAG=v0.1.4

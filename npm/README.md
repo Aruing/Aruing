@@ -46,3 +46,13 @@ workflow 固定使用支持 OIDC 的 npm CLI，声明 `id-token: write` 并附 p
 在三个支持平台的干净 npm prefix 中安装精确版本，检查 `version`、`connect`、`run`、`chat`。
 确认 `aruing update` 拒绝自替换并引导 `npm update -g aruing`。
 本地 fixture 与已有 Release 的安装冒烟均不能替代新版本发布后的 registry 验收。
+
+可先用已公开的 Release 验证当前候选包的真实安装链：
+
+```sh
+make npm-smoke NPM_SMOKE_TAG=v0.1.4
+```
+
+脚本临时准备该版本包并在本机回环地址启动 registry，安装到隔离 prefix；二进制仍由 postinstall 从官方 Release 下载并校验。
+脚本检查版本、自更新保护和三个子命令的 help 后清理临时目录，不上传包，也不触碰已有全局安装。
+help 检查只验证入口可启动；`connect` 实际保存、`run` / `chat` 真集群与 LLM 冒烟仍需发布前后人工验收。

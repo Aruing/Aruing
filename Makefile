@@ -116,12 +116,16 @@ vuln:
 
 check: tidy-check build test-ci fmt-check vet lint vuln
 
-.PHONY: npm-test npm-sync
+.PHONY: npm-test npm-sync npm-smoke
 npm-test:
 	node --test npm/tests/*.test.cjs
 
 npm-sync:
 	node scripts/npm-sync-installers.mjs
+
+npm-smoke:
+	@test -n "$(NPM_SMOKE_TAG)" || { echo 'NPM_SMOKE_TAG= required (published GitHub Release, e.g. v0.1.4)'; exit 1; }
+	node scripts/npm-smoke.mjs "$(NPM_SMOKE_TAG)"
 
 # 机械判分 bench：生成器 × 方法 × 预算 × 位置 × 种子遍历 → CSV + 矩阵快照到 bench/results/
 # 零 LLM 零集群；出图用 scripts/bench-plot.py（本地 venv，不进 CI）
