@@ -116,6 +116,9 @@ test('platform packages use Node CPU names and generated installers stay identic
   for (const [platform, arch] of [['darwin', 'arm64'], ['darwin', 'x64'], ['linux', 'x64']]) {
     const name = platformPackage(platform, arch);
     assert.equal(name, `@aruing/aruing-${platform}-${arch}`);
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, name.slice('@aruing/'.length), 'package.json')));
+    assert.equal(manifest.name, name);
+    assert.equal(manifest.publishConfig.access, 'public');
     assert.deepEqual(fs.readFileSync(path.join(root, name.slice('@aruing/'.length), 'install.js')), fs.readFileSync(path.join(root, 'installer.cjs')));
   }
   assert.throws(() => platformPackage('win32', 'x64'), /unsupported/);

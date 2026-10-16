@@ -54,6 +54,17 @@ test('resuming a partial publish requires matching integrity and never downgrade
   assert.throws(() => checkExisting(metadata, 'aruing', '0.1.5', 'sha512-identical', 'latest'), /dist-tags/);
 });
 
+test('prepare rejects existing output directories without deleting caller files', async t => {
+  const { prepare } = await import('../../scripts/npm-prepare-release.mjs');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'aruing-existing-output-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const sentinel = path.join(directory, 'keep.txt');
+  fs.writeFileSync(sentinel, 'caller-owned content');
+  assert.throws(() => prepare('v0.1.5', directory), { code: 'EEXIST' });
+  assert.equal(fs.readFileSync(sentinel, 'utf8'), 'caller-owned content');
+  assert.deepEqual(fs.readdirSync(directory), ['keep.txt']);
+});
+
 // 模拟 registry 与命令执行边界，确保任何冲突在首次发布前暴露
 test('publisher preflights every package before ordered publication and resumes identical versions', async t => {
   const { prepare, packageNames, mainPackage } = await import('../../scripts/npm-prepare-release.mjs');
