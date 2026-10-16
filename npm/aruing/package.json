@@ -1,5 +1,5 @@
 {
-  "name": "aruing",
+  "name": "@aruing/aruing",
   "version": "0.1.5",
   "description": "Kubernetes operations agent with traceable tool evidence",
   "license": "MIT",
@@ -24,8 +24,8 @@
     "LICENSE"
   ],
   "optionalDependencies": {
-    "aruing-darwin-arm64": "0.1.5",
-    "aruing-darwin-x64": "0.1.5",
-    "aruing-linux-x64": "0.1.5"
+    "@aruing/aruing-darwin-arm64": "0.1.5",
+    "@aruing/aruing-darwin-x64": "0.1.5",
+    "@aruing/aruing-linux-x64": "0.1.5"
   }
 }

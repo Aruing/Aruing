@@ -51,7 +51,7 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintln(stderr, "Usage: aruing update [flags]")
 		fmt.Fprintln(stderr, "")
 		fmt.Fprintln(stderr, "Update aruing to the latest release (from GitHub Releases).")
-		fmt.Fprintln(stderr, "Binaries installed via npm should use: npm update -g aruing")
+		fmt.Fprintln(stderr, "Binaries installed via npm should use: npm update -g @aruing/aruing")
 		fmt.Fprintln(stderr, "")
 		fs.PrintDefaults()
 	}
@@ -73,7 +73,7 @@ func runUpdate(args []string, stdout, stderr io.Writer) error {
 		exePath = resolved
 	}
 	if isNpmInstallPath(exePath) {
-		return fmt.Errorf("this aruing binary is managed by npm (%s);\nrun: npm update -g aruing", exePath)
+		return fmt.Errorf("this aruing binary is managed by npm (%s);\nrun: npm update -g @aruing/aruing", exePath)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)

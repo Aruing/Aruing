@@ -3,8 +3,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const packageNames = ['aruing-darwin-arm64', 'aruing-darwin-x64', 'aruing-linux-x64', 'aruing'];
+export const mainPackage = '@aruing/aruing';
+export const packageNames = ['@aruing/aruing-darwin-arm64', '@aruing/aruing-darwin-x64', '@aruing/aruing-linux-x64', mainPackage];
 const sourceRoot = fileURLToPath(new URL('../npm/', import.meta.url));
+
+// npm 全名含组织 scope，本地目录保留稳定名称；白名单外输入不得变为路径
+export function packageDirectory(name) {
+  if (!packageNames.includes(name)) throw new Error(`unknown npm package: ${name}`);
+  return name.slice('@aruing/'.length);
+}
 
 // 接受项目采用的三段版本及预发布标签，拒绝路径片段和有前导零的数字标识
 export function releaseVersion(tag) {
@@ -23,12 +30,12 @@ export function prepare(tag, output) {
   fs.mkdirSync(output);
   try {
     for (const name of packageNames) {
-      const source = path.join(sourceRoot, name);
-      const target = path.join(output, name);
+      const source = path.join(sourceRoot, packageDirectory(name));
+      const target = path.join(output, packageDirectory(name));
       const manifest = JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8'));
       if (manifest.name !== name) throw new Error(`unexpected package name in ${source}`);
       manifest.version = version;
-      if (name === 'aruing') {
+      if (name === mainPackage) {
         manifest.optionalDependencies = Object.fromEntries(packageNames.filter(n => n !== name).map(n => [n, version]));
       }
       fs.mkdirSync(target);

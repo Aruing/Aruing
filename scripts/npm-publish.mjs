@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { packageNames, releaseVersion } from './npm-prepare-release.mjs';
+import { packageNames, packageDirectory, mainPackage, releaseVersion } from './npm-prepare-release.mjs';
 
 // 任何 npm 命令失败立即中止，不吞掉认证错误或 registry 错误
 function npm(args, cwd) {
@@ -36,29 +36,30 @@ export function checkExisting(metadata, name, version, integrity, tag) {
 
 // 读取公开 registry；仅 404 表示未发布，其余错误都应在修改 registry 前暴露
 async function metadataFor(name) {
-  const response = await fetch(`https://registry.npmjs.org/${name}`, { signal: AbortSignal.timeout(30000) });
+  const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}`, { signal: AbortSignal.timeout(30000) });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`registry HTTP ${response.status} for ${name}`);
   return response.json();
 }
 
-// 所有包先完成打包、演练和冲突检查；默认仅演练，显式发布仅供正式工作流调用
+// 所有包先完成打包和冲突检查，待发布包再演练；显式发布仅供正式工作流调用
 export async function publishPackages(directory, tag, execute = false, { command = npm, metadata = metadataFor } = {}) {
   const version = releaseVersion(tag);
   const distTag = version.includes('-') ? 'next' : 'latest';
   const packages = [];
   for (const name of packageNames) {
-    const cwd = path.resolve(directory, name);
+    const cwd = path.resolve(directory, packageDirectory(name));
     const manifest = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8'));
     if (manifest.name !== name || manifest.version !== version) throw new Error(`package version/name mismatch: ${name}`);
-    if (name === 'aruing') {
+    if (name === mainPackage) {
       const expected = Object.fromEntries(packageNames.filter(n => n !== name).map(n => [n, version]));
       if (JSON.stringify(manifest.optionalDependencies) !== JSON.stringify(expected)) throw new Error('optional dependency version mismatch');
     }
     const [packed] = JSON.parse(command(['pack', '--json'], cwd));
     const tarball = path.join(cwd, packed.filename);
-    command(['publish', tarball, '--dry-run', '--access', 'public', '--tag', distTag], cwd);
     const skip = checkExisting(await metadata(name), name, version, packed.integrity, distTag);
+    // npm 连演练也拒绝既有版本，内容与标签均验证相同后直接跳过
+    if (!skip) command(['publish', tarball, '--dry-run', '--access', 'public', '--tag', distTag], cwd);
     packages.push({ name, cwd, tarball, integrity: packed.integrity, skip });
     console.log(`${name}@${version}: ${skip ? 'already published; content verified' : 'ready'}`);
   }

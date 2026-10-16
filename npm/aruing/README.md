@@ -3,7 +3,7 @@
 A Kubernetes operations agent that answers with tools and traceable evidence.
 
 ```sh
-npm install -g aruing
+npm install -g @aruing/aruing
 aruing version
 aruing connect
 aruing chat
@@ -21,10 +21,10 @@ Optional dependencies and install scripts must be enabled.
 If installation fails, view the installer error and retry:
 
 ```sh
-npm install -g aruing --include=optional --ignore-scripts=false --foreground-scripts
+npm install -g @aruing/aruing --include=optional --ignore-scripts=false --foreground-scripts
 ```
 
-Upgrade npm-managed installations with `npm update -g aruing`.
+Upgrade npm-managed installations with `npm update -g @aruing/aruing`.
 `aruing update` refuses to replace an npm-managed binary.
 
 See the [project documentation](https://github.com/Aruing/Aruing#readme) for configuration and usage.

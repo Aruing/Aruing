@@ -1,5 +1,5 @@
 {
-  "name": "aruing-darwin-x64",
+  "name": "@aruing/aruing-darwin-x64",
   "version": "0.1.5",
   "description": "Kubernetes operations agent with traceable tool evidence",
   "license": "MIT",

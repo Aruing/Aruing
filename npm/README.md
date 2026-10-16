@@ -1,6 +1,6 @@
 # npm 包维护
 
-主包 `aruing` 通过三个精确版本 optionalDependencies 选择平台包。
+主包 `@aruing/aruing` 通过三个精确版本 optionalDependencies 选择平台包。
 平台包安装时从同版本 GitHub Release 下载二进制，先校验 SHA-256 再安装。
 仓库中的平台 `install.js` 与许可证由 `make npm-sync` 生成，修改安装逻辑请编辑 `npm/installer.cjs`。
 
@@ -24,17 +24,18 @@ dry-run 会打包、检查四个包的内容和 registry 中的版本冲突，�
 4. `npm-publish.yml` 自动 checkout 同一 tag，检查 production 归属和附件公开可下载。
 5. workflow 准备四个包，先发布平台包，全部确认后才发布主包。
 
-首次发包前，包管理者须确认四个包名均可使用且由预期账号管理：
+首次发包前，包管理者须确认四个包名均可使用且归属 `aruing` 组织且发布者具有组织建包与发包权限：
 
-- `aruing`
-- `aruing-darwin-arm64`
-- `aruing-darwin-x64`
-- `aruing-linux-x64`
+- `@aruing/aruing`
+- `@aruing/aruing-darwin-arm64`
+- `@aruing/aruing-darwin-x64`
+- `@aruing/aruing-linux-x64`
 
 bootstrap 可使用具备相应发布权限的 npm granular token，由管理者存入 GitHub 仓库 secret `NPM_TOKEN`。
 也可使用已配置的 npm trusted publishing：逐包设置 GitHub owner `Aruing`、仓库 `Aruing`、workflow 文件名 `npm-publish.yml`，允许直接 `npm publish`。
 首次建包能否直接配置以 npm 当前界面为准；若尚不能配置，先用 bootstrap token 完成首次发布再切换。
 workflow 固定使用支持 OIDC 的 npm CLI，声明 `id-token: write` 并附 provenance。
+新建的 trusted publisher 连接须在两天内完成首次成功发布，否则过期；应临近正式发版配置，并逐包核对 workflow 与允许直接 `npm publish` 的权限。
 密钥只由管理者在 npm / GitHub 设置页操作，不写进源码、提交或日志。
 
 必须由维护者人工发布 Draft；使用 `GITHUB_TOKEN` 自动发布 Release 不会触发后续 release workflow。
@@ -44,7 +45,7 @@ workflow 固定使用支持 OIDC 的 npm CLI，声明 `id-token: write` 并附 p
 ## 发布后验收
 
 在三个支持平台的干净 npm prefix 中安装精确版本，检查 `version`、`connect`、`run`、`chat`。
-确认 `aruing update` 拒绝自替换并引导 `npm update -g aruing`。
+确认 `aruing update` 拒绝自替换并引导 `npm update -g @aruing/aruing`。
 本地 fixture 与已有 Release 的安装冒烟均不能替代新版本发布后的 registry 验收。
 
 可先用已公开的 Release 验证当前候选包的真实安装链：

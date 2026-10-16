@@ -46,7 +46,7 @@ Commands:
   version          Print version information
   help             Print this help message
   connect          Interactive wizard: configure LLM (base URL / API key / model)
-  update           Self-update to the latest release (npm installs: npm update -g aruing)
+  update           Self-update to the latest release (npm installs: npm update -g @aruing/aruing)
   run <question>   Run a one-shot diagnosis (requires LLM)
   chat [question]  Multi-turn chat via Session.Turn + Tower (requires LLM)
   sessions        List saved sessions: id, times, message count, first question

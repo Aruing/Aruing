@@ -32,7 +32,7 @@ function fixture(t, { link = false } = {}) {
   assert.equal(result.status, 0, result.stderr.toString());
   const pkg = path.join(dir, 'package');
   fs.mkdirSync(pkg);
-  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'aruing-darwin-arm64', version: '0.1.5' }));
+  fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: '@aruing/aruing-darwin-arm64', version: '0.1.5' }));
   return { dir, pkg, bytes: fs.readFileSync(archive) };
 }
 
@@ -115,8 +115,11 @@ test('download rejects downgrade, redirect loops and slow responses', async t =>
 test('platform packages use Node CPU names and generated installers stay identical', () => {
   for (const [platform, arch] of [['darwin', 'arm64'], ['darwin', 'x64'], ['linux', 'x64']]) {
     const name = platformPackage(platform, arch);
-    assert.equal(name, `aruing-${platform}-${arch}`);
-    assert.deepEqual(fs.readFileSync(path.join(root, name, 'install.js')), fs.readFileSync(path.join(root, 'installer.cjs')));
+    assert.equal(name, `@aruing/aruing-${platform}-${arch}`);
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, name.slice('@aruing/'.length), 'package.json')));
+    assert.equal(manifest.name, name);
+    assert.equal(manifest.publishConfig.access, 'public');
+    assert.deepEqual(fs.readFileSync(path.join(root, name.slice('@aruing/'.length), 'install.js')), fs.readFileSync(path.join(root, 'installer.cjs')));
   }
   assert.throws(() => platformPackage('win32', 'x64'), /unsupported/);
   assert.throws(() => platformPackage('linux', 'arm64'), /unsupported/);
@@ -125,7 +128,7 @@ test('platform packages use Node CPU names and generated installers stay identic
 // 组装真实包布局，使模块解析、进程退出与缺失依赖都走产品入口
 function launcher(t, script) {
   const dir = temporary(t);
-  const main = path.join(dir, 'node_modules/aruing');
+  const main = path.join(dir, 'node_modules/@aruing/aruing');
   const platform = path.join(dir, 'node_modules', platformPackage());
   fs.cpSync(path.join(root, 'aruing'), main, { recursive: true });
   fs.mkdirSync(path.join(platform, 'bin'), { recursive: true });
@@ -140,6 +143,18 @@ test('launcher forwards arguments, standard streams and nonzero exit code', t =>
   assert.equal(result.status, 7);
   assert.equal(result.stdout, 'input');
   assert.deepEqual(JSON.parse(result.stderr), ['argument with spaces', '--flag']);
+});
+
+test('launcher refuses self-update with the organization package command before starting native binary', t => {
+  const { cli } = launcher(t, 'console.log("native update started");');
+  const result = spawnSync(process.execPath, [cli, 'update'], { encoding: 'utf8' });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /npm update -g @aruing\/aruing/);
+  const help = spawnSync(process.execPath, [cli, 'update', '--help'], { encoding: 'utf8' });
+  assert.equal(help.status, 0);
+  assert.match(help.stdout, /npm update -g @aruing\/aruing/);
+  assert.doesNotMatch(help.stdout, /native update started/);
 });
 
 test('launcher reports missing binaries, mismatched versions and omitted optional dependencies', t => {
