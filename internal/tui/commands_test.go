@@ -212,10 +212,12 @@ func TestUpdateEnterCommand(t *testing.T) {
 	}
 }
 
-// app 模式 /session 切换：本地会话编号生效（lister 注入 fake）
+// app 模式 /session 切换：本地会话编号生效（lister 注入 fake）；
+// 视图历史同步清空，旧会话消息不得混入新会话视图（回归：显示与活跃会话一致）
 func TestUpdateEnterCommandSwitch(t *testing.T) {
 	m := newTestModel()
 	m.sessionID = "s1"
+	m.messages = []msgView{{kind: "user", text: "旧会话消息"}}
 	m.lister = fakeLister{summaries: []session.SessionSummary{{ID: "s2"}}}
 	m.input.SetValue("/session s2")
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -225,6 +227,9 @@ func TestUpdateEnterCommandSwitch(t *testing.T) {
 	}
 	if len(um.messages) != 1 || um.messages[0].kind != "system" {
 		t.Fatalf("messages = %+v", um.messages)
+	}
+	if strings.Contains(um.messages[0].text, "旧会话消息") {
+		t.Fatal("stale history must not survive a session switch")
 	}
 }
 

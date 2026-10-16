@@ -171,6 +171,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if res.switchTo != "" {
 					m.sessionID = res.switchTo
+					// 切换后清空视图历史：viewport 只承载本次交互的滚动记录，
+					// 避免旧会话消息与新会话轮次混在同一视图（显示与活跃会话不符）。
+					// 历史不重放——Store 全量保留，切回即恢复语义
+					m.messages = nil
 				}
 				for _, ln := range res.lines {
 					kind := "system"
