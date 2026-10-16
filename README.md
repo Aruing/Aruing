@@ -24,11 +24,11 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-**`0.1.4` — production hardening: persistence, streaming, full-coverage scans.** Everything survives restarts: sessions, messages, diagnostic ledgers (`RunLedger`), and suspended runs persist under `~/.aruing/data`; oversized tool output spills to disk and stays page-able via `evidence.read` beyond the inline truncation point; `aruing sessions` lists past conversations. Chat replies stream token-by-token in both TUI modes (inline / app) — structured reasoning is never streamed, and an interrupted stream fails cleanly with no half-committed message. Oversized tables get an optional map-reduce two-pass full-coverage projection so root causes hidden mid-table are not lost (scenario / config switch; default path unchanged). Everything from 0.1.0–0.1.3 still applies: real-cluster + real-LLM diagnosis, interactive chat, evidence navigation, clarify-suspend/resume, representative projection, acquire-loop & tiered-memory method switches, one-line install and self-update.
+**`0.1.5` — outward completeness: reproducible benchmark, hard scenarios, runtime commands.** The kind fault-scenario harness is now a reproducible evaluation baseline: one command (`make bench-run`) sweeps every scenario through the single-turn diagnosis and long-session probe dimensions with three-tier judging, and artifacts are scrubbed for open sourcing ([`docs/benchmark.md`](docs/benchmark.md)). Twelve scenarios ship — including four high-difficulty ones that separate symptom from root cause and plant decoy faults an agent must rule out with evidence. Inside `aruing chat`, a minimal `/` command set (help / sessions / session / new / exit) behaves identically in both TUI modes: unknown commands error clearly and never go out as chat messages. Everything from 0.1.0–0.1.4 still applies: real-cluster + real-LLM diagnosis, interactive streaming chat, evidence navigation with paged spool reads, clarify-suspend/resume across restarts, representative projection, acquire-loop & tiered-memory method switches, one-line install and self-update.
 
-Not yet built (planned 0.2+/0.3+): write tools with approval, multi-cluster, Web UI, npm distribution. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
+Not yet built: npm distribution (planned 0.1.6); write tools with approval, multi-cluster, Web UI (planned 0.3+). See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
-Shipped in release [`v0.1.4`](https://github.com/Aruing/Aruing/releases/tag/v0.1.4) (2026-10-09).
+Shipped in release [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) (2026-10-16).
 
 ⚠️ Only simple trials / testing are supported right now — not production-ready.
 
