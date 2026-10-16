@@ -9,7 +9,7 @@
 | 功能 | 状态 | 摘要 |
 | --- | --- | --- |
 | benchmark 升格 | 未开始 | kind 场景 harness → 可复现评测基准：多场景 × 长会话（probe 接场景）× 判分三维矩阵，一条命令跑批出报告，产物可开源 |
-| npm 发包 | ⏳ | 主包与三个自包含平台安装包已实现，校验与 launcher 离线测试通过；发布接线、三平台完整验收及正式发布待完成 |
+| npm 发包 | ⏳ | 主包、三个平台安装包与 Release 发布接线已实现；离线测试通过，三平台完整验收、npm 权限配置及正式发布待完成 |
 | `/` 运行时命令 | 未开始 | chat（inline + app）内 `/` 前缀命令（帮助 / 会话 / 退出类，步骤设计钉最小集）；纯 TUI 层（#20），双模式一致 |
 
 版本级完成标志一句话：基准一条命令可复现跑批（产物无私人路径）+ npm 干净环境即用（校验 / 防降级对齐 release）+ `/` 命令双模式一致且未知命令不误发为消息 + `make check` 与 `make smoke-all` 全绿 + `v0.1.5` tag（含 npm 包）。
@@ -31,7 +31,7 @@
 | # | 模块 | 状态 | 备注 |
 | - | --- | --- | --- |
 | 1 | `scenarios/` + `internal/eval` + `cmd` bench/judge/probe 接线 | 未开始 | benchmark：扩场景 + 长会话（probe 接场景）+ 跑批入口 + 判分报告 + 复现文档；不进 CI 必绿 |
-| 2 | npm 包源 + 发布 workflow | ⏳ | 主包、平台安装器、checksum 校验与三平台 npm 检查已实现；Release 接线与正式安装验收待完成，未发布 |
+| 2 | npm 包源 + 发布 workflow | ⏳ | 包源、checksum 校验、tag 版本准备与 Release published 后自动发布已实现；三平台安装验收与 npm 首发配置待完成，未发布 |
 | 3 | `internal/tui` + `cmd` chat 交互接线 | 未开始 | `/` 命令解析与执行、双模式一致、与流式共存语义（步骤设计钉） |
 
 产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
