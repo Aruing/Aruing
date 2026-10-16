@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: demo
+  labels:
+    app: orders-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-api
+  template:
+    metadata:
+      labels:
+        app: orders-api
+    spec:
+      containers:
+        - name: orders-api
+          # 症状载体：启动即按 envFrom 注入的 DB_HOST 探库。
+          # payments-db 无 ready endpoint → 连接必拒（DNS 未就绪导致解析失败时同样非零退出）
+          # → 打 fatal 日志（内含实际 DB_HOST 值）→ exit 1 → CrashLoopBackOff
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              if ! nc -w 3 "$DB_HOST" 5432; then
+                echo "fatal: cannot reach database at $DB_HOST"
+                exit 1
+              fi
+              sleep 3600
+          envFrom:
+            - configMapRef:
+                name: app-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-api
+  namespace: demo
+  labels:
+    app: orders-api
+spec:
+  selector:
+    app: orders-api
+  ports:
+    - port: 80
+      targetPort: 8080

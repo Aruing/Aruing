@@ -29,12 +29,13 @@ FORCE="${FORCE:-0}"   # 1 = 忽略已有记录强制重跑（默认跳过已完�
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 # 场景问题 = prompts.md 第 1 条有序列表提示词（与 smoke 验收同源）；
-# cases 协议场景（无顶层 prompts.md）取首个 case 的首条；
-# 取首个「与其后首个」之间的文本（允许尾部备注）
+# cases 协议场景（无顶层 prompts.md）取排序后首个 case 的首条（case 目录名不假设
+# 固定前缀，bigtable-fleet 的 01-bigtable 同样覆盖）；取首个「与其后首个」之间的文本
+# （允许尾部备注）
 scn_question() {
     local f="$ROOT/scenarios/$1/prompts.md" line
     if [ ! -f "$f" ]; then
-        f="$ROOT/scenarios/$1/cases/01-default/prompts.md"
+        f="$(find "$ROOT/scenarios/$1/cases" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -1 || true)/prompts.md"
     fi
     line="$(grep -m1 -E '^[[:space:]]*[0-9]+\.' "$f" || true)"
     line="${line#*「}"
