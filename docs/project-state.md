@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-10-15（`/` 运行时命令认领开工：owner 维护者，进入步骤设计）
+> 最后更新：2026-10-16（`/` 运行时命令功能关闭：#189/#190 入 main，smoke-all 12 场景全绿）
 
 ## 当前阶段
 
@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | benchmark 升格 | ✅ 四步全合 | 统一跑批入口 `make bench-run`（逐场景 fresh-up → 单轮诊断维 + 长会话维 → 汇总报告）；③层 rubric 抽样并入 + 产物开源清洗（写时归一 + scrub 自检门）；场景 5→8 且 probe.yaml 全覆盖，chat-env 经 bench-run 注入两维单元；复现手册 `docs/benchmark.md`，授权小矩阵端到端验收通过（3 场景两维全绿、scrub 零命中、失败清单空）；smoke-all 全场景验证随版本级集成验证 |
 | npm 发包 | 未开始 | `npm i -g aruing` 三平台（darwin arm64/amd64 + linux amd64）干净环境装上即用；平台子包挂 release 管线，与 `aruing update` 拒绝自替换语义闭环 |
-| `/` 运行时命令 | ⏳ 代码已交付，收口中 | 五命令最小集（help / sessions / session / new / exit）已合入功能主分支（#189，含评审修复：切换会话同步清空 app 视图）；剩 smoke-all 回归 + 功能主分支入 main + 历程蒸馏；2026-10-15 认领（owner：维护者） |
+| `/` 运行时命令 | ✅ 已关闭（2026-10-16） | 五命令最小集（help / sessions / session / new / exit，#189 → #190 入 main，含评审修复：切换会话同步清空 app 视图）；双模式共用同一内核、未知命令不误发、与流式互斥；smoke-all 12 场景全绿 + 内容抽查命中；历程已蒸馏（笔记仓） |
 | hard-scenarios 高难场景批 | ✅ 已关闭（2026-10-15） | 四场景全交付（#178–#181）并入 main（#185）：配置漂移双诱饵 / 发布卡死 HPA 诱饵 / 配额 vs 调度判别 / 网络策略标签错配；每场景 lab-chat 对照 expect 命中 + 判分批跑通（A 场景 ours 1/5、miss 均停诱饵=区分度实证，B/C/D 完成运行全命中）；收尾全量回归 12 场景三段绿、既有场景文件零改动；历程已蒸馏（笔记仓 历程/0.1.5/） |
 
 版本级完成标志一句话：基准一条命令可复现跑批（产物无私人路径）+ npm 干净环境即用（校验 / 防降级对齐 release）+ `/` 命令双模式一致且未知命令不误发为消息 + `make check` 与 `make smoke-all` 全绿 + `v0.1.5` tag（含 npm 包）。
@@ -33,16 +33,14 @@
 | - | --- | --- | --- |
 | 1 | `scenarios/` + `internal/eval` + `cmd` bench/judge/probe 接线 | ✅ | 步骤 1–4 已落（#173/#174/#175/#176）：bench-run 统一入口 + rubric 并入 + 开源清洗自检门 + 8 场景全 probe.yaml + chat-env 注入 + `docs/benchmark.md` 复现手册；授权小矩阵（3 场景 × ours × K3 × 20 轮）端到端验收通过；不进 CI 必绿 |
 | 2 | npm 包源 + `.github/workflows/release.yml` publish 门禁 | 未开始 | 平台子包（主包 + optionalDeps）复用 release 资产与 checksums；预期零 `internal/` 改动 |
-| 3 | `internal/tui` + `cmd` chat 交互接线 | ⏳ 步骤 1 已交付 | #189（8ee8b91）合入 feat/0.1.5-runtime-commands；剩：smoke-all 回归 + 功能主分支入 main |
+| 3 | `internal/tui` + `cmd` chat 交互接线 | ✅ | #189（步骤）/ #190（集成）入 main；smoke-all 12 场景回归全绿；历程已蒸馏 |
 | 4 | `scenarios/` 4 个高难场景目录 + `scenarios/README.md` 表行 | ✅ | 四场景五件套 + README 表行已并入 main（步骤 #178–#181，功能集成 #185）；零 `internal/` 改动 |
 
 产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
 ## 下一步
 
-**进行中**：`/` 运行时命令（0.1.5，owner：维护者）——代码已合入功能主分支（#189）；收口动作：smoke-all 回归 → 功能主分支经 PR 入 main → 历程蒸馏。
-
-**待认领**：npm 发包（认领时更新笔记仓功能头 owner）。
+**下一项**：npm 发包——另一开发者的功能分支已在推进（feat/0.1.5-npm 系列：包源 / release 门禁 / 验收测试），认领与状态同步归其功能头；npm 完成（或维护者裁决不等）即触发版本收口。
 
 **版本收口清单**（四功能全绿后）：`make check` + `make smoke-all`（既有 8 + 高难 4 场景）集成验证 → README 双语 Current stage / Install 收尾同改 → `v0.1.5` tag（含 npm 包）。
 
