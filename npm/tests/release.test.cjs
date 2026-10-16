@@ -81,6 +81,7 @@ test('publisher preflights every package before ordered publication and resumes 
   const command = (args, cwd) => {
     const name = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'))).name;
     if (args[0] === 'pack') return JSON.stringify([{ filename: 'fixture.tgz', integrity: `sha512-${name}` }]);
+    if (args.includes('--dry-run') && published.has(name)) throw new Error('cannot publish over existing version, even in dry-run');
     events.push(`${args.includes('--dry-run') ? 'dry' : 'publish'}:${name}`);
     if (!args.includes('--dry-run')) published.set(name, {
       'dist-tags': { latest: '0.1.5' }, versions: { '0.1.5': { dist: { integrity: `sha512-${name}` } } },
@@ -90,8 +91,12 @@ test('publisher preflights every package before ordered publication and resumes 
   await publishPackages(out, 'v0.1.5', true, { command, metadata: async n => published.get(n) });
   assert.deepEqual(events, [...packageNames.map(n => `dry:${n}`), ...packageNames.map(n => `publish:${n}`)]);
   events.length = 0;
+  for (const name of packageNames.slice(1)) published.delete(name);
   await publishPackages(out, 'v0.1.5', true, { command, metadata: async n => published.get(n) });
-  assert.deepEqual(events, packageNames.map(n => `dry:${n}`));
+  assert.deepEqual(events, [...packageNames.slice(1).map(n => `dry:${n}`), ...packageNames.slice(1).map(n => `publish:${n}`)]);
+  events.length = 0;
+  await publishPackages(out, 'v0.1.5', true, { command, metadata: async n => published.get(n) });
+  assert.deepEqual(events, []);
   events.length = 0;
   published.get(mainPackage).versions['0.1.5'].dist.integrity = 'different';
   await assert.rejects(publishPackages(out, 'v0.1.5', true, { command, metadata: async n => published.get(n) }), /differs/);

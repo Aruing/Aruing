@@ -42,7 +42,7 @@ async function metadataFor(name) {
   return response.json();
 }
 
-// 所有包先完成打包、演练和冲突检查；默认仅演练，显式发布仅供正式工作流调用
+// 所有包先完成打包和冲突检查，待发布包再演练；显式发布仅供正式工作流调用
 export async function publishPackages(directory, tag, execute = false, { command = npm, metadata = metadataFor } = {}) {
   const version = releaseVersion(tag);
   const distTag = version.includes('-') ? 'next' : 'latest';
@@ -57,8 +57,9 @@ export async function publishPackages(directory, tag, execute = false, { command
     }
     const [packed] = JSON.parse(command(['pack', '--json'], cwd));
     const tarball = path.join(cwd, packed.filename);
-    command(['publish', tarball, '--dry-run', '--access', 'public', '--tag', distTag], cwd);
     const skip = checkExisting(await metadata(name), name, version, packed.integrity, distTag);
+    // npm 连演练也拒绝既有版本，内容与标签均验证相同后直接跳过
+    if (!skip) command(['publish', tarball, '--dry-run', '--access', 'public', '--tag', distTag], cwd);
     packages.push({ name, cwd, tarball, integrity: packed.integrity, skip });
     console.log(`${name}@${version}: ${skip ? 'already published; content verified' : 'ready'}`);
   }
