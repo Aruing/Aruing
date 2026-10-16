@@ -24,11 +24,11 @@
 
 ## 当前阶段
 
-**`0.1.4` —— 产品完备批：持久化 + 流式 + 全覆盖扫描。** 一切跨重启存活：会话、消息、诊断账本（`RunLedger`）与挂起 Run 落盘于 `~/.aruing/data`；超巨工具输出落盘留存，`evidence.read` 可翻页到内联截断点之后；`aruing sessions` 列出历史会话。chat 回复在两种 TUI 模式（inline / app）下逐字流式渲染——结构化推理不外流，中断明确失败、无半截消息。超大表可选 map-reduce 两遍分片全覆盖投影，中段根因不漏（场景 / config 开关，默认路径不变）。0.1.0–0.1.3 的能力全部保留：真集群 + 真 LLM 诊断、交互式终端对话、证据导航、澄清挂起与恢复、代表性投影、取证决策与分层记忆方法开关、一行安装与自更新。
+**`0.1.5` —— 对外完备批：可复现评测基准 + 高难场景 + 运行时命令。** kind 故障场景台架升格为可复现评测基准：一条命令（`make bench-run`）跑批全部场景的单轮诊断维与长会话探针维并做三层判分，产物经开源清洗可公开（见 [`docs/benchmark.md`](docs/benchmark.md)）。场景增至 12 个——含 4 个高难场景：症状与根因拉开因果距离、植入必须以证据排除的诱饵故障。`aruing chat` 内支持 `/` 运行时命令最小集（help / sessions / session / new / exit），inline / app 双模式行为一致：未知命令明确报错，不会误发为聊天消息。0.1.0–0.1.4 的能力全部保留：真集群 + 真 LLM 诊断、交互式流式对话、证据导航与超巨输出翻页、跨重启澄清挂起与恢复、代表性投影、取证决策与分层记忆方法开关、一行安装与自更新。
 
-尚未构建（计划 0.2+/0.3+）：带审批的写工具、多集群、Web UI、npm 分发。路线图见 [`docs/project-state.md`](docs/project-state.md)。
+尚未构建：npm 分发（计划 0.1.6）；带审批的写工具、多集群、Web UI（计划 0.3+）。路线图见 [`docs/project-state.md`](docs/project-state.md)。
 
-已随 [`v0.1.4`](https://github.com/Aruing/Aruing/releases/tag/v0.1.4) 发布（2026-10-09）。
+已随 [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) 发布（2026-10-16）。
 
 ⚠️ 当前仅支持简单试用 / 测试——未达生产可用。
 
