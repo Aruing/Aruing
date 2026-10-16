@@ -48,6 +48,8 @@ type Model struct {
 	svc       *session.Service
 	sessionID string
 	tuiTheme  string // 配置主题（dark | light | auto）；空同 auto
+	// 会话发现能力（运行时命令 /sessions、/session 用）；可空，缺能力时命令报不可用
+	lister session.SessionLister
 
 	styles styles
 	md     *markdownRenderer // markdown 渲染器；WindowSizeMsg 到达后按宽度建
@@ -153,6 +155,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quit = true
 				return m, tea.Quit
 			}
+			// 运行时命令分支：命令不进 Turn、不产生 user 视图，错误同样只渲染不发送
+			// （完成标志 1/2）；busy 已在上方拦截，与流式生成互斥不排队（零新状态机）
+			if name, args, ok, perr := parseCommand(text); ok {
+				var res commandResult
+				if perr != nil {
+					res = errResult(perr.Error())
+				} else {
+					res = runCommand(m.ctx, m.commandEnv(), name, args)
+				}
+				if res.quit {
+					m.quit = true
+					m.input.Reset()
+					return m, tea.Quit
+				}
+				if res.switchTo != "" {
+					m.sessionID = res.switchTo
+					// 切换后清空视图历史：viewport 只承载本次交互的滚动记录，
+					// 避免旧会话消息与新会话轮次混在同一视图（显示与活跃会话不符）。
+					// 历史不重放——Store 全量保留，切回即恢复语义
+					m.messages = nil
+				}
+				for _, ln := range res.lines {
+					kind := "system"
+					if ln.isError {
+						kind = "error"
+					}
+					m.messages = append(m.messages, msgView{kind: kind, text: ln.text})
+				}
+				m.input.Reset()
+				syncViewport(&m)
+				return m, nil
+			}
 			m.messages = append(m.messages, msgView{kind: "user", text: text})
 			m.input.Reset()
 			m.busy = true
@@ -178,6 +212,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+// 组装命令执行环境：闭包读取当前会话编号，/session、/new 切换后后续轮次即时生效；
+// newSession 绑定产品服务既有路径，不另起后门
+func (m Model) commandEnv() commandEnv {
+	return commandEnv{
+		lister:           m.lister,
+		newSession:       m.svc.NewSession,
+		currentSessionID: func() string { return m.sessionID },
+	}
 }
 
 func (m Model) View() string {
