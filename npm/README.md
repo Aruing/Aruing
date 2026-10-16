@@ -35,6 +35,7 @@ bootstrap 可使用具备相应发布权限的 npm granular token，由管理者
 也可使用已配置的 npm trusted publishing：逐包设置 GitHub owner `Aruing`、仓库 `Aruing`、workflow 文件名 `npm-publish.yml`，允许直接 `npm publish`。
 首次建包能否直接配置以 npm 当前界面为准；若尚不能配置，先用 bootstrap token 完成首次发布再切换。
 workflow 固定使用支持 OIDC 的 npm CLI，声明 `id-token: write` 并附 provenance。
+新建的 trusted publisher 连接须在两天内完成首次成功发布，否则过期；应临近正式发版配置，并逐包核对 workflow 与允许直接 `npm publish` 的权限。
 密钥只由管理者在 npm / GitHub 设置页操作，不写进源码、提交或日志。
 
 必须由维护者人工发布 Draft；使用 `GITHUB_TOKEN` 自动发布 Release 不会触发后续 release workflow。
