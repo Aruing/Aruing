@@ -35,7 +35,7 @@ const (
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
 // 行内模式入口：readline 循环 + Turn 等待（spinner）+ 助手留痕 + 容错
-func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, out io.Writer, prog *TurnProgress) error {
+func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tuiTheme, themeFile string, lister session.SessionLister, out io.Writer, prog *TurnProgress) error {
 	st, err := loadStyles(tuiTheme, themeFile)
 	if err != nil {
 		return err
@@ -70,6 +70,14 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	width := terminalWidth()
 	md := buildRenderer(tuiTheme, width)
 
+	// 命令执行环境：闭包引用 sessionID 变量，/session、/new 切换后即时生效；
+	// lister 缺能力时会话类命令报不可用（步骤设计决策 7）
+	cmdEnv := commandEnv{
+		lister:           lister,
+		newSession:       svc.NewSession,
+		currentSessionID: func() string { return sessionID },
+	}
+
 	// 一次性交互提示（系统样式，留痕）
 	fmt.Fprintln(out, st.system.Render("多行输入：shift+enter / option+enter（终端支持时）/ 行尾 \\ + 回车；exit / Ctrl+D 退出"))
 
@@ -95,6 +103,18 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 			width = w
 			md = buildRenderer(tuiTheme, width)
 		}
+		// 运行时命令分支：命中命令语法只解析执行与渲染，不 echo 用户行、不进 Turn；
+		// 未知命令报错同样只渲染不发送（完成标志 1），命令轮零业务写入（完成标志 2）
+		if res, handled := runInlineCommand(ctx, out, st, cmdEnv, text); handled {
+			if res.quit {
+				return nil
+			}
+			if res.switchTo != "" {
+				sessionID = res.switchTo
+			}
+			renderMessageDivider(out, st, width)
+			continue
+		}
 		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项与
 		// 称呼开关在此消费，守 #20：与 app 模式 viewport 历史同规则）
 		echoUserMessage(out, st, text)
@@ -102,6 +122,31 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
 		renderMessageDivider(out, st, width)
 	}
+}
+
+// inline 模式的命令分支：命中命令语法时立即执行并渲染输出，返回效果供主循环
+// 应用（quit / 切换）；普通输入 handled=false 交回主循环走 Turn。命令与错误
+// 都只渲染不发送、不写 Store、不进 Turn（#20，完成标志 1/2）
+func runInlineCommand(ctx context.Context, out io.Writer, st styles, env commandEnv, text string) (commandResult, bool) {
+	name, args, ok, err := parseCommand(text)
+	if !ok {
+		return commandResult{}, false
+	}
+	var res commandResult
+	if err != nil {
+		// 解析错误（未知命令 / 参数非法）与执行错误同一路径：错误样式留痕，不当消息发送
+		res = errResult(err.Error())
+	} else {
+		res = runCommand(ctx, env, name, args)
+	}
+	for _, ln := range res.lines {
+		if ln.isError {
+			fmt.Fprintln(out, st.err.Render("错误 "+ln.text))
+		} else {
+			fmt.Fprintln(out, st.system.Render(ln.text))
+		}
+	}
+	return res, true
 }
 
 // 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行、长行在终端折行），
