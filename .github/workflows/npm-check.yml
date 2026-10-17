@@ -1,0 +1,39 @@
+name: npm checks
+
+on:
+  pull_request:
+    paths: ['npm/**', 'scripts/npm-*', '.github/workflows/npm-*.yml', 'Makefile']
+  push:
+    branches: [main]
+    paths: ['npm/**', 'scripts/npm-*', '.github/workflows/npm-*.yml', 'Makefile']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: npm package (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, macos-15-intel, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22.14.0'
+          package-manager-cache: false
+      - run: make npm-test
+      - name: Check generated installers and licenses
+        run: |
+          make npm-sync
+          git diff --exit-code -- npm/
+      - name: Inspect package contents
+        run: |
+          for package in npm/aruing npm/aruing-*; do
+            (cd "$package" && npm pack --dry-run)
+          done
+      - name: Install candidate packages against a published release
+        run: make npm-smoke NPM_SMOKE_TAG=v0.1.4
