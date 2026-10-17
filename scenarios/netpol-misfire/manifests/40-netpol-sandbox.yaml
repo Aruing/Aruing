@@ -1,0 +1,13 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: deny-all
+  namespace: sandbox
+spec:
+  # 诱饵：全拒形态最凶（Ingress+Egress、所有 pod），但 NetworkPolicy 仅作用于
+  # 自身 ns 的 pod——sandbox 的策略管不着 edge→core 流量；ns 内无工作负载
+  # （沙箱基线策略）。排除靠作用域论证，不靠连通性实测
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress

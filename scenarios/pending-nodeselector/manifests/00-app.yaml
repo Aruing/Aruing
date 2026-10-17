@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api
+  namespace: demo
+  labels:
+    app: demo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-api
+  template:
+    metadata:
+      labels:
+        app: demo-api
+    spec:
+      # 指向不存在的节点标签：任何节点都不满足 → Pod 永久 Pending（调度约束类故障，
+      # 根因经 describe/events 的 FailedScheduling 事件可见）
+      nodeSelector:
+        workload-type: batch-node
+      containers:
+        - name: demo-api
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["sleep", "3600"]

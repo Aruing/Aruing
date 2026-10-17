@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api
+  namespace: demo
+  labels:
+    app: demo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-api
+  template:
+    metadata:
+      labels:
+        app: demo-api
+    spec:
+      containers:
+        - name: demo-api
+          # tail /dev/zero 无限读零、行缓冲无限增长 → 秒级撞 16Mi 上限被 OOMKilled
+          # → RestartPolicy Always 反复重启（资源上限类故障，根因经 describe Last State 可见）
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["tail", "/dev/zero"]
+          resources:
+            limits:
+              memory: 16Mi

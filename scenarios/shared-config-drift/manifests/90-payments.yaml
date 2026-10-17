@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payments-db
+  namespace: payments
+  labels:
+    app: payments-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: payments-db
+  template:
+    metadata:
+      labels:
+        app: payments-db
+    spec:
+      containers:
+        - name: payments-db
+          # 诱饵②：有真证据支撑的错答——库真在 OOM 循环（注入法同 oom-killed 场景：
+          # tail /dev/zero 无限读零撞 16Mi 上限），但它是 payments ns 的库；
+          # orders-api 连它是 DB_HOST 配置漂移的结果而非根因，修它不等于修配置
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command: ["tail", "/dev/zero"]
+          resources:
+            limits:
+              memory: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payments-db
+  namespace: payments
+  labels:
+    app: payments-db
+spec:
+  selector:
+    app: payments-db
+  ports:
+    - port: 5432
+      targetPort: 5432

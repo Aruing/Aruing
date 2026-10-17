@@ -408,8 +408,14 @@ func runChatWith(args []string, stdout, stderr io.Writer) error {
 		return chatStdinLoop(ctx, svc, sessionID, formatVal, stdout, os.Stdin)
 	}
 
-	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回
-	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI, progress)
+	// 交互模式：bubbletea TUI 接管终端（Step 2）；单句模式已在上方返回。
+	// 会话发现能力注入运行时命令（磁盘/内存存储均实现，断言保守；
+	// 缺能力时 /sessions、/session 报不可用，其余命令不受影响）
+	var lister session.SessionLister
+	if l, ok := stack.store.(session.SessionLister); ok {
+		lister = l
+	}
+	return tui.Run(ctx, svc, sessionID, formatVal, stdout, cfg.TUI, progress, lister)
 }
 
 // 退出前关闭磁盘存储句柄（P2-3 生命周期收口）；内存实现无 Close 不受影响，
