@@ -1,0 +1,17 @@
+name: quota-vs-scheduler
+kind_cluster_name: aruing-sc-quota-vs-scheduler
+namespace: billing
+# 给人看的坏态提示；脚本不解析本文件
+# 诱饵清单：payment-svc 模板 nodeSelector kubernetes.io/os=linux（标签实际存在于
+# 节点，若走到调度并不阻塞；ledger-api 带相同 nodeSelector 却 Running 健康）。
+# signature 唯一性：quota/配额/准入/admission/FailedCreate/exceeded 只属于根因
+# （ResourceQuota 满导致 Pod 准入被拒）；诱饵词（nodeSelector/节点/调度/标签）
+# 不进 signature——停在诱饵的结论必 miss（机械判分粗粒度残差见步骤 plan）
+notes: "症状：billing ns 新 Deployment payment-svc 副本恒 0、无 Pod 对象。根因：ResourceQuota compute-resources 已满（ledger-api 占用 requests.cpu 1/1），payment-svc 单 pod 请求 2 CPU 在准入阶段被拒（RS FailedCreate: exceeded quota）。诱饵：nodeSelector 指向真实存在的标签，须证据排除。"
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
+ground_truth:
+  resource_type: resourcequota
+  resource_name: compute-resources
+  namespace: billing
+  fault_type: quota-exhausted-create-rejected
+  fault_signature: [quota, 配额, 准入, admission, FailedCreate, exceeded]

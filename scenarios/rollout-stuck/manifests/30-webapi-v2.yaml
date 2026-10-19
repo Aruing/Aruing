@@ -1,0 +1,48 @@
+# 与 20-webapi-v1.yaml 同名更新（两代 ReplicaSet 生成法）：kubectl apply -f 目录
+# 按文件名字典序逐文件串行 apply（非单请求批改），deployment 控制器在两文件
+# 间隔内即对 v1 建档 revision 1 RS——lab-up / smoke-all / bench-run 多次独立
+# fresh-up 实测均稳定产出两代稳态（3×v1 Ready + 1×v2 0/1）；理论竞态（控制器
+# 极端迟滞时仅单代）为已知残差，翻车预案为场景内强化 v1 先行性，不改台架脚本
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-api
+  namespace: shop
+  labels:
+    app: web-api
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  progressDeadlineSeconds: 120
+  selector:
+    matchLabels:
+      app: web-api
+  template:
+    metadata:
+      labels:
+        app: web-api
+        version: v2
+    spec:
+      containers:
+        # v2 重命名容器（web-api → web-api-v2）：模板差异的可见载体（触发新 RS），
+        # 同时是本场景判分锚（scenario.yaml ground_truth.resource_name——
+        # 诱饵答案必点名 Deployment 名、不涉容器名，见步骤 plan 决策 4）
+        - name: web-api-v2
+          # 与 v1 同款命令：仍监听 8080——发布只改了容器名与探针，容器行为不变
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - "mkdir -p /www && echo ok > /www/healthz && httpd -f -p 8080 -h /www"
+          readinessProbe:
+            # 根因：自检端口抄错（8080 → 8081）。8081 全程无监听 → connection refused
+            # → 新 pod 永不 ready → 滚动更新卡死（3×v1 Ready + 1×v2 Running 0/1）
+            httpGet:
+              path: /healthz
+              port: 8081
+            periodSeconds: 5

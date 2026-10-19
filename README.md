@@ -24,11 +24,11 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-**`0.1.4` — production hardening: persistence, streaming, full-coverage scans.** Everything survives restarts: sessions, messages, diagnostic ledgers (`RunLedger`), and suspended runs persist under `~/.aruing/data`; oversized tool output spills to disk and stays page-able via `evidence.read` beyond the inline truncation point; `aruing sessions` lists past conversations. Chat replies stream token-by-token in both TUI modes (inline / app) — structured reasoning is never streamed, and an interrupted stream fails cleanly with no half-committed message. Oversized tables get an optional map-reduce two-pass full-coverage projection so root causes hidden mid-table are not lost (scenario / config switch; default path unchanged). Everything from 0.1.0–0.1.3 still applies: real-cluster + real-LLM diagnosis, interactive chat, evidence navigation, clarify-suspend/resume, representative projection, acquire-loop & tiered-memory method switches, one-line install and self-update.
+**`0.1.5` — outward completeness: reproducible benchmark, hard scenarios, runtime commands.** The kind fault-scenario harness is now a reproducible evaluation baseline: one command (`make bench-run`) sweeps every scenario through the single-turn diagnosis and long-session probe dimensions with three-tier judging, and artifacts are scrubbed for open sourcing ([`docs/benchmark.md`](docs/benchmark.md)). Twelve scenarios ship — including four high-difficulty ones that separate symptom from root cause and plant decoy faults an agent must rule out with evidence. Inside `aruing chat`, a minimal `/` command set (help / sessions / session / new / exit) behaves identically in both TUI modes: unknown commands error clearly and never go out as chat messages. Everything from 0.1.0–0.1.4 still applies: real-cluster + real-LLM diagnosis, interactive streaming chat, evidence navigation with paged spool reads, clarify-suspend/resume across restarts, representative projection, acquire-loop & tiered-memory method switches, one-line install and self-update.
 
-Not yet built (planned 0.2+/0.3+): write tools with approval, multi-cluster, Web UI, npm distribution. See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
+Not yet built: npm distribution (planned 0.1.6); write tools with approval, multi-cluster, Web UI (planned 0.3+). See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
-Shipped in release [`v0.1.4`](https://github.com/Aruing/Aruing/releases/tag/v0.1.4) (2026-10-09).
+Shipped in release [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) (2026-10-16).
 
 ⚠️ Only simple trials / testing are supported right now — not production-ready.
 
@@ -122,7 +122,7 @@ make lab-chat NAME=crashloop-bad-image MSG="why is demo-api in demo not starting
 make lab-down NAME=crashloop-bad-image
 ```
 
-Five scenarios ship today: `crashloop-bad-image`, `svc-wrong-selector`, `same-name-multi-ns` (incl. a multi-turn clarify-suspend case), `log-time-window` (evidence time-window slicing), `bigtable-fleet` (oversized-table full-coverage map-reduce projection; a scenario-level `chat-env` file injects the non-default projection method). `lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
+Twelve scenarios ship today: `crashloop-bad-image`, `svc-wrong-selector`, `same-name-multi-ns` (incl. a multi-turn clarify-suspend case), `log-time-window` (evidence time-window slicing), `bigtable-fleet` (oversized-table full-coverage map-reduce projection; a scenario-level `chat-env` file injects the non-default projection method), `configmap-missing` (CreateContainerConfigError), `oom-killed`, `pending-nodeselector`, plus four high-difficulty ones that keep symptom and root cause apart and plant decoy faults an agent must rule out with evidence — `shared-config-drift` (config drift + two decoys), `rollout-stuck` (probe-port typo behind an HPA red herring), `quota-vs-scheduler` (quota-rejected creation vs a nodeSelector decoy), `netpol-misfire` (cross-namespace NetworkPolicy label typo, data-plane simulated; high-difficulty judging caveat in `scenarios/README.md`). Every scenario ships a `probe.yaml` (scripted long-session material consumed by the benchmark probe dimension). `lab-chat` / `lab-kube` inject KUBECONFIG for you (no manual export). Not part of `make test` / CI; requires Docker + kind + kubectl locally.
 
 ### Configuration & local LLM
 
@@ -147,6 +147,7 @@ Full list: [`docs/architecture.md`](docs/architecture.md#硬约束) (incl. #15�
 | [`docs/project-state.md`](docs/project-state.md) | Stage, work units, next step |
 | [`docs/README.md`](docs/README.md) | What lives in docs/ vs the private notebook |
 | [`scenarios/README.md`](scenarios/README.md) | Kind fault scenarios: usage, cases protocol, verification |
+| [`docs/benchmark.md`](docs/benchmark.md) | Benchmark: reproduce the evaluation baseline (deps, steps, params, artifacts) |
 | [`aruing.example.yaml`](aruing.example.yaml) / [`tui.example.yaml`](tui.example.yaml) | Annotated config / theme references |
 | [`docs/skills/`](docs/skills) | Project skills (docs, tests, comments, PR description, milestone close, self-check, cluster smoke, retrospective) |
 | [`AGENTS.md`](AGENTS.md) | AI tooling / skill install |

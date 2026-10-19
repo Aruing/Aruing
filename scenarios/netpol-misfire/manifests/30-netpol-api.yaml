@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-to-api
+  namespace: core
+spec:
+  # 作用于 core ns 的 api pod
+  podSelector:
+    matchLabels:
+      app: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        # AND 语义：edge ns 中标签 app=frontend-web 的 pod——错值（实际
+        # app=frontend，见 20-frontend.yaml）→ 规则匹配空集 → api 入站对
+        # 所有人关闭（根因；场景判分锚 resource_name 即本策略名）
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: edge
+          podSelector:
+            matchLabels:
+              app: frontend-web
+      ports:
+        - protocol: TCP
+          port: 8080
