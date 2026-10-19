@@ -71,7 +71,7 @@ irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | i
 
 `~/.aruing/bin` 不在 PATH 时安装器会打印需追加的那一行。从源码安装：`go install github.com/Aruing/Aruing/cmd/aruing@latest` 或 `make build`（源码构建版本号为 dev 且无法自更新；需要可升级安装请用安装脚本）。
 
-后续升级用 `aruing update`（自 GitHub Releases 自更新，带校验和验证）。npm 安装的请用 `npm update -g aruing`。
+后续升级用 `aruing update`（自 GitHub Releases 自更新，带校验和验证）。npm 安装的请用 `npm update -g @aruing/aruing`。
 
 首次使用？用交互式向导配置大模型（写入用户级配置文件，保存前做连通测试）：
 
