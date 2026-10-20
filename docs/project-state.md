@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-10-16（0.1.5 三功能全关闭、发版收口；npm 挪版 0.1.6，当前阶段切换 0.1.6）
+> 最后更新：2026-10-17（保留 0.1.6 规划，同步 npm 功能分支集成及已发布验收状态）
 
 ## 当前阶段
 
@@ -8,7 +8,7 @@
 
 | 功能 | 状态 | 摘要 |
 | --- | --- | --- |
-| npm 发包 | ⏳ 分支推进中 | owner Go-Go-Zeppelin：功能主分支 `feature/0.1.5-npm`（PR #182 已合入）+ 四条步骤分支（scope / package / release / acceptance）；挪版后功能主分支更名 `feat/0.1.6-npm`（操作归 owner）；`npm i -g aruing` 三平台（darwin arm64/amd64 + linux amd64）干净环境装上即用 + release publish 门禁 + `aruing update` 拒绝自替换语义闭环 |
+| npm 发包 | ⏳ 集成与验收中 | owner Go-Go-Zeppelin：四个步骤已合入功能主分支 `feature/0.1.5-npm`，汇总 PR #194 待合入 `main`；`@aruing` 四包已发布 0.1.4，macOS arm64 的 registry 安装、版本、更新保护与帮助入口通过，三平台候选安装 CI 通过；完整产品验收、其他平台 registry 安装及自动发布认证待完成 |
 | `/` 行内命令体验 | 未开始 | pi 式命令面板：输入 `/` 即菜单（命令 + 用途，与 `/help` 同源）、随输入过滤、键位导航选择/补全/执行；inline / app 双模式一致；`internal/tui` 纯展示层（#20） |
 
 版本级完成标志一句话：npm 干净环境即用（校验 / 防降级对齐 release）+ 命令面板双模式一致且与流式共存无半截 + `make check` 与 `make smoke-all` 全绿 + `v0.1.6` tag（含 npm 包）。
@@ -30,14 +30,14 @@
 
 | # | 模块 | 状态 | 备注 |
 | - | --- | --- | --- |
-| 1 | npm 包源 + `.github/workflows/release.yml` publish 门禁 | ⏳ | owner Go-Go-Zeppelin 分支推进（`feature/0.1.5-npm` 系列，挪版后更名 `feat/0.1.6-npm`，操作归 owner）；平台子包（主包 + optionalDeps）复用 release 资产与 checksums；预期零 `internal/` 改动 |
+| 1 | npm 包源 + `.github/workflows/npm-publish.yml` publish 门禁 | ⏳ | 主包 `@aruing/aruing` + 三平台精确版本 optionalDeps，复用官方 Release 资产与 checksums；安装校验、npm 更新保护及先平台后主包发布已实现，未改 `internal/`；汇总集成与剩余验收待完成 |
 | 2 | `internal/tui` 命令面板 + `cmd` chat 交互接线 | 未开始 | pi 式：`/` 即菜单、随输入过滤、键位导航；双模式一致；纯展示层（#20）；功能头 draft 在笔记仓 `plan/0.1.6/inline-ux/` |
 
 产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
 ## 下一步
 
-**进行中**：npm 发包（0.1.6，owner Go-Go-Zeppelin 分支推进中；挪版后功能主分支更名 `feat/0.1.6-npm`，状态同步归其功能头）。
+**进行中**：npm 发包（0.1.6，owner Go-Go-Zeppelin）：完成汇总 PR #194 集成、macOS Intel / Linux x64 的真实 registry 安装、真实 LLM 与集群诊断及四包自动发布认证。当前 PR 沿用 `feature/0.1.5-npm`；迁版分支命名待 owner 对齐。
 
 **待认领**：`/` 行内命令体验（0.1.6，功能头 draft 已立笔记仓；认领时更新 owner）。
 
