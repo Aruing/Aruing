@@ -17,6 +17,9 @@ type styles struct {
 	spinner   lipgloss.Style
 	prompt    lipgloss.Style
 	divider   lipgloss.Style
+	// 命令面板（/ 菜单）：正文行与选中行（选中行叠加 ❯ 前缀，由渲染点拼）
+	menu         lipgloss.Style
+	menuSelected lipgloss.Style
 	// 块间距显式值（默认 defaultSpacing；主题 margin 声明覆盖）
 	spacing spacing
 	// 称呼开关与文案（默认关；开启后称呼独立一行 + 换行 + 内容）
@@ -66,26 +69,30 @@ func loadStyles(theme, themeFile string) (styles, error) {
 // 显式值由消费点输出（margin 若进样式项，Render 块级应用会与手动空行双重叠加）
 func darkStyles() styles {
 	return styles{
-		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
-		err:       lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
-		system:    lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
-		spinner:   lipgloss.NewStyle().Foreground(lipgloss.Color("212")),
-		prompt:    lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		user:         lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
+		assistant:    lipgloss.NewStyle().Foreground(lipgloss.Color("252")),
+		err:          lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Bold(true),
+		system:       lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+		spinner:      lipgloss.NewStyle().Foreground(lipgloss.Color("212")),
+		prompt:       lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
+		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		menu:         lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
+		menuSelected: lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
 	}
 }
 
 // 亮色主题色表
 func lightStyles() styles {
 	return styles{
-		user:      lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
-		assistant: lipgloss.NewStyle().Foreground(lipgloss.Color("238")),
-		err:       lipgloss.NewStyle().Foreground(lipgloss.Color("124")).Bold(true),
-		system:    lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
-		spinner:   lipgloss.NewStyle().Foreground(lipgloss.Color("99")),
-		prompt:    lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
-		divider:   lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
+		user:         lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
+		assistant:    lipgloss.NewStyle().Foreground(lipgloss.Color("238")),
+		err:          lipgloss.NewStyle().Foreground(lipgloss.Color("124")).Bold(true),
+		system:       lipgloss.NewStyle().Foreground(lipgloss.Color("242")),
+		spinner:      lipgloss.NewStyle().Foreground(lipgloss.Color("99")),
+		prompt:       lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
+		divider:      lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
+		menu:         lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		menuSelected: lipgloss.NewStyle().Foreground(lipgloss.Color("27")).Bold(true),
 	}
 }
 

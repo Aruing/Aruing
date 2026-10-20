@@ -283,3 +283,116 @@ func TestUpdateStreamingCancel(t *testing.T) {
 		t.Fatal("next turn must remain available")
 	}
 }
+
+// 命令面板：'/' 即菜单（含键位自述行）；↑↓ 改选中并钳制；Esc 关闭后编辑重开
+func TestUpdatePaletteMenuAndKeys(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/")
+	m.refreshPalette()
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "/sessions") || !strings.Contains(view, "/exit") {
+		t.Fatalf("menu missing commands: %q", view)
+	}
+	if !strings.Contains(view, paletteKeyHint) {
+		t.Fatalf("menu missing key hint: %q", view)
+	}
+
+	m.input.SetValue("/s")
+	m.refreshPalette()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if doc, ok := m.palette.selectedDoc(); !ok || doc.name != "session" {
+		t.Fatalf("selected after down = %+v", doc)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // 钳制：仍停在顶部
+	m = updated.(Model)
+	if doc, _ := m.palette.selectedDoc(); doc.name != "sessions" {
+		t.Fatalf("selection should clamp at top, got %+v", doc)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.menuVisible() || strings.Contains(stripANSI(m.View()), paletteKeyHint) {
+		t.Fatal("esc should hide menu")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m = updated.(Model)
+	if !m.menuVisible() {
+		t.Fatal("edit should reopen menu")
+	}
+}
+
+// Tab 补全：选中命令名写入输入框，需参命令带尾空格
+func TestUpdatePaletteTabComplete(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/se")
+	m.refreshPalette()
+	m.palette = m.palette.moveSel(1) // → session
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if got := m.input.Value(); got != "/session " {
+		t.Fatalf("tab complete = %q", got)
+	}
+}
+
+// Enter 执行选中项：裸命令替换后走既有命令分支，输出入历史、不进 Turn、菜单随提交消失
+func TestUpdatePaletteEnterExecutesSelected(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/hel")
+	m.refreshPalette()
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.busy || cmd != nil {
+		t.Fatal("palette enter on command must not start a turn")
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "system" {
+		t.Fatalf("command output missing: %+v", um.messages)
+	}
+	if !strings.Contains(um.messages[0].text, "/sessions") {
+		t.Fatalf("help output = %q", um.messages[0].text)
+	}
+	if um.menuVisible() {
+		t.Fatal("menu should close after command submit")
+	}
+}
+
+// 裸需参命令回车：既有用法错误引导补参，不当消息发送
+func TestUpdatePaletteEnterArgCommandUsageError(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/se")
+	m.refreshPalette()
+	m.palette = m.palette.moveSel(1)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.busy {
+		t.Fatal("usage error must not start turn")
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "error" || !strings.Contains(um.messages[0].text, "用法") {
+		t.Fatalf("messages = %+v", um.messages)
+	}
+}
+
+// 已输参数时 Enter 原样提交（不替换为选中项）；busy 时 Enter 不执行
+func TestUpdatePaletteEnterWithArgsAndBusy(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/session abc")
+	m.refreshPalette()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	// lister 未注入：走既有 switchSession 路径报不可用（证明未被替换成裸命令）
+	if len(um.messages) != 1 || !strings.Contains(um.messages[0].text, "不可用") {
+		t.Fatalf("messages = %+v", um.messages)
+	}
+
+	m2 := newTestModel()
+	m2.busy = true
+	m2.input.SetValue("/hel")
+	m2.refreshPalette()
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um = updated.(Model)
+	if len(um.messages) != 0 {
+		t.Fatalf("busy enter must not execute: %+v", um.messages)
+	}
+}
