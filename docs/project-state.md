@@ -37,11 +37,11 @@
 
 ## 下一步
 
-**进行中**：npm 发包（0.1.6，owner Go-Go-Zeppelin）：完成汇总 PR #194 集成、macOS Intel / Linux x64 的真实 registry 安装、真实 LLM 与集群诊断及四包自动发布认证。当前 PR 沿用 `feature/0.1.5-npm`；迁版分支命名待 owner 对齐。
+**下一项**：v0.1.5 发版收口——release/sync 快照 → PR to production → tag。npm 剩余验收（macOS Intel / Linux x64 真实 registry 安装、真实 LLM 与集群诊断、四包自动发布认证）归 owner Go-Go-Zeppelin，记录见笔记仓功能头活段。
 
 **待认领**：`/` 行内命令体验（0.1.6，功能头 draft 已立笔记仓；认领时更新 owner）。
 
-**版本收口清单**（功能全绿后）：`make check` + `make smoke-all`（12 场景）集成验证 → README 双语 Current stage / Install 收尾同改 → `v0.1.6` tag（含 npm 包）。
+**版本收口清单**（0.1.6 功能全绿后）：`make check` + `make smoke-all`（12 场景）集成验证 → README 双语 Current stage / Install 收尾同改 → `v0.1.6` tag。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）：
 

@@ -24,11 +24,11 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 ## Current stage
 
-**`0.1.5` — outward completeness: reproducible benchmark, hard scenarios, runtime commands.** The kind fault-scenario harness is now a reproducible evaluation baseline: one command (`make bench-run`) sweeps every scenario through the single-turn diagnosis and long-session probe dimensions with three-tier judging, and artifacts are scrubbed for open sourcing ([`docs/benchmark.md`](docs/benchmark.md)). Twelve scenarios ship — including four high-difficulty ones that separate symptom from root cause and plant decoy faults an agent must rule out with evidence. Inside `aruing chat`, a minimal `/` command set (help / sessions / session / new / exit) behaves identically in both TUI modes: unknown commands error clearly and never go out as chat messages. Everything from 0.1.0–0.1.4 still applies: real-cluster + real-LLM diagnosis, interactive streaming chat, evidence navigation with paged spool reads, clarify-suspend/resume across restarts, representative projection, acquire-loop & tiered-memory method switches, one-line install and self-update.
+**`0.1.5` — outward completeness: reproducible benchmark, hard scenarios, runtime commands, npm distribution.** The kind fault-scenario harness is now a reproducible evaluation baseline: one command (`make bench-run`) sweeps every scenario through the single-turn diagnosis and long-session probe dimensions with three-tier judging, and artifacts are scrubbed for open sourcing ([`docs/benchmark.md`](docs/benchmark.md)). Twelve scenarios ship — including four high-difficulty ones that separate symptom from root cause and plant decoy faults an agent must rule out with evidence. Inside `aruing chat`, a minimal `/` command set (help / sessions / session / new / exit) behaves identically in both TUI modes: unknown commands error clearly and never go out as chat messages. The CLI is also distributed via npm — `npm i -g @aruing/aruing` resolves a platform-matched binary at install time, verified against release checksums; npm-installed binaries refuse `aruing update` self-replacement and point to `npm update -g @aruing/aruing`. Everything from 0.1.0–0.1.4 still applies: real-cluster + real-LLM diagnosis, interactive streaming chat, evidence navigation with paged spool reads, clarify-suspend/resume across restarts, representative projection, acquire-loop & tiered-memory method switches, one-line install and self-update.
 
-Not yet built: npm distribution (planned 0.1.6); write tools with approval, multi-cluster, Web UI (planned 0.3+). See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
+Not yet built: write tools with approval, multi-cluster, Web UI (planned 0.3+). See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
-Shipped in release [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) (2026-10-16).
+Shipped in release [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) (2026-10-19).
 
 ⚠️ Only simple trials / testing are supported right now — not production-ready.
 
@@ -67,6 +67,12 @@ curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.
 ```powershell
 # Windows (PowerShell) — experimental: core commands verified; interactive `chat` TUI not yet validated on real Windows terminals
 irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | iex
+```
+
+Or via npm (resolves the platform binary at install time, checksum-verified against the release):
+
+```bash
+npm i -g @aruing/aruing
 ```
 
 If `~/.aruing/bin` is not on your `PATH`, the installer prints the exact line to add. From source: `go install github.com/Aruing/Aruing/cmd/aruing@latest` or `make build` (source builds report `version dev` and cannot self-update; prefer the install script for upgradable installs).
