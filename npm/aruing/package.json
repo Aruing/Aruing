@@ -1,0 +1,31 @@
+{
+  "name": "@aruing/aruing",
+  "version": "0.1.5",
+  "description": "Kubernetes operations agent with traceable tool evidence",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aruing/Aruing.git",
+    "directory": "npm/aruing"
+  },
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "bin": {
+    "aruing": "bin/aruing.js"
+  },
+  "files": [
+    "bin/aruing.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "optionalDependencies": {
+    "@aruing/aruing-darwin-arm64": "0.1.5",
+    "@aruing/aruing-darwin-x64": "0.1.5",
+    "@aruing/aruing-linux-x64": "0.1.5"
+  }
+}
