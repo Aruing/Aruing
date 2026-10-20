@@ -28,7 +28,7 @@ Tools go through a shared **Registry / Dispatcher** (shell-less kubectl backend,
 
 Not yet built: write tools with approval, multi-cluster, Web UI (planned 0.3+). See [`docs/project-state.md`](docs/project-state.md) for the live roadmap.
 
-Shipped in release [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) (2026-10-19).
+Shipped in release [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) (2026-10-20).
 
 ⚠️ Only simple trials / testing are supported right now — not production-ready.
 
