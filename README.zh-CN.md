@@ -24,11 +24,11 @@
 
 ## 当前阶段
 
-**`0.1.5` —— 对外完备批：可复现评测基准 + 高难场景 + 运行时命令。** kind 故障场景台架升格为可复现评测基准：一条命令（`make bench-run`）跑批全部场景的单轮诊断维与长会话探针维并做三层判分，产物经开源清洗可公开（见 [`docs/benchmark.md`](docs/benchmark.md)）。场景增至 12 个——含 4 个高难场景：症状与根因拉开因果距离、植入必须以证据排除的诱饵故障。`aruing chat` 内支持 `/` 运行时命令最小集（help / sessions / session / new / exit），inline / app 双模式行为一致：未知命令明确报错，不会误发为聊天消息。0.1.0–0.1.4 的能力全部保留：真集群 + 真 LLM 诊断、交互式流式对话、证据导航与超巨输出翻页、跨重启澄清挂起与恢复、代表性投影、取证决策与分层记忆方法开关、一行安装与自更新。
+**`0.1.5` —— 对外完备批：可复现评测基准 + 高难场景 + 运行时命令 + npm 分发。** kind 故障场景台架升格为可复现评测基准：一条命令（`make bench-run`）跑批全部场景的单轮诊断维与长会话探针维并做三层判分，产物经开源清洗可公开（见 [`docs/benchmark.md`](docs/benchmark.md)）。场景增至 12 个——含 4 个高难场景：症状与根因拉开因果距离、植入必须以证据排除的诱饵故障。`aruing chat` 内支持 `/` 运行时命令最小集（help / sessions / session / new / exit），inline / app 双模式行为一致：未知命令明确报错，不会误发为聊天消息。CLI 亦经 npm 分发——`npm i -g @aruing/aruing` 安装时解析平台二进制并按 release 校验和验证；npm 安装的二进制拒绝 `aruing update` 自替换并引导 `npm update -g @aruing/aruing`。0.1.0–0.1.4 的能力全部保留：真集群 + 真 LLM 诊断、交互式流式对话、证据导航与超巨输出翻页、跨重启澄清挂起与恢复、代表性投影、取证决策与分层记忆方法开关、一行安装与自更新。
 
-尚未构建：npm 分发（计划 0.1.6）；带审批的写工具、多集群、Web UI（计划 0.3+）。路线图见 [`docs/project-state.md`](docs/project-state.md)。
+尚未构建：带审批的写工具、多集群、Web UI（计划 0.3+）。路线图见 [`docs/project-state.md`](docs/project-state.md)。
 
-已随 [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) 发布（2026-10-16）。
+已随 [`v0.1.5`](https://github.com/Aruing/Aruing/releases/tag/v0.1.5) 发布（2026-10-19）。
 
 ⚠️ 当前仅支持简单试用 / 测试——未达生产可用。
 
@@ -67,6 +67,12 @@ curl -fsSL https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.
 ```powershell
 # Windows（PowerShell）—— experimental：基础命令已验证；交互式 `chat` TUI 未在真实 Windows 终端验证
 irm https://raw.githubusercontent.com/Aruing/Aruing/main/scripts/install.ps1 | iex
+```
+
+或经 npm 安装（安装时解析平台二进制，按 release 校验和验证）：
+
+```bash
+npm i -g @aruing/aruing
 ```
 
 `~/.aruing/bin` 不在 PATH 时安装器会打印需追加的那一行。从源码安装：`go install github.com/Aruing/Aruing/cmd/aruing@latest` 或 `make build`（源码构建版本号为 dev 且无法自更新；需要可升级安装请用安装脚本）。
