@@ -196,7 +196,7 @@ func TestHelpMatchesPaletteRows(t *testing.T) {
 		}
 		want += "  " + d.usage
 		// 菜单行带选中前缀（全量视图默认选中首行）或对齐空格，去掉后应与 /help 同形
-		if got := strings.TrimLeft(rows[i].text, "\u276f  "); got != want {
+		if got := strings.TrimLeft(rows[i].text, "\u276f "); got != want {
 			t.Fatalf("menu row %d = %q, want %q", i, got, want)
 		}
 		if got := lines[i+1]; got != want {
