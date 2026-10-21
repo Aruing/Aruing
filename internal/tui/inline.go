@@ -402,24 +402,36 @@ func (n *newlineKeyReader) translateMenuKeys(in []byte) []byte {
 		return in
 	}
 	out := make([]byte, 0, len(in)+len(menuInjectSeq))
+	// 块内顺序可见性：Esc 关闭菜单后，同读块内后续键不再拦截（归还历史
+	// 导航）；本块内不会重新激活（激活依赖 Listener 重算，块级模拟只需关闭方向）
+	vis := true
 	for len(in) > 0 {
 		switch {
-		case bytes.HasPrefix(in, menuUpSeq):
+		case vis && bytes.HasPrefix(in, menuUpSeq):
 			// ↑ 不进 readline：菜单激活时防历史导航接管方向键
 			n.ctl.pushIntent(intentUp)
 			out = append(out, menuInjectSeq...)
 			in = in[len(menuUpSeq):]
-		case bytes.HasPrefix(in, menuDownSeq):
+		case vis && bytes.HasPrefix(in, menuDownSeq):
 			n.ctl.pushIntent(intentDown)
 			out = append(out, menuInjectSeq...)
 			in = in[len(menuDownSeq):]
-		case len(in) == 1 && in[0] == '\x1b':
+		case vis && in[0] == '\x1b' && len(in) > 1 && in[1] == '\x1b':
+			// 同读块内 Esc 后随另一按键（如 Esc+↑ 批量到达，终端把两次按键
+			// 合进一次 Read）：首字节按 Esc 键关闭菜单，后续键不再拦截。真
+			// alt+方向键（\x1b\x1b[A）同编码命中此分支——alt+方向罕见，让位
+			// 保 Esc 语义（pr-agent 批量路径）
+			n.ctl.pushIntent(intentEsc)
+			out = append(out, menuInjectSeq...)
+			in = in[1:]
+			vis = false
+		case vis && len(in) == 1 && in[0] == '\x1b':
 			// 孤立 Esc：剩余恰为单字节 \x1b 视为 Esc 键；与被拆包的序列头
 			// 无法区分，退化沿既有拆包容忍（文档化）
 			n.ctl.pushIntent(intentEsc)
 			out = append(out, menuInjectSeq...)
 			in = nil
-		case in[0] == '\t':
+		case vis && in[0] == '\t':
 			// Tab 透传（readline 插入 '\t' 后回调 Listener 补全）+ 注入重画
 			// 意图：补全改写缓冲触发的全量重绘会把菜单清掉，由注入键重画
 			n.ctl.pushIntent(intentRedraw)

@@ -317,6 +317,9 @@ func TestTranslateMenuKeys(t *testing.T) {
 		{"换行序列不被菜单段碰", visible(), "\x1b[27;2;13~", "\x1b[27;2;13~", nil, true},
 		{"不可见全透传", func() *paletteCtl { return &paletteCtl{} }(), "\x1b[A\t\x1b", "\x1b[A\t\x1b", nil, true},
 		{"无 ctl 全透传", nil, "\x1b[A\t\x1b", "\x1b[A\t\x1b", nil, true},
+		{"批量 Esc+↑：Esc 关菜单后同块键透传", visible(), "\x1b\x1b[A", "\x1b[Z\x1b[A", []paletteIntent{intentEsc}, false},
+		{"批量 Esc+↑+Tab：同块内全部不再拦截", visible(), "\x1b\x1b[A\t", "\x1b[Z\x1b[A\t", []paletteIntent{intentEsc}, false},
+		{"Esc 后随普通键（alt+字母歧义）不识别为 Esc", visible(), "\x1b\t\x1b[B", "\x1b\t\x1b[Z\x1b[Z", []paletteIntent{intentRedraw, intentDown}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
