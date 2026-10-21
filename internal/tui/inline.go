@@ -122,6 +122,8 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		// 效果应用次序固定：清屏 → 换主题 → 渲染输出行 —— 渲染必须排在两者之后，
 		// 否则确认行会被随后的擦屏抹掉、换成新主题的确认行也用旧色表
 		if res, handled := execInlineCommand(ctx, cmdEnv, text); handled {
+			// 会话选择器：列表由模态绘制，不另印文本；取列表失败只报错不开选择器
+			res = openInlinePicker(ctx, out, ctl, lister, sessionID, rstate.st, res)
 			var themed bool
 			res, themed = rstate.applyCommandEffects(res, out, ctl, themeFile)
 			if themed {
@@ -207,6 +209,26 @@ func (s *inlineRenderState) applyCommandEffects(res commandResult, out io.Writer
 // 的样式快照会让 /theme 之后的第一条用户消息仍是旧色（启动快照族）
 func (s *inlineRenderState) echoUser(out io.Writer, text string) {
 	echoUserMessage(out, s.st, text)
+}
+
+// openInlinePicker 处理 /session 无参：同步取一次会话列表快照并打开选择器。
+// 能力缺失或列举失败只把原因作为输出行，不打开选择器（与 /sessions 同文案）
+func openInlinePicker(ctx context.Context, out io.Writer, ctl *paletteCtl, lister session.SessionLister, current string, st styles, res commandResult) commandResult {
+	if !res.pickSession {
+		return res
+	}
+	res.pickSession = false
+	if lister == nil {
+		res.lines = append(res.lines, renderLine{text: "会话列表不可用（当前存储未提供会话发现能力）", isError: true})
+		return res
+	}
+	summaries, err := lister.ListSessions(ctx)
+	if err != nil {
+		res.lines = append(res.lines, renderLine{text: "列出会话失败：" + err.Error(), isError: true})
+		return res
+	}
+	ctl.openPicker(out, st, sessionItems(summaries, current))
+	return res
 }
 
 // renderCommandLines 渲染命令输出：错误行走错误样式，其余走系统样式
@@ -463,15 +485,18 @@ var (
 	menuInjectSeq = []byte("\x1b[Z")
 )
 
-// translateMenuKeys 菜单可见时把 ↑↓/孤立 Esc/Tab 翻译为注入序列并把意图
-// 入队，其余字节原样透传（含换行序列，交后续 translateNewlineSeqs）；
-// 菜单不可见时整体原样返回，保留 ↑↓ 历史导航、Tab 插字符、Esc 的既有
-// readline 行为。注入的序列只追加到输出、不回扫，不会被二次翻译。
+// translateMenuKeys 菜单可见或会话选择器打开时把 ↑↓/孤立 Esc/Tab 翻译为注入序列
+// 并把意图入队，其余字节原样透传（含换行序列，交后续 translateNewlineSeqs）；
+// 两者都不可见时整体原样返回，保留 ↑↓ 历史导航、Tab 插字符、Esc 的既有
+// readline 行为。选择器下 Tab 直接吞掉（输入行是过滤词，无补全语义）。
+// 注入的序列只追加到输出、不回扫，不会被二次翻译。
 // 只在本包装层 Read（ioloop goroutine）内调用，经 ctl 锁与主 goroutine 交互
 func (n *newlineKeyReader) translateMenuKeys(in []byte) []byte {
-	if n.ctl == nil || !n.ctl.visible() {
+	if n.ctl == nil || !n.ctl.active() {
 		return in
 	}
+	// 选择器是模态：它的键位语义与命令菜单不同（Tab 无意义），逐键判定
+	picker := n.ctl.pickerVisible()
 	out := make([]byte, 0, len(in)+len(menuInjectSeq))
 	// 块内顺序可见性：Esc 关闭菜单后，同读块内后续键不再拦截（归还历史
 	// 导航）；本块内不会重新激活（激活依赖 Listener 重算，块级模拟只需关闭方向）
@@ -502,6 +527,9 @@ func (n *newlineKeyReader) translateMenuKeys(in []byte) []byte {
 			n.ctl.pushIntent(intentEsc)
 			out = append(out, menuInjectSeq...)
 			in = nil
+		case vis && picker && in[0] == '\t':
+			// 选择器下 Tab 无补全语义：吞掉，避免在过滤词里插入制表符
+			in = in[1:]
 		case vis && in[0] == '\t':
 			// Tab 透传（readline 插入 '\t' 后回调 Listener 补全）+ 注入重画
 			// 意图：补全改写缓冲触发的全量重绘会把菜单清掉，由注入键重画

@@ -67,6 +67,11 @@ type Model struct {
 	// Esc 抑制（菜单关闭，任意编辑后重开）
 	palette    paletteView
 	paletteOff bool
+	// 会话选择器（/session 无参）：pickerOn 为模态开关，pickerItems 为打开
+	// 瞬间的会话快照（之后的过滤都在内存里做），picker 为当前过滤视图
+	pickerOn    bool
+	picker      pickerView
+	pickerItems []sessionItem
 
 	busy   bool
 	quit   bool
@@ -143,6 +148,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// 会话选择器是模态，优先级最高：↑↓/Esc/Enter 由它消费，其余编辑键
+		// 进输入框作为过滤词
+		if m.pickerOn {
+			if handled, cmd := m.updatePicker(msg); handled {
+				return m, cmd
+			}
+		}
 		// 菜单激活时的专属键位：↑↓/Tab/Esc 不进 textarea（消费）；
 		// busy 中仍可浏览导航，Enter 不执行由下方既有 busy 拦截承接（设计钉死）
 		if m.updatePaletteKeys(msg) {
@@ -184,13 +196,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					res = runCommand(m.ctx, m.commandEnv(), name, args)
 				}
-				// 效果应用次序与 inline 一致：清屏 → 换主题 → 追加输出行
+				// 效果应用次序与 inline 一致：清屏 → 换主题 → 会话选择器 → 输出行
 				if res.clearDisplay {
 					// 只清视图历史：Store 全量保留，切回即恢复语义与 /session 切换同口径
 					m.messages = nil
 				}
 				if res.theme != "" {
 					res = m.applyTheme(res)
+				}
+				if res.pickSession {
+					res = m.openPicker(res)
 				}
 				if res.quit {
 					m.quit = true
@@ -283,6 +298,83 @@ func (m *Model) applyTheme(res commandResult) commandResult {
 	return res
 }
 
+// 应用会话选择器打开效果：同步取一次列表快照；能力缺失或列举失败只把原因
+// 作为输出行，不打开选择器（与 /sessions 同文案）
+func (m *Model) openPicker(res commandResult) commandResult {
+	res.pickSession = false
+	if m.lister == nil {
+		res.lines = append(res.lines, renderLine{text: "会话列表不可用（当前存储未提供会话发现能力）", isError: true})
+		return res
+	}
+	summaries, err := m.lister.ListSessions(m.ctx)
+	if err != nil {
+		res.lines = append(res.lines, renderLine{text: "列出会话失败：" + err.Error(), isError: true})
+		return res
+	}
+	m.pickerItems = sessionItems(summaries, m.sessionID)
+	m.picker = pickerView{items: m.pickerItems}
+	m.pickerOn = true
+	return res
+}
+
+// 选择器模态键位：↑↓ 改选中、Esc 关闭、Enter 切换、其余编辑键作为过滤词进
+// 输入框（值变化后重算过滤）。返回 handled 表示该键已被选择器消费
+func (m *Model) updatePicker(msg tea.Msg) (bool, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false, nil
+	}
+	switch km.Type {
+	case tea.KeyUp:
+		m.picker = m.picker.moveSel(-1)
+		return true, nil
+	case tea.KeyDown:
+		m.picker = m.picker.moveSel(1)
+		return true, nil
+	case tea.KeyEscape:
+		m.closePicker()
+		return true, nil
+	case tea.KeyEnter:
+		// 生成中不切换：与既有 busy 拦截同语义
+		if m.busy {
+			return true, nil
+		}
+		item, picked := m.picker.selected()
+		m.closePicker()
+		switch {
+		case picked && item.cur:
+			// 选中当前会话：不清视图历史（与 /session <当前 id> 一致）
+			m.messages = append(m.messages, msgView{kind: "system", text: "已在该会话 " + item.id})
+		case picked:
+			m.sessionID = item.id
+			// 切换后清空视图历史（与 /session <id> 同口径：Store 全量保留）
+			m.messages = nil
+			m.messages = append(m.messages, msgView{kind: "system", text: "已切换到会话 " + item.id})
+		default:
+			m.messages = append(m.messages, msgView{kind: "system", text: "暂无可切换的会话"})
+		}
+		syncViewport(m)
+		return true, nil
+	case tea.KeyCtrlC:
+		// 退出语义归主分支：不在这里吞掉
+		return false, nil
+	}
+	prev := m.input.Value()
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != prev {
+		m.picker = pickerView{items: filterSessions(m.pickerItems, m.input.Value())}
+	}
+	return true, cmd
+}
+
+// 关闭选择器并复位过滤态（输入框由调用方清空：命令分支已统一 Reset）
+func (m *Model) closePicker() {
+	m.pickerOn = false
+	m.picker = pickerView{}
+	m.pickerItems = nil
+}
+
 // menuVisible 报告菜单当前是否显示（有过滤结果且未被 Esc 抑制）
 func (m *Model) menuVisible() bool {
 	return m.palette.active() && !m.paletteOff
@@ -342,15 +434,21 @@ func (m Model) View() string {
 	}
 	b.WriteString("\n" + m.styles.divider.Render(strings.Repeat("─", w)) + "\n")
 	// 命令面板：菜单行在分割线与输入框之间，行正文与 /help 同形（#20：样式
-	// 只经 menu / menu_selected 主题 token）
-	if m.menuVisible() {
-		for _, ln := range paletteRows(m.palette) {
-			st := m.styles.menu
-			if ln.selected {
-				st = m.styles.menuSelected
-			}
-			b.WriteString(st.Render(ln.text) + "\n")
+	// 只经 menu / menu_selected 主题 token）。会话选择器与菜单互斥：打开时
+	// 只画会话条目（行类型与样式 token 同源）
+	var panelRows []paletteLine
+	switch {
+	case m.pickerOn:
+		panelRows = pickerRows(m.picker)
+	case m.menuVisible():
+		panelRows = paletteRows(m.palette)
+	}
+	for _, ln := range panelRows {
+		st := m.styles.menu
+		if ln.selected {
+			st = m.styles.menuSelected
 		}
+		b.WriteString(st.Render(ln.text) + "\n")
 	}
 	b.WriteString(m.styles.prompt.Render("❯ ") + m.input.View())
 	return b.String()

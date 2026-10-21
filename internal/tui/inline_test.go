@@ -399,3 +399,42 @@ func TestInlineEchoUserFollowsTheme(t *testing.T) {
 		t.Fatal("echo still used the startup theme")
 	}
 }
+
+// /session 无参会话选择器打开路径：有列表能力则打开并绘制，缺能力 / 列举失败
+// 只报错不开选择器（与 /sessions 同文案）
+func TestOpenInlinePicker(t *testing.T) {
+	st := mustLoadStyles("dark")
+	summaries := []session.SessionSummary{{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"}}
+
+	t.Run("打开", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		res := openInlinePicker(context.Background(), &b, c, fakeLister{summaries: summaries}, "sess_a", st, commandResult{pickSession: true})
+		if res.pickSession || len(res.lines) != 0 {
+			t.Fatalf("res = %+v, want plain success", res)
+		}
+		if !c.pickerVisible() {
+			t.Fatal("picker should be open")
+		}
+	})
+
+	for name, tc := range map[string]struct {
+		lister session.SessionLister
+		want   string
+	}{
+		"缺能力":  {nil, "不可用"},
+		"列举失败": {fakeLister{err: errBoom}, "列出会话失败"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := &paletteCtl{}
+			var b bytes.Buffer
+			res := openInlinePicker(context.Background(), &b, c, tc.lister, "", st, commandResult{pickSession: true})
+			if c.pickerVisible() {
+				t.Fatal("picker must stay closed on failure")
+			}
+			if len(res.lines) != 1 || !res.lines[0].isError || !strings.Contains(res.lines[0].text, tc.want) {
+				t.Fatalf("lines = %+v, want error containing %q", res.lines, tc.want)
+			}
+		})
+	}
+}
