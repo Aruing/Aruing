@@ -192,6 +192,63 @@ func TestPaletteRepaintGeometry(t *testing.T) {
 	if !strings.HasPrefix(b.String(), "\x1b[K\n\r\x1b[2K") {
 		t.Fatalf("hide sweep must anchor below the input line: %q", b.String()[:min(24, b.Len())])
 	}
+
+	// 折行续行上的光标列还原：余数列而非全宽。带参长行（/session + 91 字符
+	// 参数，光标行尾）前缀 102 列、宽 80 → 光标在续行 22 列；菜单命中 session
+	// 单条 + 键位行，上移 = down(1) + sweep(2) - 1
+	c2 := &paletteCtl{}
+	var b2 bytes.Buffer
+	c2.onLine(&b2, st, []rune("/session "+strings.Repeat("a", 91)), 100)
+	out2 := b2.String()
+	wantTail2 := fmt.Sprintf("\x1b[%dA\r\x1b[%dC", 3, 22)
+	if !strings.HasSuffix(out2, wantTail2) {
+		t.Fatalf("wrapped restore tail = ..., want suffix %q in %q", wantTail2, out2)
+	}
+}
+
+// cursorColOnRow：列位余数与行末悬挂边界的纯函数钉板
+func TestCursorColOnRow(t *testing.T) {
+	cases := []struct {
+		prefixCols, width, want int
+	}{
+		{3, 80, 3},   // 单行短前缀：列即前缀宽
+		{80, 80, 80}, // 恰为整数倍：行末悬挂位（CUF 钳边，既有容忍）
+		{102, 80, 22},
+		{161, 80, 1},
+	}
+	for _, c := range cases {
+		if got := cursorColOnRow(c.prefixCols, c.width); got != c.want {
+			t.Fatalf("cursorColOnRow(%d, %d) = %d, want %d", c.prefixCols, c.width, got, c.want)
+		}
+	}
+}
+
+// 擦除路径必须复位视图：否则下个提示符 visible() 恒真，包装层劫持 ↑↓
+// 历史导航（提交路径 clearBelow 清屏但不复位的回归）
+func TestEraseResetsView(t *testing.T) {
+	st := mustLoadStyles("dark")
+	var b bytes.Buffer
+
+	// clearBelow（提交路径）
+	c, _ := newVisibleCtl(t, "/")
+	c.clearBelow(&b)
+	if c.visible() {
+		t.Fatal("clearBelow must reset the stale view")
+	}
+
+	// 初始回调（rows 已被 clearBelow 清零，复位不能藏在 if 里）
+	c2, _ := newVisibleCtl(t, "/")
+	c2.rows = 0
+	c2.onLine(&b, st, nil, 0)
+	if c2.visible() {
+		t.Fatal("initial callback must reset the view regardless of rows")
+	}
+
+	// 复位后包装层不再拦截 ↑（归还历史导航）
+	n := &newlineKeyReader{ctl: c2}
+	if got := n.translateMenuKeys([]byte("\x1b[A")); string(got) != "\x1b[A" {
+		t.Fatalf("arrow should pass through after reset, got %q", got)
+	}
 }
 
 // 锚定几何：菜单锚在输入显示末行之下——折行 + 光标行中时下移量补足，

@@ -93,11 +93,14 @@ func (c *paletteCtl) setView(v paletteView, off bool) {
 // 的场景），清到屏尾安全；空行不折行，不会误伤输入显示
 func (c *paletteCtl) onLine(out io.Writer, st styles, line []rune, pos int) {
 	if line == nil {
+		// 无论是否残留：视图必须复位——提交路径 clearBelow 只清屏上菜单，
+		// 不复位视图会让 visible() 恒真、包装层在新提示符继续拦截 ↑↓（历史
+		// 导航被劫持直到下一个普通键）
 		if c.rows > 0 {
 			fmt.Fprint(out, "\x1b[J")
 			c.rows = 0
-			c.setView(paletteView{}, false)
 		}
+		c.setView(paletteView{}, false)
 		c.line, c.pos = nil, 0
 		return
 	}
@@ -185,6 +188,11 @@ func (c *paletteCtl) repaint(out io.Writer, st styles, rows []paletteLine) {
 	}
 	width := terminalWidth()
 	down := anchorDownMoves(string(c.line), pos, width)
+	// 光标还原列 = 光标前逻辑列数落在其显示行上的余数（折行续行时用全宽
+	// 会钳在右边距错位列）；恰为整数倍时余数为 width（行末悬挂换行位），
+	// CUF 钳在右边距属既有折行估算容忍
+	prefixCols := promptCols + displayCols(string(c.line[:pos]))
+	restoreCol := cursorColOnRow(prefixCols, width)
 	// 光标在行尾时清本行行尾：输入增长越过折行点时，旧菜单首行残迹会
 	// 遗留在输入末行行尾（终端自动折行只覆写一列），此处兜住；
 	// 光标在行中的编辑由 readline 全量重绘清屏兜底，不清行尾防误伤
@@ -216,7 +224,7 @@ func (c *paletteCtl) repaint(out io.Writer, st styles, rows []paletteLine) {
 		}
 	}
 	// 回到光标行与列：上移 (down + sweep - 1) 行后归零列、右移恢复列位
-	fmt.Fprintf(out, "\x1b[%dA\r\x1b[%dC", down+sweep-1, promptCols+displayCols(string(c.line[:pos])))
+	fmt.Fprintf(out, "\x1b[%dA\r\x1b[%dC", down+sweep-1, restoreCol)
 	c.rows = len(rows)
 }
 
@@ -235,10 +243,19 @@ func (c *paletteCtl) clearBelow(out io.Writer) {
 	}
 	fmt.Fprintf(out, "\x1b[%dA", c.rows)
 	c.rows = 0
+	// 屏上已无菜单：视图一并复位（否则下个提示符 visible() 恒真，包装层
+	// 劫持 ↑↓ 历史导航）
+	c.setView(paletteView{}, false)
 }
 
 // promptCols 输入行 prompt（「❯ 」）的显示列数，折行与列恢复估算用
 const promptCols = 2
+
+// cursorColOnRow 计算光标在其显示行上的列位：光标前逻辑列数对终端宽取
+// 模的余数；恰为整数倍时为 width（行末悬挂换行位，CUF 会在右边距钳住）
+func cursorColOnRow(prefixCols, width int) int {
+	return prefixCols - (rowsFor(prefixCols, width)-1)*width
+}
 
 // anchorDownMoves 计算从光标行下移到「输入显示末行之下」的行数：
 // 输入总显示行数减光标行序（0 基）。宽度按 displayCols 粗估（CJK 2 列，
