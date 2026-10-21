@@ -42,6 +42,11 @@ func TestParseCommand(t *testing.T) {
 		{"缺参数", "/session", true, "session", nil, true},
 		{"多参数", "/session a b", true, "session", []string{"a", "b"}, true},
 		{"无参命令带参", "/help extra", true, "help", []string{"extra"}, true},
+		{"可选参数命令零参", "/theme", true, "theme", nil, false},
+		{"可选参数命令带一参", "/theme dark", true, "theme", []string{"dark"}, false},
+		{"可选参数命令仍限制至多一参", "/theme dark light", true, "theme", []string{"dark", "light"}, true},
+		{"无参命令 /clear", "/clear", true, "clear", nil, false},
+		{"无参命令 /clear 带参", "/clear now", true, "clear", []string{"now"}, true},
 		{"多行输入不作为命令", "/session a\nb", true, "", nil, true},
 	}
 	for _, c := range cases {
@@ -163,6 +168,86 @@ func TestRunCommandExit(t *testing.T) {
 	if !res.quit || len(res.lines) != 0 {
 		t.Fatalf("res = %+v", res)
 	}
+}
+
+// /help 末尾附面板键位自述：键位与菜单底行同源，新增命令不需另改键位文案
+func TestRunCommandHelpKeyHint(t *testing.T) {
+	res := runCommand(context.Background(), commandEnv{}, "help", nil)
+	if len(res.lines) != 1 || !strings.Contains(res.lines[0].text, paletteKeyHint) {
+		t.Fatalf("help output must carry the palette key hint: %+v", res.lines)
+	}
+}
+
+// /help 与菜单同源：每条命令的展示正文逐行相等（新增命令只改 commandDocs 一处）
+func TestHelpMatchesPaletteRows(t *testing.T) {
+	help := runCommand(context.Background(), commandEnv{}, "help", nil)
+	if len(help.lines) != 1 {
+		t.Fatalf("lines = %+v", help.lines)
+	}
+	lines := strings.Split(help.lines[0].text, "\n")
+	rows := paletteRows(filterPalette("/"))
+	if len(rows) != len(commandDocs)+1 {
+		t.Fatalf("rows = %d, want %d", len(rows), len(commandDocs)+1)
+	}
+	for i, d := range commandDocs {
+		want := "/" + d.name
+		if d.args != "" {
+			want += " " + d.args
+		}
+		want += "  " + d.usage
+		// 菜单行带选中前缀（全量视图默认选中首行）或对齐空格，去掉后应与 /help 同形
+		if got := strings.TrimLeft(rows[i].text, "\u276f "); got != want {
+			t.Fatalf("menu row %d = %q, want %q", i, got, want)
+		}
+		if got := lines[i+1]; got != want {
+			t.Fatalf("help line %d = %q, want %q", i+1, got, want)
+		}
+	}
+}
+
+// /clear 只置展示层效果：不切换会话、不退出、不报错
+func TestRunCommandClear(t *testing.T) {
+	res := runCommand(context.Background(), commandEnv{}, "clear", nil)
+	if !res.clearDisplay || res.quit || res.switchTo != "" {
+		t.Fatalf("res = %+v", res)
+	}
+	if len(res.lines) != 1 || res.lines[0].isError {
+		t.Fatalf("lines = %+v", res.lines)
+	}
+}
+
+// /theme：白名单外的值只报用法错误、不置切换效果（模式层据此保持原样式）
+func TestRunCommandTheme(t *testing.T) {
+	t.Run("无参显示当前值", func(t *testing.T) {
+		env := commandEnv{currentTheme: func() string { return "light" }}
+		res := runCommand(context.Background(), env, "theme", nil)
+		if res.theme != "" || len(res.lines) != 1 || !strings.Contains(res.lines[0].text, "当前主题：light") {
+			t.Fatalf("res = %+v", res)
+		}
+	})
+
+	t.Run("未注入当前值按自动处理", func(t *testing.T) {
+		res := runCommand(context.Background(), commandEnv{}, "theme", nil)
+		if len(res.lines) != 1 || !strings.Contains(res.lines[0].text, "当前主题：auto") {
+			t.Fatalf("lines = %+v", res.lines)
+		}
+	})
+
+	for _, theme := range []string{"dark", "light", "auto"} {
+		t.Run("切换 "+theme, func(t *testing.T) {
+			res := runCommand(context.Background(), commandEnv{}, "theme", []string{theme})
+			if res.theme != theme || len(res.lines) != 1 || res.lines[0].isError {
+				t.Fatalf("res = %+v", res)
+			}
+		})
+	}
+
+	t.Run("非法值", func(t *testing.T) {
+		res := runCommand(context.Background(), commandEnv{}, "theme", []string{"blue"})
+		if res.theme != "" || len(res.lines) != 1 || !res.lines[0].isError {
+			t.Fatalf("res = %+v", res)
+		}
+	})
 }
 
 // inline 分支：命令渲染留痕、普通输入不拦截、未知命令渲染错误（三者都不发送）

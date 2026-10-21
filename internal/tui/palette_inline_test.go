@@ -182,9 +182,10 @@ func TestPaletteRepaintGeometry(t *testing.T) {
 	if !strings.HasPrefix(out, "\x1b[K\n\r\x1b[2K") {
 		t.Fatalf("down-move must precede the first clear: %q", out[:min(24, len(out))])
 	}
-	// 下移与上移对称：菜单 6 行（5 命令 + 键位行），还原上移 6 行、列恢复
+	// 下移与上移对称：菜单行数随命令表变化（全量命令 + 键位行），还原行数同值
 	// prompt 2 列 + 光标前 1 列
-	wantTail := fmt.Sprintf("\x1b[%dA\r\x1b[%dC", 6, promptCols+1)
+	menuRows := len(commandDocs) + 1
+	wantTail := fmt.Sprintf("\x1b[%dA\r\x1b[%dC", menuRows, promptCols+1)
 	if !strings.HasSuffix(out, wantTail) {
 		t.Fatalf("restore tail = ..., want suffix %q in %q", wantTail, out)
 	}
