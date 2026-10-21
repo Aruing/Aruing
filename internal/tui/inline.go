@@ -56,24 +56,25 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	ctl := &paletteCtl{}
 	keys := &newlineKeyReader{r: os.Stdin, ctl: ctl}
 
+	// 终端宽度、主题与 markdown 渲染器的可写状态：每轮提交时重取宽度（ioctl
+	// 开销可忽略），宽度或主题变了才重建 renderer（重建需解析 style 配置，
+	// 毫秒级，仅在变化时付）。这样会话中途调整终端宽 / 主题后，markdown
+	// 换行宽、divider 宽与配色都能自适应。
+	// 先于 readline 构造：Listener 持有它的指针，/theme 切换后菜单立刻用新色表
+	rstate := inlineRenderState{st: st, theme: tuiTheme, width: terminalWidth()}
+	rstate.md = buildRenderer(rstate.theme, rstate.width)
+
 	rl, err := readline.NewFromConfig(&readline.Config{
-		Prompt:   st.prompt.Render("❯ "),
+		Prompt:   rstate.st.prompt.Render("❯ "),
 		Stdin:    keys,
 		Stdout:   out,
 		Stderr:   os.Stderr,
-		Listener: paletteListener(ctl, out, st),
+		Listener: paletteListener(ctl, out, &rstate),
 	})
 	if err != nil {
 		return fmt.Errorf("init readline: %w", err)
 	}
 	defer rl.Close()
-
-	// 终端宽度、主题与 markdown 渲染器的可写状态：每轮提交时重取宽度（ioctl
-	// 开销可忽略），宽度或主题变了才重建 renderer（重建需解析 style 配置，
-	// 毫秒级，仅在变化时付）。这样会话中途调整终端宽 / 主题后，markdown
-	// 换行宽、divider 宽与配色都能自适应
-	rstate := inlineRenderState{st: st, theme: tuiTheme, width: terminalWidth()}
-	rstate.md = buildRenderer(rstate.theme, rstate.width)
 
 	// 命令执行环境：闭包引用 sessionID 变量，/session、/new 切换后即时生效；
 	// lister 缺能力时会话类命令报不可用（步骤设计决策 7）
@@ -124,9 +125,10 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 			var themed bool
 			res, themed = rstate.applyCommandEffects(res, out, ctl, themeFile)
 			if themed {
-				// 样式换了：进度协调器持有的色表跟着更新（否则下一轮 spinner
-				// 与进度行还用旧主题）
+				// 样式换了：所有启动时定格过色表的消费点都要跟新——进度协调器
+				// （spinner 与进度行）与 readline 提示符（它把 prompt 字符串存下来）
 				prog.bind(out, rstate.st)
+				rl.SetPrompt(rstate.st.prompt.Render("❯ "))
 			}
 			renderCommandLines(out, rstate.st, res.lines)
 			if res.quit {
@@ -143,7 +145,7 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		}
 		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项与
 		// 称呼开关在此消费，守 #20：与 app 模式 viewport 历史同规则）
-		echoUserMessage(out, st, text)
+		rstate.echoUser(out, text)
 		waitTurn(ctx, out, rstate.st, rstate.md, svc, sessionID, text, prog)
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
 		renderMessageDivider(out, rstate.st, rstate.width)
@@ -199,6 +201,12 @@ func (s *inlineRenderState) applyCommandEffects(res commandResult, out io.Writer
 	}
 	s.st, s.md, s.theme = newSt, newMd, res.theme
 	return res, true
+}
+
+// echoUser 用当前样式表重印用户消息留痕。主题切换后必须走这里：直接拿启动时
+// 的样式快照会让 /theme 之后的第一条用户消息仍是旧色（启动快照族）
+func (s *inlineRenderState) echoUser(out io.Writer, text string) {
+	echoUserMessage(out, s.st, text)
 }
 
 // renderCommandLines 渲染命令输出：错误行走错误样式，其余走系统样式

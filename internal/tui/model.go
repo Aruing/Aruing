@@ -274,6 +274,8 @@ func (m *Model) applyTheme(res commandResult) commandResult {
 		return res
 	}
 	m.styles, m.tuiTheme = st, res.theme
+	// spinner 在构造时把样式表拷进 Bubble 组件，不会自己跟主题走，须显式同步
+	m.spinner.Style = st.spinner
 	if m.width > 0 {
 		// 宽度已知才重建：WindowSizeMsg 会按新 tuiTheme 再建一次
 		m.md = md

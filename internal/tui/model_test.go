@@ -428,6 +428,10 @@ func TestUpdateEnterTheme(t *testing.T) {
 	if len(um.messages) != 2 || um.messages[0].kind != "user" {
 		t.Fatalf("history must be kept: %+v", um.messages)
 	}
+	// spinner 样式在构造时被拷贝进组件，切换后必须同步（否则下一轮 spinner 仍旧色）
+	if got, want := um.spinner.Style.Render("x"), mustLoadStyles("light").spinner.Render("x"); got != want {
+		t.Fatalf("spinner style not switched: got %q want %q", got, want)
+	}
 }
 
 // app 模式 /theme 非法值：样式不变，只多一条错误行
