@@ -563,3 +563,74 @@ func TestPaletteListenerFollowsTheme(t *testing.T) {
 		t.Fatal("menu still rendered with the startup theme")
 	}
 }
+
+// 选择器：打开即绘制条目、↑↓ 改选中、回车确认返回目标并关闭擦除；
+// 打开期间 Tab 被包装层吞掉（过滤词里不该插制表符）
+func TestPaletteCtlPicker(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	c.openPicker(&b, st, sessionItems(testSummaries(), "sess_a"))
+	if !c.pickerVisible() || c.rows != 3 {
+		t.Fatalf("after open: visible=%v rows=%d, want true/3", c.pickerVisible(), c.rows)
+	}
+	if !strings.Contains(stripANSI(b.String()), pickerKeyHint) {
+		t.Fatalf("picker must render the key hint: %q", stripANSI(b.String()))
+	}
+
+	// ↓ 移动选中后确认：目标为第二条（sess_a，当前会话）
+	c.applyIntent(&b, st, nil, 0, intentDown)
+	item, ok := c.confirmPicker(&b)
+	if !ok || item.id != "sess_a" || !item.cur {
+		t.Fatalf("confirm = (%+v, %v), want sess_a current", item, ok)
+	}
+	if c.pickerVisible() || c.rows != 0 {
+		t.Fatalf("after confirm: visible=%v rows=%d, want closed/0", c.pickerVisible(), c.rows)
+	}
+
+	// Esc 关闭：不产出目标
+	c.openPicker(&b, st, sessionItems(testSummaries(), "sess_a"))
+	c.applyIntent(&b, st, nil, 0, intentEsc)
+	if c.pickerVisible() {
+		t.Fatal("Esc must close the picker")
+	}
+	if _, ok := c.confirmPicker(&b); ok {
+		t.Fatal("closed picker must not yield a target")
+	}
+}
+
+// 选择器打开时包装层吞掉 Tab、仍拦截 ↑↓（选择器占用方向键）
+func TestPaletteCtlPickerKeyTranslation(t *testing.T) {
+	c := &paletteCtl{}
+	c.openPicker(bytes.NewBuffer(nil), mustLoadStyles("dark"), sessionItems(testSummaries(), ""))
+	n := &newlineKeyReader{ctl: c}
+	if got := n.translateMenuKeys([]byte("\t")); len(got) != 0 {
+		t.Fatalf("Tab must be swallowed while picker is open, got %q", got)
+	}
+	if got := n.translateMenuKeys([]byte("\x1b[B")); !bytes.HasPrefix(got, menuInjectSeq) {
+		t.Fatalf("arrow must be translated while picker is open, got %q", got)
+	}
+	if intent, ok := c.popIntent(); !ok || intent != intentDown {
+		t.Fatalf("queued intent = (%v, %v), want down", intent, ok)
+	}
+}
+
+// 选择器下 Esc：关闭并把输入行里的过滤词清掉（返回 ok=true 的空行），
+// 否则下一次回车会把过滤词当消息发出去
+func TestPalettePickerEscapeClearsFilter(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	c.openPicker(&b, st, sessionItems(testSummaries(), "sess_a"))
+	l := paletteListener(c, &b, &inlineRenderState{st: st})
+
+	// 真实路径由包装层把 Esc 翻译成注入键并入队意图
+	c.pushIntent(intentEsc)
+	line, pos, ok := l([]rune("redis"), 5, readline.MetaShiftTab)
+	if !ok || len(line) != 0 || pos != 0 {
+		t.Fatalf("Esc should clear the filter line: (%q, %d, %v)", string(line), pos, ok)
+	}
+	if c.pickerVisible() {
+		t.Fatal("picker must be closed")
+	}
+}

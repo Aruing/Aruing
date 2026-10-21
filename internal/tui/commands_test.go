@@ -39,7 +39,7 @@ func TestParseCommand(t *testing.T) {
 		{"斜杠开头的普通词也是命令语法", "/etc/hosts 怎么写", true, "etc/hosts", []string{"怎么写"}, true},
 		{"大小写不归一", "/Help", true, "Help", nil, true},
 		{"裸斜杠", "/", true, "", nil, true},
-		{"缺参数", "/session", true, "session", nil, true},
+		{"可选参数命令零参（裸 /session 打开选择器）", "/session", true, "session", nil, false},
 		{"多参数", "/session a b", true, "session", []string{"a", "b"}, true},
 		{"无参命令带参", "/help extra", true, "help", []string{"extra"}, true},
 		{"可选参数命令零参", "/theme", true, "theme", nil, false},

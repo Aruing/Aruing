@@ -34,7 +34,7 @@ type commandDoc struct {
 var commandDocs = []commandDoc{
 	{name: "help", usage: "显示命令表"},
 	{name: "sessions", usage: "列出历史会话（* 为当前）"},
-	{name: "session", args: "<id>", usage: "切换到指定会话"},
+	{name: "session", args: "<id>", optionalArgs: true, usage: "切换会话（无参则列出会话供选择）"},
 	{name: "new", usage: "新建会话并切换（原会话可 /session 切回）"},
 	{name: "clear", usage: "清屏（只清展示，会话数据仍全量保留）"},
 	{name: "theme", args: "[dark|light|auto]", optionalArgs: true, usage: "切换主题（仅本进程；持久化改 tui.theme）"},
@@ -115,6 +115,8 @@ type commandResult struct {
 	clearDisplay bool
 	// 非空 = 目标主题名（已过白名单）：调用方重载样式与渲染器后生效
 	theme string
+	// /session 无参置位：调用方打开会话选择器（列表由选择器画，不另印文本）
+	pickSession bool
 	// 待渲染输出行，顺序即展示顺序
 	lines []renderLine
 }
@@ -147,6 +149,10 @@ func runCommand(ctx context.Context, env commandEnv, name string, args []string)
 	case "sessions":
 		return listSessions(ctx, env)
 	case "session":
+		// 无参：不打印列表——列表由各模式的会话选择器画，避免文本与模态双份
+		if len(args) == 0 {
+			return commandResult{pickSession: true}
+		}
 		// parseCommand 已保证恰好一参；此处防御内部直呼时的越界，不信任调用方形状
 		if len(args) != 1 {
 			return errResult("/session 用法：/session <id>")

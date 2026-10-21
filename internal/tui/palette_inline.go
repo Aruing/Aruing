@@ -48,6 +48,11 @@ type paletteCtl struct {
 	off bool
 	// 上次绘制的菜单行数（含键位自述行），重绘/擦除按此清理防残留
 	rows int
+	// 会话选择器是否打开（锁内读写；包装层据此拦截按键）
+	pickerOn bool
+	// 选择器视图与打开时的会话快照（主 goroutine 专用：过滤只在主 goroutine 做）
+	picker      pickerView
+	pickerItems []sessionItem
 	// 上次成功绘制的签名；与本次一致时跳过重绘，消除光标在同一显示行内
 	// 移动（← → Home End 等）时菜单无意义的擦画闪烁。任何擦除路径置零值
 	lastPaint paintSig
@@ -66,6 +71,9 @@ type paintSig struct {
 	sel int
 	// 锚定下移量（输入折行或光标跨显示行时菜单物理位置变化需重绘）
 	down int
+	// 当前画的是会话选择器（同一行数与选中下标下与命令菜单内容不同，
+	// 不能互相跳过）
+	picker bool
 }
 
 // visible 报告菜单当前是否显示（锁内快照）；供包装层（ioloop goroutine）
@@ -75,6 +83,50 @@ func (c *paletteCtl) visible() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.view.active() && !c.off
+}
+
+// pickerVisible 报告会话选择器是否打开（锁内快照）。选择器的条目/选中字段
+// 仍只在主 goroutine 读写；包装层只读这个布尔位
+func (c *paletteCtl) pickerVisible() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pickerOn
+}
+
+// active 报告任一菜单类 UI 是否占用方向键：菜单可见或选择器打开。包装层的
+// 按键拦截条件用它，避免两处各自的可见性判断渐渐漂移
+func (c *paletteCtl) active() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pickerOn || (c.view.active() && !c.off)
+}
+
+// openPicker 打开会话选择器：items 为打开瞬间的会话快照（一次 ListSessions），
+// 之后的过滤都在内存里做。打开时清掉菜单的 Esc 抑制，两者互斥
+func (c *paletteCtl) openPicker(out io.Writer, st styles, items []sessionItem) {
+	c.pickerItems = items
+	c.picker = pickerView{items: items}
+	c.mu.Lock()
+	c.pickerOn = true
+	c.off = false
+	c.setViewLocked(paletteView{}, false)
+	c.mu.Unlock()
+	c.repaintByVisibility(out, st)
+}
+
+// closePicker 关闭并擦除选择器（Esc / 回车确认 / 空视图）：行数与绘制签名
+// 跟着汇总，避免残留行被下次重绘算错
+func (c *paletteCtl) closePicker(out io.Writer) {
+	if !c.pickerVisible() {
+		return
+	}
+	c.picker = pickerView{}
+	c.pickerItems = nil
+	c.mu.Lock()
+	c.pickerOn = false
+	c.mu.Unlock()
+	// 行内容此时是过滤词（非命令），擦除只需清行数不重算菜单
+	c.repaint(out, styles{}, nil)
 }
 
 // pushIntent 把拦截到的键的意图入队（包装层 / ioloop goroutine 调用）
@@ -103,6 +155,12 @@ func (c *paletteCtl) setView(v paletteView, off bool) {
 	c.view, c.off = v, off
 }
 
+// setViewLocked 同 setView，要求调用方已持锁（openPicker 一次锁内完成多字段
+// 更新，避免包装层看到半旧状态）
+func (c *paletteCtl) setViewLocked(v paletteView, off bool) {
+	c.view, c.off = v, off
+}
+
 // onLine 处理一次普通键回调：重算过滤视图并按可见性重画或擦除。
 // line 为 nil 是 readline 的初始回调（prompt 打印前、行为空）：此时光标在
 // 新行 prompt 之后且下方只可能是上一行遗留的菜单残迹（软换行进草稿下一行
@@ -124,6 +182,12 @@ func (c *paletteCtl) onLine(out io.Writer, st styles, line []rune, pos int) {
 	// 行值变化清除 Esc 抑制（与 app 的编辑键清除同语义）；仅移动光标不清
 	changed := string(line) != string(c.line)
 	c.line, c.pos = append([]rune(nil), line...), pos
+	// 选择器打开时输入行是过滤词（无 / 语义）：只重算过滤，不推导命令菜单
+	if c.pickerVisible() {
+		c.picker = pickerView{items: filterSessions(c.pickerItems, string(line))}
+		c.repaintByVisibility(out, st)
+		return
+	}
 	v := filterPalette(string(line))
 	if changed {
 		c.setView(v, false)
@@ -138,6 +202,23 @@ func (c *paletteCtl) onLine(out io.Writer, st styles, line []rune, pos int) {
 // Tab 补全后的新行）
 func (c *paletteCtl) applyIntent(out io.Writer, st styles, line []rune, pos int, i paletteIntent) {
 	c.line, c.pos = append([]rune(nil), line...), pos
+	if c.pickerVisible() {
+		// 选择器下的意图：↑↓ 改选中、Esc 关闭、redraw 只重画（Tab 由包装层吞掉）
+		switch i {
+		case intentUp, intentDown:
+			if i == intentUp {
+				c.picker = c.picker.moveSel(-1)
+			} else {
+				c.picker = c.picker.moveSel(1)
+			}
+			c.repaintByVisibility(out, st)
+		case intentEsc:
+			c.closePicker(out)
+		case intentRedraw:
+			c.repaintByVisibility(out, st)
+		}
+		return
+	}
 	switch i {
 	case intentUp, intentDown:
 		delta := 1
@@ -161,6 +242,10 @@ func (c *paletteCtl) applyIntent(out io.Writer, st styles, line []rune, pos int,
 // 时 Tab 按普通字符进缓冲），再调内核补全。菜单不可见时返回 ok=false，
 // 保留 Tab 插字符的既有行为
 func (c *paletteCtl) tab(line []rune, pos int) (newLine []rune, newPos int, ok bool) {
+	// 选择器下 Tab 无补全语义（输入行是过滤词），包装层已吞掉此键，此处兼做防御
+	if c.pickerVisible() {
+		return nil, 0, false
+	}
 	if pos > 0 && pos <= len(line) && line[pos-1] == '\t' {
 		stripped := make([]rune, 0, len(line)-1)
 		stripped = append(stripped, line[:pos-1]...)
@@ -178,10 +263,15 @@ func (c *paletteCtl) tab(line []rune, pos int) (newLine []rune, newPos int, ok b
 	return []rune(completed), cursor, true
 }
 
-// repaintByVisibility 按当前视图重画（可见）或擦除（不可见但有残留）
+// repaintByVisibility 按当前视图重画（可见）或擦除（不可见但有残留）。
+// 选择器与命令菜单互斥：选择器打开时只画会话条目
 func (c *paletteCtl) repaintByVisibility(out io.Writer, st styles) {
 	var rows []paletteLine
-	if c.visible() {
+	switch {
+	case c.pickerVisible():
+		// 选中下标与条目只在主 goroutine 读写，无需加锁
+		rows = pickerRows(c.picker)
+	case c.visible():
 		c.mu.Lock()
 		rows = paletteRows(c.view)
 		c.mu.Unlock()
@@ -206,10 +296,16 @@ func (c *paletteCtl) repaint(out io.Writer, st styles, rows []paletteLine) {
 	width := terminalWidth()
 	down := anchorDownMoves(string(c.line), pos, width)
 	// 签名一致且屏上仍有菜单：内容与位置均未变，跳过重绘（防光标移动闪烁）
-	c.mu.Lock()
-	sel := c.view.sel
-	c.mu.Unlock()
-	if len(rows) > 0 && (paintSig{rows: len(rows), sel: sel, down: down} == c.lastPaint) {
+	// 选中下标随模式取自各自的视图（菜单 / 选择器），否则选择器下移动选中
+	// 会被当成无变化而画不出来
+	picker := c.pickerVisible()
+	sel := c.picker.sel
+	if !picker {
+		c.mu.Lock()
+		sel = c.view.sel
+		c.mu.Unlock()
+	}
+	if len(rows) > 0 && (paintSig{rows: len(rows), sel: sel, down: down, picker: picker} == c.lastPaint) {
 		return
 	}
 	// 光标还原列 = 光标前逻辑列数落在其显示行上的余数（折行续行时用全宽
@@ -250,7 +346,7 @@ func (c *paletteCtl) repaint(out io.Writer, st styles, rows []paletteLine) {
 	// 回到光标行与列：上移 (down + sweep - 1) 行后归零列、右移恢复列位
 	fmt.Fprintf(out, "\x1b[%dA\r\x1b[%dC", down+sweep-1, restoreCol)
 	c.rows = len(rows)
-	c.lastPaint = paintSig{rows: len(rows), sel: sel, down: down}
+	c.lastPaint = paintSig{rows: len(rows), sel: sel, down: down, picker: picker}
 }
 
 // clearBelow 提交路径擦除：Enter 后 readline 回显换行，光标已在输入末行
@@ -293,7 +389,13 @@ func paletteListener(c *paletteCtl, out io.Writer, theme *inlineRenderState) rea
 			// 注入键：消费翻译器入队的意图（↑↓/Esc/重画）；真实 shift+tab
 			// 无意图时纯 no-op，无副作用
 			if intent, ok := c.popIntent(); ok {
+				wasPicker := c.pickerVisible()
 				c.applyIntent(out, theme.st, line, pos, intent)
+				// 选择器被 Esc 关闭：输入行里留下的是过滤词，不是待发消息，
+				// 一并清空（否则下一次回车会把它当消息发出去）
+				if wasPicker && intent == intentEsc {
+					return []rune{}, 0, true
+				}
 			}
 			return nil, 0, false
 		case '\t':
@@ -337,7 +439,13 @@ func (c *paletteCtl) clearAll(out io.Writer) {
 	fmt.Fprint(out, "\x1b[3J\x1b[2J\x1b[H")
 	c.rows = 0
 	c.lastPaint = paintSig{}
-	c.setView(paletteView{}, false)
+	c.mu.Lock()
+	c.setViewLocked(paletteView{}, false)
+	// 整屏已擦：选择器一并关闭（否则后续方向键仍被当成选择器意图）
+	c.pickerOn = false
+	c.mu.Unlock()
+	c.picker = pickerView{}
+	c.pickerItems = nil
 	c.line, c.pos = nil, 0
 }
 
@@ -353,6 +461,17 @@ func (c *paletteCtl) clearTail(out io.Writer) {
 	c.lastPaint = paintSig{}
 	// 退出前同样复位视图，与 clearBelow 同口径（擦除/复位成对）
 	c.setView(paletteView{}, false)
+}
+
+// confirmPicker 选择器回车：取选中条目并关闭选择器（无条目也算已处理，
+// 调用方据此提示空列表）。先关闭（擦除）再返回，确认行从干净行位开始
+func (c *paletteCtl) confirmPicker(out io.Writer) (sessionItem, bool) {
+	if !c.pickerVisible() {
+		return sessionItem{}, false
+	}
+	item, ok := c.picker.selected()
+	c.closePicker(out)
+	return item, ok
 }
 
 // promptCols 输入行 prompt（「❯ 」）的显示列数，折行与列恢复估算用
