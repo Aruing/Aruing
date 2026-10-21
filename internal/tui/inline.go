@@ -121,7 +121,8 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		// 效果应用次序固定：清屏 → 换主题 → 渲染输出行 —— 渲染必须排在两者之后，
 		// 否则确认行会被随后的擦屏抹掉、换成新主题的确认行也用旧色表
 		if res, handled := execInlineCommand(ctx, cmdEnv, text); handled {
-			res, themed := rstate.applyCommandEffects(res, out, ctl, themeFile)
+			var themed bool
+			res, themed = rstate.applyCommandEffects(res, out, ctl, themeFile)
 			if themed {
 				// 样式换了：进度协调器持有的色表跟着更新（否则下一轮 spinner
 				// 与进度行还用旧主题）
