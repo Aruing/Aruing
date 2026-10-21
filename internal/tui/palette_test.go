@@ -7,13 +7,18 @@ import (
 
 // 过滤基础：'/' 全量按声明序；前缀优先；子序列兜底；大小写不敏感
 func TestFilterPalette(t *testing.T) {
+	// 全量用例从命令表派生：新增命令不该让本测试变成需要手改的计数断言
+	all := make([]string, 0, len(commandDocs))
+	for _, d := range commandDocs {
+		all = append(all, d.name)
+	}
 	cases := []struct {
 		name  string
 		line  string
 		names []string
 	}{
-		{"全量", "/", []string{"help", "sessions", "session", "new", "exit"}},
-		{"前导空白容忍", "  /", []string{"help", "sessions", "session", "new", "exit"}},
+		{"全量", "/", all},
+		{"前导空白容忍", "  /", all},
 		{"前缀命中在前", "/s", []string{"sessions", "session"}},
 		{"精确名也是前缀", "/session", []string{"sessions", "session"}},
 		{"子序列兜底", "/xit", []string{"exit"}},
