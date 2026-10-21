@@ -68,11 +68,12 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	}
 	defer rl.Close()
 
-	// 终端宽度与 markdown 渲染器：每轮提交时重取宽度（ioctl 开销可忽略），
-	// 宽度变了才重建 renderer（重建需解析 style 配置，毫秒级，仅在变化时付）。
-	// 这样会话中途调整终端宽，markdown 换行宽与 divider 宽都能自适应
-	width := terminalWidth()
-	md := buildRenderer(tuiTheme, width)
+	// 终端宽度、主题与 markdown 渲染器的可写状态：每轮提交时重取宽度（ioctl
+	// 开销可忽略），宽度或主题变了才重建 renderer（重建需解析 style 配置，
+	// 毫秒级，仅在变化时付）。这样会话中途调整终端宽 / 主题后，markdown
+	// 换行宽、divider 宽与配色都能自适应
+	rstate := inlineRenderState{st: st, theme: tuiTheme, width: terminalWidth()}
+	rstate.md = buildRenderer(rstate.theme, rstate.width)
 
 	// 命令执行环境：闭包引用 sessionID 变量，/session、/new 切换后即时生效；
 	// lister 缺能力时会话类命令报不可用（步骤设计决策 7）
@@ -80,6 +81,7 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		lister:           lister,
 		newSession:       svc.NewSession,
 		currentSessionID: func() string { return sessionID },
+		currentTheme:     func() string { return rstate.theme },
 	}
 
 	// 一次性交互提示（系统样式，留痕）
@@ -110,54 +112,103 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		text = submitWithPalette(ctl, text)
 		ctl.clearBelow(out)
 		// 每轮重取终端宽：变了则重建 renderer，后续 divider 与 markdown 都用新宽
-		if w := terminalWidth(); w != width {
-			width = w
-			md = buildRenderer(tuiTheme, width)
+		if w := terminalWidth(); w != rstate.width {
+			rstate.width = w
+			rstate.md = buildRenderer(rstate.theme, rstate.width)
 		}
 		// 运行时命令分支：命中命令语法只解析执行与渲染，不 echo 用户行、不进 Turn；
-		// 未知命令报错同样只渲染不发送（完成标志 1），命令轮零业务写入（完成标志 2）
-		if res, handled := runInlineCommand(ctx, out, st, cmdEnv, text); handled {
+		// 未知命令报错同样只渲染不发送（完成标志 1），命令轮零业务写入（完成标志 2）。
+		// 效果应用次序固定：清屏 → 换主题 → 渲染输出行 —— 渲染必须排在两者之后，
+		// 否则确认行会被随后的擦屏抹掉、换成新主题的确认行也用旧色表
+		if res, handled := execInlineCommand(ctx, cmdEnv, text); handled {
+			res, themed := rstate.applyCommandEffects(res, out, ctl, themeFile)
+			if themed {
+				// 样式换了：进度协调器持有的色表跟着更新（否则下一轮 spinner
+				// 与进度行还用旧主题）
+				prog.bind(out, rstate.st)
+			}
+			renderCommandLines(out, rstate.st, res.lines)
 			if res.quit {
 				return nil
 			}
 			if res.switchTo != "" {
 				sessionID = res.switchTo
 			}
-			renderMessageDivider(out, st, width)
+			// 清屏即新起点：不在空屏上先画一条分割线
+			if !res.clearDisplay {
+				renderMessageDivider(out, rstate.st, rstate.width)
+			}
 			continue
 		}
 		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项与
 		// 称呼开关在此消费，守 #20：与 app 模式 viewport 历史同规则）
 		echoUserMessage(out, st, text)
-		waitTurn(ctx, out, st, md, svc, sessionID, text, prog)
+		waitTurn(ctx, out, rstate.st, rstate.md, svc, sessionID, text, prog)
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
-		renderMessageDivider(out, st, width)
+		renderMessageDivider(out, rstate.st, rstate.width)
 	}
 }
 
-// inline 模式的命令分支：命中命令语法时立即执行并渲染输出，返回效果供主循环
-// 应用（quit / 切换）；普通输入 handled=false 交回主循环走 Turn。命令与错误
-// 都只渲染不发送、不写 Store、不进 Turn（#20，完成标志 1/2）
-func runInlineCommand(ctx context.Context, out io.Writer, st styles, env commandEnv, text string) (commandResult, bool) {
+// inline 模式的命令执行：命中命令语法时只解析与执行，返回效果供主循环应用
+// （渲染与效果次序归主循环：清屏 / 换主题必须早于输出行）。普通输入
+// handled=false 交回主循环走 Turn。命令与错误都不发送、不写 Store、不进 Turn
+// （#20，完成标志 1/2）
+func execInlineCommand(ctx context.Context, env commandEnv, text string) (commandResult, bool) {
 	name, args, ok, err := parseCommand(text)
 	if !ok {
 		return commandResult{}, false
 	}
-	var res commandResult
 	if err != nil {
-		// 解析错误（未知命令 / 参数非法）与执行错误同一路径：错误样式留痕，不当消息发送
-		res = errResult(err.Error())
-	} else {
-		res = runCommand(ctx, env, name, args)
+		// 解析错误（未知命令 / 参数非法）与执行错误同一路径：错误样式留痕
+		return errResult(err.Error()), true
 	}
-	for _, ln := range res.lines {
+	return runCommand(ctx, env, name, args), true
+}
+
+// inlineRenderState inline 循环里会被运行时命令改写的渲染状态：样式表、
+// markdown 渲染器、生效主题与终端宽。集中在一处，避免换主题后各处局部变量
+// 出现新旧不一致（风格 token、渲染宽、主题查询三者必须同源）
+type inlineRenderState struct {
+	// 当前生效样式表；/theme 成功后整体替换
+	st styles
+	// markdown 渲染器；随生效主题与终端宽重建
+	md *markdownRenderer
+	// 当前生效主题名（dark / light / auto 或配置原值）
+	theme string
+	// 终端显示宽；每轮提交时重取，宽变则重建渲染器与分割线
+	width int
+}
+
+// applyCommandEffects 按固定次序应用命令效果：先清屏（若有）再换主题，返回
+// 调整后的结果与「样式是否已更换」（调用方据此重绑进度协调器的色表）。
+// 次序不能颠倒：主题切换失败时要保留原样式，而清屏与主题无关。
+// 主题加载失败时把命令自带的「已切换」行换成错误行——切换没成时的确认行是误导
+func (s *inlineRenderState) applyCommandEffects(res commandResult, out io.Writer, ctl *paletteCtl, themeFile string) (commandResult, bool) {
+	if res.clearDisplay {
+		ctl.clearAll(out)
+	}
+	if res.theme == "" {
+		return res, false
+	}
+	newSt, newMd, err := switchTheme(res.theme, themeFile, s.width)
+	if err != nil {
+		res.theme = ""
+		res.lines = []renderLine{{text: "切换主题失败：" + err.Error(), isError: true}}
+		return res, false
+	}
+	s.st, s.md, s.theme = newSt, newMd, res.theme
+	return res, true
+}
+
+// renderCommandLines 渲染命令输出：错误行走错误样式，其余走系统样式
+func renderCommandLines(out io.Writer, st styles, lines []renderLine) {
+	for _, ln := range lines {
 		if ln.isError {
 			fmt.Fprintln(out, st.err.Render("错误 "+ln.text))
 		} else {
 			fmt.Fprintln(out, st.system.Render(ln.text))
 		}
 	}
-	return res, true
 }
 
 // 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行、长行在终端折行），

@@ -329,6 +329,17 @@ func submitWithPalette(c *paletteCtl, text string) string {
 	return text
 }
 
+// clearAll /clear 命令擦屏：清可视屏与回滚区并把光标归位。屏上不再有
+// 菜单残迹，行数 / 绘制签名 / 视图一并归零——否则下次重绘会按旧行数清理，
+// 且 visible() 残留会让包装层继续把 ↑↓ 当菜单意图（擦除/复位成对）
+func (c *paletteCtl) clearAll(out io.Writer) {
+	fmt.Fprint(out, "\x1b[3J\x1b[2J\x1b[H")
+	c.rows = 0
+	c.lastPaint = paintSig{}
+	c.setView(paletteView{}, false)
+	c.line, c.pos = nil, 0
+}
+
 // clearTail 退出路径清残迹：EOF / ErrInterrupt 后 readline 写过中断提示、
 // 光标精确位置不可知，清当前行行首到屏尾——退出时刻输入行之下只可能是
 // 菜单残迹，不会误伤其他内容

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -332,4 +333,46 @@ func TestInlineStructuredResult(t *testing.T) {
 			t.Fatalf("missing or repeated result: %q", out.String())
 		}
 	}
+}
+
+// 命令效果应用：先清屏后换主题，两者都在渲染输出行之前（确认行不会被
+// 擦屏抹掉、切换后的确认行用新色表）
+func TestInlineApplyCommandEffects(t *testing.T) {
+	t.Run("清屏在换主题之前", func(t *testing.T) {
+		s := &inlineRenderState{st: mustLoadStyles("dark"), theme: "dark", width: 80}
+		c, _ := newVisibleCtl(t, "/")
+		var b bytes.Buffer
+		res, themed := s.applyCommandEffects(commandResult{clearDisplay: true, theme: "light", lines: []renderLine{{text: "ok"}}}, &b, c, "")
+		if !themed {
+			t.Fatal("theme change should report themed=true")
+		}
+		if got := b.String(); got != "\x1b[3J\x1b[2J\x1b[H" {
+			t.Fatalf("clearAll must be written first: %q", got)
+		}
+		if s.theme != "light" || c.rows != 0 {
+			t.Fatalf("state = theme %q rows %d", s.theme, c.rows)
+		}
+		if got, want := s.st.prompt.Render("x"), mustLoadStyles("light").prompt.Render("x"); got != want {
+			t.Fatalf("style not switched: got %q want %q", got, want)
+		}
+		if len(res.lines) != 1 || res.lines[0].text != "ok" {
+			t.Fatalf("lines = %+v", res.lines)
+		}
+	})
+
+	t.Run("主题加载失败保持原样式", func(t *testing.T) {
+		s := &inlineRenderState{st: mustLoadStyles("dark"), theme: "dark", width: 80}
+		c, _ := newVisibleCtl(t, "/")
+		var b bytes.Buffer
+		res, themed := s.applyCommandEffects(commandResult{theme: "light", lines: []renderLine{{text: "已切换主题 light"}}}, &b, c, writeTheme(t, "styles:\n  user:\n    foreground: \"#zzzzzz\"\n"))
+		if themed || s.theme != "dark" {
+			t.Fatalf("failure must keep the old theme: themed=%v theme=%q", themed, s.theme)
+		}
+		if res.theme != "" {
+			t.Fatalf("res.theme should be cleared on failure: %q", res.theme)
+		}
+		if len(res.lines) != 1 || !res.lines[0].isError || !strings.Contains(res.lines[0].text, "切换主题失败") {
+			t.Fatalf("lines = %+v (misleading success line must be replaced)", res.lines)
+		}
+	})
 }

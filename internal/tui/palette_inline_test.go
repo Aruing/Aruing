@@ -516,3 +516,22 @@ func TestKeyReaderMenuChain(t *testing.T) {
 		t.Fatalf("second intent = %v, want redraw", got)
 	}
 }
+
+// clearAll：输出擦屏序列并把菜单簿记（行数 / 视图 / 锚定输入）全部复位，
+// 否则下一轮重绘按旧行数清理、包装层继续劫持 ↑↓
+func TestPaletteCtlClearAll(t *testing.T) {
+	c, _ := newVisibleCtl(t, "/")
+	var b bytes.Buffer
+	c.clearAll(&b)
+	if got := b.String(); got != "\x1b[3J\x1b[2J\x1b[H" {
+		t.Fatalf("erase sequence = %q", got)
+	}
+	if c.rows != 0 || c.visible() {
+		t.Fatalf("rows = %d visible = %v after clearAll", c.rows, c.visible())
+	}
+	// 复位后包装层不再拦截方向键（归还历史导航）
+	n := &newlineKeyReader{ctl: c}
+	if got := n.translateMenuKeys([]byte("\x1b[A")); string(got) != "\x1b[A" {
+		t.Fatalf("arrow should pass through after clearAll, got %q", got)
+	}
+}
