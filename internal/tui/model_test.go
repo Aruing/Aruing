@@ -568,3 +568,42 @@ func TestUpdateEnterThemeLoadFailure(t *testing.T) {
 		t.Fatalf("messages = %+v", um.messages)
 	}
 }
+
+// 选择器关闭时过滤词不残留：回车切换与 Esc 取消都要清空输入行，
+// 否则下一次回车会把过滤词当消息发出去（pr-agent 采纳项）
+func TestPickerClearsFilterOnClose(t *testing.T) {
+	newPicker := func() Model {
+		m := newTestModel()
+		m.lister = fakeLister{summaries: []session.SessionSummary{
+			{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"},
+			{ID: "sess_b", MessageCount: 1, FirstQuestion: "为什么 demo-api 起不来"},
+		}}
+		m.input.SetValue("/session")
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		m.input.SetValue("")
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("redis")})
+		return updated.(Model)
+	}
+
+	t.Run("回车切换后清空", func(t *testing.T) {
+		m := newPicker()
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		if got := m.input.Value(); got != "" {
+			t.Fatalf("input = %q after switching, want empty", got)
+		}
+		if m.pickerOn {
+			t.Fatal("picker must close")
+		}
+	})
+
+	t.Run("Esc 取消后清空", func(t *testing.T) {
+		m := newPicker()
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+		m = updated.(Model)
+		if got := m.input.Value(); got != "" {
+			t.Fatalf("input = %q after Esc, want empty", got)
+		}
+	})
+}

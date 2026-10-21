@@ -99,6 +99,10 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 			fmt.Fprintln(out)
 			return nil
 		}
+		// 选择器模态优先：回车 = 确认选中（输入行是过滤词，不是消息）
+		if inlinePickerEnter(out, rstate.st, ctl, &sessionID) {
+			continue
+		}
 		text = strings.TrimSpace(text)
 		if text == "" {
 			continue
@@ -203,6 +207,27 @@ func (s *inlineRenderState) applyCommandEffects(res commandResult, out io.Writer
 	}
 	s.st, s.md, s.theme = newSt, newMd, res.theme
 	return res, true
+}
+
+// inlinePickerEnter 选择器模态下的回车：取选中会话并切换，渲染确认行后再画
+// 分割线；返回本次输入是否已被选择器消费（过滤词绝不当消息发送）。
+// 选中当前会话不重建视图（与 /session <当前 id> 同语义），空视图只提示
+func inlinePickerEnter(out io.Writer, st styles, ctl *paletteCtl, sessionID *string) bool {
+	if !ctl.pickerVisible() {
+		return false
+	}
+	item, picked := ctl.confirmPicker(out)
+	switch {
+	case picked && item.cur:
+		fmt.Fprintln(out, st.system.Render("已在该会话 "+item.id))
+	case picked:
+		*sessionID = item.id
+		fmt.Fprintln(out, st.system.Render("已切换到会话 "+item.id))
+	default:
+		fmt.Fprintln(out, st.system.Render("暂无可切换的会话"))
+	}
+	renderMessageDivider(out, st, terminalWidth())
+	return true
 }
 
 // echoUser 用当前样式表重印用户消息留痕。主题切换后必须走这里：直接拿启动时

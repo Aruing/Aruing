@@ -332,7 +332,9 @@ func (m *Model) updatePicker(msg tea.Msg) (bool, tea.Cmd) {
 		m.picker = m.picker.moveSel(1)
 		return true, nil
 	case tea.KeyEscape:
+		// 过滤词不是待发消息：关闭即清空，避免下一次回车把它当消息发出去
 		m.closePicker()
+		m.input.Reset()
 		return true, nil
 	case tea.KeyEnter:
 		// 生成中不切换：与既有 busy 拦截同语义
@@ -341,6 +343,8 @@ func (m *Model) updatePicker(msg tea.Msg) (bool, tea.Cmd) {
 		}
 		item, picked := m.picker.selected()
 		m.closePicker()
+		// 过滤词随选择器关闭一起丢弃（同 Esc 口径）
+		m.input.Reset()
 		switch {
 		case picked && item.cur:
 			// 选中当前会话：不清视图历史（与 /session <当前 id> 一致）

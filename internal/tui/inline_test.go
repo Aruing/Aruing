@@ -438,3 +438,69 @@ func TestOpenInlinePicker(t *testing.T) {
 		})
 	}
 }
+
+// 选择器模态回车（inline）：选中即切换并渲染确认行，返回「已消费」使过滤词
+// 绝不当消息发送；选中当前会话只提示；空视图只提示。回归：这段处理曾在
+// rebase 冲突里丢失而单测未覆盖（只有 app 侧有覆盖）
+func TestInlinePickerEnter(t *testing.T) {
+	st := mustLoadStyles("dark")
+	summaries := []session.SessionSummary{
+		{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"},
+		{ID: "sess_b", MessageCount: 1, FirstQuestion: "为什么 demo-api 起不来"},
+	}
+
+	t.Run("切换到选中会话", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		c.openPicker(&b, st, sessionItems(summaries, "sess_a"))
+		c.applyIntent(&b, st, nil, 0, intentDown)
+		sessionID := "sess_a"
+		if !inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter with a visible picker must be consumed")
+		}
+		if sessionID != "sess_b" {
+			t.Fatalf("sessionID = %q, want sess_b", sessionID)
+		}
+		if c.pickerVisible() {
+			t.Fatal("picker must close after switching")
+		}
+		if !strings.Contains(stripANSI(b.String()), "已切换到会话 sess_b") {
+			t.Fatalf("output = %q", stripANSI(b.String()))
+		}
+	})
+
+	t.Run("选中当前会话不切换", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		c.openPicker(&b, st, sessionItems(summaries, "sess_a"))
+		sessionID := "sess_a"
+		if !inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter must be consumed")
+		}
+		if sessionID != "sess_a" || !strings.Contains(stripANSI(b.String()), "已在该会话 sess_a") {
+			t.Fatalf("sessionID = %q out = %q", sessionID, stripANSI(b.String()))
+		}
+	})
+
+	t.Run("空视图只提示", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		c.openPicker(&b, st, nil)
+		sessionID := "sess_a"
+		if !inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter must be consumed even with an empty view")
+		}
+		if sessionID != "sess_a" || !strings.Contains(stripANSI(b.String()), "暂无可切换的会话") {
+			t.Fatalf("sessionID = %q out = %q", sessionID, stripANSI(b.String()))
+		}
+	})
+
+	t.Run("未打开选择器不消费", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		sessionID := "sess_a"
+		if inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter must fall through when the picker is closed")
+		}
+	})
+}

@@ -389,7 +389,13 @@ func paletteListener(c *paletteCtl, out io.Writer, theme *inlineRenderState) rea
 			// 注入键：消费翻译器入队的意图（↑↓/Esc/重画）；真实 shift+tab
 			// 无意图时纯 no-op，无副作用
 			if intent, ok := c.popIntent(); ok {
+				wasPicker := c.pickerVisible()
 				c.applyIntent(out, theme.st, line, pos, intent)
+				// 选择器被 Esc 关闭：输入行里留下的是过滤词，不是待发消息，
+				// 一并清空（否则下一次回车会把它当消息发出去）
+				if wasPicker && intent == intentEsc {
+					return []rune{}, 0, true
+				}
 			}
 			return nil, 0, false
 		case '\t':

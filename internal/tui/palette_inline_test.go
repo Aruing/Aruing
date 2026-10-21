@@ -614,3 +614,23 @@ func TestPaletteCtlPickerKeyTranslation(t *testing.T) {
 		t.Fatalf("queued intent = (%v, %v), want down", intent, ok)
 	}
 }
+
+// 选择器下 Esc：关闭并把输入行里的过滤词清掉（返回 ok=true 的空行），
+// 否则下一次回车会把过滤词当消息发出去
+func TestPalettePickerEscapeClearsFilter(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	c.openPicker(&b, st, sessionItems(testSummaries(), "sess_a"))
+	l := paletteListener(c, &b, &inlineRenderState{st: st})
+
+	// 真实路径由包装层把 Esc 翻译成注入键并入队意图
+	c.pushIntent(intentEsc)
+	line, pos, ok := l([]rune("redis"), 5, readline.MetaShiftTab)
+	if !ok || len(line) != 0 || pos != 0 {
+		t.Fatalf("Esc should clear the filter line: (%q, %d, %v)", string(line), pos, ok)
+	}
+	if c.pickerVisible() {
+		t.Fatal("picker must be closed")
+	}
+}
