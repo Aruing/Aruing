@@ -410,11 +410,14 @@ func TestLoadFileCarriesTUISection(t *testing.T) {
 func TestStorageDataDir(t *testing.T) {
 	t.Parallel()
 
-	// 默认填充走注入的主目录，不依赖真实环境；无 LLM 时校验报错但配置已返回
+	// 默认填充走注入的主目录；用户级与系统级配置路径同样注入为不存在路径，
+	// 避免捡到本机真实配置（曾因本机 aruing connect 写入的用户级配置击穿「无 LLM 须报错」断言）
 	cfg, _, err := LoadResolvedWith("", ResolveOptions{
-		Cwd:         t.TempDir(),
-		UserHomeDir: "/home/tester",
-		LookupEnv:   func(string) (string, bool) { return "", false },
+		Cwd:           t.TempDir(),
+		UserHomeDir:   "/home/tester",
+		UserConfigDir: "/home/tester/.config",
+		SystemPath:    "/home/tester/.config/aruing-system",
+		LookupEnv:     func(string) (string, bool) { return "", false },
 	})
 	if err == nil {
 		t.Fatal("want LLM validation error")
@@ -424,10 +427,12 @@ func TestStorageDataDir(t *testing.T) {
 		t.Fatalf("default data dir: %q", cfg.Storage.DataDir)
 	}
 
-	// 环境变量覆盖默认
+	// 环境变量覆盖默认（同样注入不存在的配置路径，与首页链隔离一致）
 	cfg, _, err = LoadResolvedWith("", ResolveOptions{
-		Cwd:         t.TempDir(),
-		UserHomeDir: "/home/tester",
+		Cwd:           t.TempDir(),
+		UserHomeDir:   "/home/tester",
+		UserConfigDir: "/home/tester/.config",
+		SystemPath:    "/home/tester/.config/aruing-system",
 		LookupEnv: func(k string) (string, bool) {
 			switch k {
 			case "ARUING_STORAGE_DATA_DIR":
