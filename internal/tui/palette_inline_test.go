@@ -166,6 +166,34 @@ func TestPaletteCtlTab(t *testing.T) {
 	}
 }
 
+// 重绘几何：锚点下移序列必须在首次清行之前发出（否则菜单画到输入行上、
+// 光标还原错位）；下移用行馈、上移还原与之对称。回归钉住 pr-agent 发现的
+// 缺失下移序列缺陷
+func TestPaletteRepaintGeometry(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	c.onLine(&b, st, []rune("/"), 1)
+	out := b.String()
+
+	// 光标行尾 → 先清行尾，再下移 1 行到锚点，才出现首次清行
+	if !strings.HasPrefix(out, "\x1b[K\n\r\x1b[2K") {
+		t.Fatalf("down-move must precede the first clear: %q", out[:min(24, len(out))])
+	}
+	// 下移与上移对称：菜单 6 行（5 命令 + 键位行），还原上移 6 行、列恢复
+	// prompt 2 列 + 光标前 1 列
+	wantTail := fmt.Sprintf("\x1b[%dA\r\x1b[%dC", 6, promptCols+1)
+	if !strings.HasSuffix(out, wantTail) {
+		t.Fatalf("restore tail = ..., want suffix %q in %q", wantTail, out)
+	}
+	// 隐藏擦除同样先下移到锚点再清行
+	b.Reset()
+	c.onLine(&b, st, []rune("/zz"), 3)
+	if !strings.HasPrefix(b.String(), "\x1b[K\n\r\x1b[2K") {
+		t.Fatalf("hide sweep must anchor below the input line: %q", b.String()[:min(24, b.Len())])
+	}
+}
+
 // 锚定几何：菜单锚在输入显示末行之下——折行 + 光标行中时下移量补足，
 // 不与输入显示重叠（评审裁决 2）
 func TestAnchorDownMoves(t *testing.T) {

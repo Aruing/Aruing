@@ -191,6 +191,13 @@ func (c *paletteCtl) repaint(out io.Writer, st styles, rows []paletteLine) {
 	if pos == len(c.line) {
 		fmt.Fprint(out, "\x1b[K")
 	}
+	// 下移到锚点（输入显示末行之下）。用行馈 \n 而非 CUD（\x1b[B）：行馈在
+	// 屏幕底行会滚动终端腾出新行，CUD 只会钳在底边把菜单画到输入行上——
+	// 聊天输入行恰常在屏底，锚点在屏外时菜单仍能整体呈现在输入行下方；
+	// 滚动后相对行距不变，末尾上移还原仍精确
+	for i := 0; i < down; i++ {
+		fmt.Fprint(out, "\n")
+	}
 	sweep := len(rows)
 	if c.rows+1 > sweep {
 		sweep = c.rows + 1
