@@ -14,6 +14,8 @@
 #   spinner   思考中动画
 #   prompt    输入提示符（❯）
 #   divider   轮与轮之间的分隔线
+#   menu      命令面板（/ 菜单）正文行
+#   menu_selected 命令面板选中行（叠加 ❯ 前缀）
 #
 # 颜色格式：ANSI 256 编号（如 "205"）或 hex（如 "#ff005f"）。
 # padding / margin：四个数 [上, 右, 下, 左]，单位为行/格，非负。
@@ -62,6 +64,13 @@ styles:
   divider:
     foreground: "240"        # 分隔线颜色
     margin: [1, 0, 0, 0]     # 分隔线上方留 1 行空行（下方默认 0，与下轮输入的空行由 user.margin-top 提供）
+
+  menu:
+    foreground: "250"        # 命令面板正文行（默认 dark: 250）
+
+  menu_selected:
+    foreground: "#00aaff"    # 命令面板选中行（默认 dark: 39 加粗）
+    bold: true
 
   # 边框示例（当前 UI 尚未启用边框；声明后供未来组件消费，不会破坏现有渲染）：
   # assistant:

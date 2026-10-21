@@ -60,6 +60,11 @@ type Model struct {
 	spinner   spinner.Model
 	streaming streamingBuffer
 
+	// 命令面板（/ 菜单）：palette 为按当前输入推导的视图；paletteOff 为
+	// Esc 抑制（菜单关闭，任意编辑后重开）
+	palette    paletteView
+	paletteOff bool
+
 	busy   bool
 	quit   bool
 	width  int
@@ -135,6 +140,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// 菜单激活时的专属键位：↑↓/Tab/Esc 不进 textarea（消费）；
+		// busy 中仍可浏览导航，Enter 不执行由下方既有 busy 拦截承接（设计钉死）
+		if m.updatePaletteKeys(msg) {
+			return m, nil
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			if m.busy && m.cancelTurn != nil {
@@ -154,6 +164,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if text == "exit" || text == "quit" {
 				m.quit = true
 				return m, tea.Quit
+			}
+			// 菜单激活时回车：裸命令（无空白）替换为选中规范名再走既有命令路径；
+			// 已在输参数（含空白）原样提交（设计钉死的 Enter 语义）
+			if m.menuVisible() {
+				if execLine, handled := paletteSubmit(m.input.Value(), m.palette); handled {
+					text = strings.TrimSpace(execLine)
+				}
 			}
 			// 运行时命令分支：命令不进 Turn、不产生 user 视图，错误同样只渲染不发送
 			// （完成标志 1/2）；busy 已在上方拦截，与流式生成互斥不排队（零新状态机）
@@ -184,11 +201,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.messages = append(m.messages, msgView{kind: kind, text: ln.text})
 				}
 				m.input.Reset()
+				m.paletteOff = false
+				m.refreshPalette()
 				syncViewport(&m)
 				return m, nil
 			}
 			m.messages = append(m.messages, msgView{kind: "user", text: text})
 			m.input.Reset()
+			m.paletteOff = false
+			m.refreshPalette()
 			m.busy = true
 			syncViewport(&m)
 			turnCtx, cancel := context.WithCancel(m.ctx)
@@ -203,8 +224,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(turn, m.spinner.Tick)
 		default:
+			prev := m.input.Value()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
+			// 输入值变化（任意编辑）：清除 Esc 抑制并重算菜单；纯光标移动不重开
+			if m.input.Value() != prev {
+				m.paletteOff = false
+				m.refreshPalette()
+			}
 			return m, cmd
 		}
 	}
@@ -224,6 +251,50 @@ func (m Model) commandEnv() commandEnv {
 	}
 }
 
+// menuVisible 报告菜单当前是否显示（有过滤结果且未被 Esc 抑制）
+func (m *Model) menuVisible() bool {
+	return m.palette.active() && !m.paletteOff
+}
+
+// refreshPalette 按输入当前值重算菜单视图（输入变化后调用）
+func (m *Model) refreshPalette() {
+	m.palette = filterPalette(m.input.Value())
+}
+
+// updatePaletteKeys 菜单激活时的专属键位：↑↓ 移动选中、Tab 把选中规范名补全进
+// 输入框（需参命令带尾空格）、Esc 关闭菜单。消费的键不进 textarea；未激活返回
+// false 走原路径。busy（生成中）可浏览导航，Enter 不执行由主分支既有 busy 拦截
+// 承接（设计钉死）
+func (m *Model) updatePaletteKeys(msg tea.Msg) bool {
+	if !m.menuVisible() {
+		return false
+	}
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false
+	}
+	switch km.Type {
+	case tea.KeyUp:
+		m.palette = m.palette.moveSel(-1)
+		return true
+	case tea.KeyDown:
+		m.palette = m.palette.moveSel(1)
+		return true
+	case tea.KeyTab:
+		if line, _, ok := completePaletteLine(m.input.Value(), m.palette); ok {
+			m.input.SetValue(line)
+			m.input.CursorEnd()
+			m.paletteOff = false
+			m.refreshPalette()
+		}
+		return true
+	case tea.KeyEscape:
+		m.paletteOff = true
+		return true
+	}
+	return false
+}
+
 func (m Model) View() string {
 	if m.quit {
 		return ""
@@ -238,6 +309,17 @@ func (m Model) View() string {
 		w = 1
 	}
 	b.WriteString("\n" + m.styles.divider.Render(strings.Repeat("─", w)) + "\n")
+	// 命令面板：菜单行在分割线与输入框之间，行正文与 /help 同形（#20：样式
+	// 只经 menu / menu_selected 主题 token）
+	if m.menuVisible() {
+		for _, ln := range paletteRows(m.palette) {
+			st := m.styles.menu
+			if ln.selected {
+				st = m.styles.menuSelected
+			}
+			b.WriteString(st.Render(ln.text) + "\n")
+		}
+	}
 	b.WriteString(m.styles.prompt.Render("❯ ") + m.input.View())
 	return b.String()
 }
