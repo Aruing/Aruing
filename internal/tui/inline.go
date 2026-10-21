@@ -343,15 +343,25 @@ var newlineSeqs = [][]byte{
 	[]byte("\x1b\r"),        // option/alt + enter（多数 mac 终端原生，无需协议）
 }
 
-// newlineKeyReader 包在 stdin 外，把 shift+enter / option+enter 序列翻译成普通回车
-// 并计数（软换行）：readline 收到回车提交当前行，readMultiline 据计数判定是换行
-// 还是提交，反斜杠不进缓冲区、屏幕无残留。普通字节（含方向键等其它 ESC 序列）原样透传。
-// 限制：终端通常一次下发完整序列；若序列被拆到两次 Read，会退化为普通回车提交（可接受）。
+// newlineKeyReader 包在 stdin 外的两段字节翻译（ioloop goroutine 上被读）：
+// 先菜单翻译（菜单可见时把 ↑↓/孤立 Esc/Tab 换成 MetaShiftTab 注入序列并把
+// 意图入队，见 translateMenuKeys），再把 shift+enter / option+enter 序列翻译成
+// 普通回车并计数（软换行）：readline 收到回车提交当前行，readMultiline 据计数
+// 判定是换行还是提交。其余字节原样透传。
+// 限制：终端通常一次下发完整序列；若序列被拆到两次 Read，换行序列退化为普通
+// 回车提交、孤立 \x1b 被当 Esc 键处理（均文档化容忍）。
 type newlineKeyReader struct {
-	r   io.Reader
+	r io.Reader
+	// 尚未交付给 readline 的翻译产物，Read 按块消费
 	buf []byte
-	// 未消费的软换行计数；readline 在同一线程内同步读 stdin，无并发竞争
+	// 未消费的软换行计数。并发事实：本包装层在 readline 的 ioloop goroutine
+	// 上被读（经 bufio），计数消费在主 goroutine；Enter 字节的 channel 传递
+	// 建立先于关系、类型上无同步保护——存量债务，本步不扩大（菜单状态的跨
+	// goroutine 访问走 paletteCtl 内锁）
 	soft int
+	// 菜单会话状态；nil = 不做菜单翻译（未装配路径与既有测试）。ioloop 侧
+	// 只经锁访问其意图队列与可见性快照，不触碰绘制
+	ctl *paletteCtl
 }
 
 func (n *newlineKeyReader) Read(p []byte) (int, error) {
@@ -359,7 +369,8 @@ func (n *newlineKeyReader) Read(p []byte) (int, error) {
 		var tmp [256]byte
 		rn, err := n.r.Read(tmp[:])
 		if rn > 0 {
-			out, soft := translateNewlineSeqs(tmp[:rn])
+			// 两段翻译：先菜单（注入 + 意图），再软换行序列；其余透传
+			out, soft := translateNewlineSeqs(n.translateMenuKeys(tmp[:rn]))
 			n.buf = out
 			n.soft += soft
 		}
@@ -370,6 +381,69 @@ func (n *newlineKeyReader) Read(p []byte) (int, error) {
 	copied := copy(p, n.buf)
 	n.buf = n.buf[copied:]
 	return copied, nil
+}
+
+// 菜单拦截键与注入序列：↑↓ 为 CSI A/B；注入 \x1b[Z 是 readline 的
+// MetaShiftTab——ioloop 按显式 no-op 处理且必回调 Listener，真实 shift+tab
+// 无意图入队时在 Listener 侧被忽略，无副作用
+var (
+	menuUpSeq     = []byte("\x1b[A")
+	menuDownSeq   = []byte("\x1b[B")
+	menuInjectSeq = []byte("\x1b[Z")
+)
+
+// translateMenuKeys 菜单可见时把 ↑↓/孤立 Esc/Tab 翻译为注入序列并把意图
+// 入队，其余字节原样透传（含换行序列，交后续 translateNewlineSeqs）；
+// 菜单不可见时整体原样返回，保留 ↑↓ 历史导航、Tab 插字符、Esc 的既有
+// readline 行为。注入的序列只追加到输出、不回扫，不会被二次翻译。
+// 只在本包装层 Read（ioloop goroutine）内调用，经 ctl 锁与主 goroutine 交互
+func (n *newlineKeyReader) translateMenuKeys(in []byte) []byte {
+	if n.ctl == nil || !n.ctl.visible() {
+		return in
+	}
+	out := make([]byte, 0, len(in)+len(menuInjectSeq))
+	// 块内顺序可见性：Esc 关闭菜单后，同读块内后续键不再拦截（归还历史
+	// 导航）；本块内不会重新激活（激活依赖 Listener 重算，块级模拟只需关闭方向）
+	vis := true
+	for len(in) > 0 {
+		switch {
+		case vis && bytes.HasPrefix(in, menuUpSeq):
+			// ↑ 不进 readline：菜单激活时防历史导航接管方向键
+			n.ctl.pushIntent(intentUp)
+			out = append(out, menuInjectSeq...)
+			in = in[len(menuUpSeq):]
+		case vis && bytes.HasPrefix(in, menuDownSeq):
+			n.ctl.pushIntent(intentDown)
+			out = append(out, menuInjectSeq...)
+			in = in[len(menuDownSeq):]
+		case vis && in[0] == '\x1b' && len(in) > 1 && in[1] == '\x1b':
+			// 同读块内 Esc 后随另一按键（如 Esc+↑ 批量到达，终端把两次按键
+			// 合进一次 Read）：首字节按 Esc 键关闭菜单，后续键不再拦截。真
+			// alt+方向键（\x1b\x1b[A）同编码命中此分支——alt+方向罕见，让位
+			// 保 Esc 语义（pr-agent 批量路径）
+			n.ctl.pushIntent(intentEsc)
+			out = append(out, menuInjectSeq...)
+			in = in[1:]
+			vis = false
+		case vis && len(in) == 1 && in[0] == '\x1b':
+			// 孤立 Esc：剩余恰为单字节 \x1b 视为 Esc 键；与被拆包的序列头
+			// 无法区分，退化沿既有拆包容忍（文档化）
+			n.ctl.pushIntent(intentEsc)
+			out = append(out, menuInjectSeq...)
+			in = nil
+		case vis && in[0] == '\t':
+			// Tab 透传（readline 插入 '\t' 后回调 Listener 补全）+ 注入重画
+			// 意图：补全改写缓冲触发的全量重绘会把菜单清掉，由注入键重画
+			n.ctl.pushIntent(intentRedraw)
+			out = append(out, '\t')
+			out = append(out, menuInjectSeq...)
+			in = in[1:]
+		default:
+			out = append(out, in[0])
+			in = in[1:]
+		}
+	}
+	return out
 }
 
 // consumeSoft 报告并满耗一个软换行计数

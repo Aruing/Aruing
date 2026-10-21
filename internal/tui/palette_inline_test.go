@@ -1,0 +1,373 @@
+package tui
+
+import (
+	"bytes"
+	"fmt"
+	"strings"
+	"testing"
+)
+
+// 快捷构造：已按行激活菜单的 ctl（画过一次，rows 已记账）
+func newVisibleCtl(t *testing.T, line string) (*paletteCtl, *bytes.Buffer) {
+	t.Helper()
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	c.onLine(&b, mustLoadStyles("dark"), []rune(line), len(line))
+	if !c.visible() {
+		t.Fatalf("line %q should activate the menu", line)
+	}
+	return c, &b
+}
+
+// onLine 主路径：激活全量、过滤收窄、无命中隐藏擦除、行值变化清 Esc 抑制、
+// 初始回调清软换行残迹
+func TestPaletteCtlOnLine(t *testing.T) {
+	st := mustLoadStyles("dark")
+
+	// 激活：/ 出全量菜单（含键位自述行），rows = 命令数 + 1
+	c, b := newVisibleCtl(t, "/")
+	if !strings.Contains(b.String(), "/help") || !strings.Contains(b.String(), paletteKeyHint) {
+		t.Fatalf("menu output missing entries or key hint: %q", b.String())
+	}
+	if c.rows != len(commandDocs)+1 {
+		t.Fatalf("rows = %d, want %d", c.rows, len(commandDocs)+1)
+	}
+
+	// 过滤收窄：/se 只剩 sessions/session，rows 跟随收缩
+	b.Reset()
+	c.onLine(b, st, []rune("/se"), 3)
+	if c.rows != 3 {
+		t.Fatalf("narrowed rows = %d, want 3", c.rows)
+	}
+
+	// 无命中隐藏：输出为纯擦除（清行序列），rows 归零
+	b.Reset()
+	c.onLine(b, st, []rune("/zz"), 3)
+	if c.visible() || c.rows != 0 {
+		t.Fatalf("no-match should hide: visible=%v rows=%d", c.visible(), c.rows)
+	}
+	if out := b.String(); !strings.Contains(out, "\x1b[2K") || strings.Contains(out, "/help") {
+		t.Fatalf("hide output should only erase: %q", out)
+	}
+
+	// Esc 抑制由行值变化清除：Esc 后改行内容，菜单应重新可见
+	c, b = newVisibleCtl(t, "/se")
+	c.applyIntent(b, st, []rune("/se"), 3, intentEsc)
+	if c.visible() {
+		t.Fatal("esc should suppress the menu")
+	}
+	b.Reset()
+	c.onLine(b, st, []rune("/ses"), 4)
+	if !c.visible() {
+		t.Fatal("line change should clear esc suppression")
+	}
+
+	// 初始回调（nil 行）：软换行后残迹清到屏尾，状态复位
+	if c.rows == 0 {
+		t.Fatal("precondition: menu rows recorded")
+	}
+	b.Reset()
+	c.onLine(b, st, nil, 0)
+	if c.rows != 0 || c.visible() {
+		t.Fatalf("initial callback should reset: rows=%d visible=%v", c.rows, c.visible())
+	}
+	if out := b.String(); !strings.Contains(out, "\x1b[J") {
+		t.Fatalf("initial callback should clear to screen end: %q", out)
+	}
+
+	// 初始回调无残迹时零输出（首轮会话常见路径）
+	b.Reset()
+	c.onLine(b, st, nil, 0)
+	if b.Len() != 0 {
+		t.Fatalf("no-op initial callback should write nothing, got %q", b.String())
+	}
+}
+
+// 意图队列 FIFO：混合连击（一次读入 ↑↓）不乱序；空队列安全
+func TestPaletteCtlIntentQueue(t *testing.T) {
+	c := &paletteCtl{}
+	c.pushIntent(intentUp)
+	c.pushIntent(intentDown)
+	for _, want := range []paletteIntent{intentUp, intentDown} {
+		got, ok := c.popIntent()
+		if !ok || got != want {
+			t.Fatalf("popIntent() = (%v, %v), want (%v, true)", got, ok, want)
+		}
+	}
+	if _, ok := c.popIntent(); ok {
+		t.Fatal("empty queue should pop false")
+	}
+}
+
+// 注入键意图：↑↓ 移动选中、Esc 擦除、redraw 按当前行重算
+func TestPaletteCtlApplyIntent(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c, b := newVisibleCtl(t, "/se")
+	// /se 过滤序 = sessions, session（声明序）
+	first, _ := c.view.selectedDoc()
+	if first.name != "sessions" {
+		t.Fatalf("initial selection = %q, want sessions", first.name)
+	}
+
+	c.applyIntent(b, st, []rune("/se"), 3, intentDown)
+	if doc, _ := c.view.selectedDoc(); doc.name != "session" {
+		t.Fatalf("after down = %q, want session", doc.name)
+	}
+	c.applyIntent(b, st, []rune("/se"), 3, intentUp)
+	if doc, _ := c.view.selectedDoc(); doc.name != "sessions" {
+		t.Fatalf("after up = %q, want sessions", doc.name)
+	}
+
+	// Esc 擦除：rows 归零、不可见
+	b.Reset()
+	c.applyIntent(b, st, []rune("/se"), 3, intentEsc)
+	if c.visible() || c.rows != 0 {
+		t.Fatalf("esc should erase: visible=%v rows=%d", c.visible(), c.rows)
+	}
+
+	// redraw：按补全后的行重算（/sessions 过滤命中 sessions）
+	c.applyIntent(b, st, []rune("/sessions"), 9, intentRedraw)
+	if !c.visible() {
+		t.Fatal("redraw intent should repaint the menu")
+	}
+	if doc, _ := c.view.selectedDoc(); doc.name != "sessions" {
+		t.Fatalf("redraw selection = %q, want sessions", doc.name)
+	}
+}
+
+// Tab 补全：剥 readline 刚插入的 '\t' 后调内核；含参命令补尾空格；
+// 菜单不可见时 ok=false 保留既有插字符行为
+func TestPaletteCtlTab(t *testing.T) {
+	c, _ := newVisibleCtl(t, "/se")
+	// 选中 sessions（无参）：剥光标前刚插入的 \t 后补全为规范名，无尾空格
+	// （pos 为插入后的光标位，\t 恰在其前）
+	line, pos, ok := c.tab([]rune("/se\t"), 4)
+	if !ok || string(line) != "/sessions" || pos != len("/sessions") {
+		t.Fatalf("tab = (%q, %d, %v), want (/sessions, %d, true)", line, pos, ok, len("/sessions"))
+	}
+
+	// 选中 session（有参）：先 ↓ 再 Tab，补尾空格引导输参
+	c.applyIntent(bytes.NewBuffer(nil), mustLoadStyles("dark"), []rune("/se"), 3, intentDown)
+	line, pos, ok = c.tab([]rune("/se\t"), 4)
+	if !ok || string(line) != "/session " || pos != len("/session ") {
+		t.Fatalf("tab with args = (%q, %d, %v), want (/session\\x20, %d, true)", line, pos, ok, len("/session "))
+	}
+
+	// 已在输参：保留既有参数部分（光标行尾插入 \t）
+	line, _, ok = c.tab([]rune("/se abc\t"), 8)
+	if !ok || string(line) != "/session abc" {
+		t.Fatalf("tab keep args = (%q, %v), want (/session abc, true)", line, ok)
+	}
+
+	// 菜单不可见：不改写
+	c2 := &paletteCtl{}
+	if _, _, ok := c2.tab([]rune("hi\t"), 3); ok {
+		t.Fatal("invisible menu should not complete")
+	}
+}
+
+// 重绘几何：锚点下移序列必须在首次清行之前发出（否则菜单画到输入行上、
+// 光标还原错位）；下移用行馈、上移还原与之对称。回归钉住 pr-agent 发现的
+// 缺失下移序列缺陷
+func TestPaletteRepaintGeometry(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	c.onLine(&b, st, []rune("/"), 1)
+	out := b.String()
+
+	// 光标行尾 → 先清行尾，再下移 1 行到锚点，才出现首次清行
+	if !strings.HasPrefix(out, "\x1b[K\n\r\x1b[2K") {
+		t.Fatalf("down-move must precede the first clear: %q", out[:min(24, len(out))])
+	}
+	// 下移与上移对称：菜单 6 行（5 命令 + 键位行），还原上移 6 行、列恢复
+	// prompt 2 列 + 光标前 1 列
+	wantTail := fmt.Sprintf("\x1b[%dA\r\x1b[%dC", 6, promptCols+1)
+	if !strings.HasSuffix(out, wantTail) {
+		t.Fatalf("restore tail = ..., want suffix %q in %q", wantTail, out)
+	}
+	// 隐藏擦除同样先下移到锚点再清行
+	b.Reset()
+	c.onLine(&b, st, []rune("/zz"), 3)
+	if !strings.HasPrefix(b.String(), "\x1b[K\n\r\x1b[2K") {
+		t.Fatalf("hide sweep must anchor below the input line: %q", b.String()[:min(24, b.Len())])
+	}
+
+	// 折行续行上的光标列还原：余数列而非全宽。带参长行（/session + 91 字符
+	// 参数，光标行尾）前缀 102 列、宽 80 → 光标在续行 22 列；菜单命中 session
+	// 单条 + 键位行，上移 = down(1) + sweep(2) - 1
+	c2 := &paletteCtl{}
+	var b2 bytes.Buffer
+	c2.onLine(&b2, st, []rune("/session "+strings.Repeat("a", 91)), 100)
+	out2 := b2.String()
+	wantTail2 := fmt.Sprintf("\x1b[%dA\r\x1b[%dC", 3, 22)
+	if !strings.HasSuffix(out2, wantTail2) {
+		t.Fatalf("wrapped restore tail = ..., want suffix %q in %q", wantTail2, out2)
+	}
+}
+
+// cursorColOnRow：列位余数与行末悬挂边界的纯函数钉板
+func TestCursorColOnRow(t *testing.T) {
+	cases := []struct {
+		prefixCols, width, want int
+	}{
+		{3, 80, 3},   // 单行短前缀：列即前缀宽
+		{80, 80, 80}, // 恰为整数倍：行末悬挂位（CUF 钳边，既有容忍）
+		{102, 80, 22},
+		{161, 80, 1},
+	}
+	for _, c := range cases {
+		if got := cursorColOnRow(c.prefixCols, c.width); got != c.want {
+			t.Fatalf("cursorColOnRow(%d, %d) = %d, want %d", c.prefixCols, c.width, got, c.want)
+		}
+	}
+}
+
+// 擦除路径必须复位视图：否则下个提示符 visible() 恒真，包装层劫持 ↑↓
+// 历史导航（提交路径 clearBelow 清屏但不复位的回归）
+func TestEraseResetsView(t *testing.T) {
+	st := mustLoadStyles("dark")
+	var b bytes.Buffer
+
+	// clearBelow（提交路径）
+	c, _ := newVisibleCtl(t, "/")
+	c.clearBelow(&b)
+	if c.visible() {
+		t.Fatal("clearBelow must reset the stale view")
+	}
+
+	// 初始回调（rows 已被 clearBelow 清零，复位不能藏在 if 里）
+	c2, _ := newVisibleCtl(t, "/")
+	c2.rows = 0
+	c2.onLine(&b, st, nil, 0)
+	if c2.visible() {
+		t.Fatal("initial callback must reset the view regardless of rows")
+	}
+
+	// 复位后包装层不再拦截 ↑（归还历史导航）
+	n := &newlineKeyReader{ctl: c2}
+	if got := n.translateMenuKeys([]byte("\x1b[A")); string(got) != "\x1b[A" {
+		t.Fatalf("arrow should pass through after reset, got %q", got)
+	}
+}
+
+// 锚定几何：菜单锚在输入显示末行之下——折行 + 光标行中时下移量补足，
+// 不与输入显示重叠（评审裁决 2）
+func TestAnchorDownMoves(t *testing.T) {
+	// 短行光标行尾：下移 1 行即输入末行之下
+	if got := anchorDownMoves("/hello", 6, 80); got != 1 {
+		t.Fatalf("short line anchor = %d, want 1", got)
+	}
+	// 100 列输入折成 2 行、光标在第 1 行中部：须下移 2 行才到末行之下
+	long := "/" + strings.Repeat("a", 99)
+	if got := anchorDownMoves(long, 50, 80); got != 2 {
+		t.Fatalf("wrapped anchor = %d, want 2", got)
+	}
+	// 同一行光标行尾：下移 1
+	if got := anchorDownMoves(long, 100, 80); got != 1 {
+		t.Fatalf("wrapped end anchor = %d, want 1", got)
+	}
+}
+
+// clearBelow 提交路径擦除：从当前行向下清 rows+1 行并回到起始行
+func TestPaletteCtlClearBelow(t *testing.T) {
+	c, _ := newVisibleCtl(t, "/")
+	rows := c.rows
+	var b bytes.Buffer
+	c.clearBelow(&b)
+	out := b.String()
+	// rows+1 行各一次清行，行间下移
+	if got := strings.Count(out, "\x1b[2K"); got != rows+1 {
+		t.Fatalf("clearBelow cleared %d lines, want %d", got, rows+1)
+	}
+	if !strings.Contains(out, fmt.Sprintf("\x1b[%dA", rows)) {
+		t.Fatal("clearBelow should return the cursor to its starting row")
+	}
+	if c.rows != 0 {
+		t.Fatalf("rows = %d after clearBelow, want 0", c.rows)
+	}
+	// 无残留时零输出
+	b.Reset()
+	c.clearBelow(&b)
+	if b.Len() != 0 {
+		t.Fatalf("no-op clearBelow wrote %q", b.String())
+	}
+}
+
+// 菜单翻译：可见时 ↑↓/孤立 Esc/Tab → 注入序列 + 意图；不可见或 ctl 为空时
+// 全透传（保留历史导航 / 插字符既有行为）
+func TestTranslateMenuKeys(t *testing.T) {
+	visible := func() *paletteCtl {
+		c, _ := newVisibleCtl(t, "/")
+		return c
+	}
+	cases := []struct {
+		name     string
+		ctl      *paletteCtl
+		in       string
+		want     string
+		intents  []paletteIntent
+		noIntent bool
+	}{
+		{"上箭头", visible(), "\x1b[A", "\x1b[Z", []paletteIntent{intentUp}, false},
+		{"下箭头", visible(), "\x1b[B", "\x1b[Z", []paletteIntent{intentDown}, false},
+		{"孤立 Esc", visible(), "\x1b", "\x1b[Z", []paletteIntent{intentEsc}, false},
+		{"Tab 注入重画", visible(), "\t", "\t\x1b[Z", []paletteIntent{intentRedraw}, false},
+		{"混合文本与箭头", visible(), "x\x1b[Ay", "x\x1b[Zy", []paletteIntent{intentUp}, false},
+		{"换行序列不被菜单段碰", visible(), "\x1b[27;2;13~", "\x1b[27;2;13~", nil, true},
+		{"不可见全透传", func() *paletteCtl { return &paletteCtl{} }(), "\x1b[A\t\x1b", "\x1b[A\t\x1b", nil, true},
+		{"无 ctl 全透传", nil, "\x1b[A\t\x1b", "\x1b[A\t\x1b", nil, true},
+		{"批量 Esc+↑：Esc 关菜单后同块键透传", visible(), "\x1b\x1b[A", "\x1b[Z\x1b[A", []paletteIntent{intentEsc}, false},
+		{"批量 Esc+↑+Tab：同块内全部不再拦截", visible(), "\x1b\x1b[A\t", "\x1b[Z\x1b[A\t", []paletteIntent{intentEsc}, false},
+		{"Esc 后随普通键（alt+字母歧义）不识别为 Esc", visible(), "\x1b\t\x1b[B", "\x1b\t\x1b[Z\x1b[Z", []paletteIntent{intentRedraw, intentDown}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &newlineKeyReader{ctl: tc.ctl}
+			got := n.translateMenuKeys([]byte(tc.in))
+			if string(got) != tc.want {
+				t.Fatalf("translate(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if tc.noIntent {
+				// ctl 为空的用例无法查队列；输出原样即证明未拦截
+				if tc.ctl != nil && len(tc.ctl.pending) != 0 {
+					t.Fatalf("unexpected intents queued: %v", tc.ctl.pending)
+				}
+				return
+			}
+			if len(tc.ctl.pending) != len(tc.intents) {
+				t.Fatalf("intents = %v, want %v", tc.ctl.pending, tc.intents)
+			}
+			for i, want := range tc.intents {
+				if tc.ctl.pending[i] != want {
+					t.Fatalf("intents = %v, want %v", tc.ctl.pending, tc.intents)
+				}
+			}
+		})
+	}
+}
+
+// 包装层两段翻译链：菜单注入与软换行翻译在同一 Read 流内正确分流
+func TestKeyReaderMenuChain(t *testing.T) {
+	c, _ := newVisibleCtl(t, "/")
+	n := &newlineKeyReader{r: strings.NewReader("/\x1b[A\x1b[27;2;13~\t"), ctl: c}
+	var buf [256]byte
+	rn, err := n.Read(buf[:])
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	// / 透传；↑ → 注入；shift+enter 经菜单段透传后由换行段译为 \r；Tab 透传 + 注入
+	want := "/\x1b[Z\r\t\x1b[Z"
+	if string(buf[:rn]) != want {
+		t.Fatalf("chain output = %q, want %q", buf[:rn], want)
+	}
+	if !n.consumeSoft() {
+		t.Fatal("soft newline should be counted once")
+	}
+	if got, _ := c.popIntent(); got != intentUp {
+		t.Fatalf("first intent = %v, want up", got)
+	}
+	if got, _ := c.popIntent(); got != intentRedraw {
+		t.Fatalf("second intent = %v, want redraw", got)
+	}
+}
