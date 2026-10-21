@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/ergochat/readline"
+	"github.com/muesli/termenv"
 )
 
 // 快捷构造：已按行激活菜单的 ctl（画过一次，rows 已记账）
@@ -356,7 +358,7 @@ func TestPaletteListener(t *testing.T) {
 	st := mustLoadStyles("dark")
 	c := &paletteCtl{}
 	var b bytes.Buffer
-	l := paletteListener(c, &b, st)
+	l := paletteListener(c, &b, &inlineRenderState{st: st})
 
 	// 初始回调（nil,0,0）：视为空行，零输出
 	l(nil, 0, 0)
@@ -386,7 +388,7 @@ func TestPaletteListener(t *testing.T) {
 
 	// Tab 补全：可见时改写缓冲（返回 ok=true，行与光标行尾）
 	c2, _ := newVisibleCtl(t, "/se")
-	l2 := paletteListener(c2, &b, st)
+	l2 := paletteListener(c2, &b, &inlineRenderState{st: st})
 	line, pos, ok := l2([]rune("/se\t"), 4, '\t')
 	if !ok || string(line) != "/sessions" || pos != len("/sessions") {
 		t.Fatalf("listener tab = (%q, %d, %v), want (/sessions, %d, true)", line, pos, ok, len("/sessions"))
@@ -400,7 +402,7 @@ func TestPaletteListener(t *testing.T) {
 
 	// 不可见时 Tab：不改写、不补全
 	c3 := &paletteCtl{}
-	l3 := paletteListener(c3, &b, st)
+	l3 := paletteListener(c3, &b, &inlineRenderState{st: st})
 	if line, _, ok := l3([]rune("hi\t"), 3, '\t'); ok || line != nil {
 		t.Fatalf("invisible tab = (%q, %v), want (nil, false)", line, ok)
 	}
@@ -408,7 +410,7 @@ func TestPaletteListener(t *testing.T) {
 	// 清屏键：强制全量重画（签名跳过优化不生效）
 	c4, _ := newVisibleCtl(t, "/")
 	var b4 bytes.Buffer
-	l4 := paletteListener(c4, &b4, st)
+	l4 := paletteListener(c4, &b4, &inlineRenderState{st: st})
 	l4([]rune("/"), 1, '/') // 同签名：被跳过，无输出
 	if b4.Len() != 0 {
 		t.Fatalf("identical repaint should be skipped, wrote %q", b4.String())
@@ -514,5 +516,50 @@ func TestKeyReaderMenuChain(t *testing.T) {
 	}
 	if got, _ := c.popIntent(); got != intentRedraw {
 		t.Fatalf("second intent = %v, want redraw", got)
+	}
+}
+
+// clearAll：输出擦屏序列并把菜单簿记（行数 / 视图 / 锚定输入）全部复位，
+// 否则下一轮重绘按旧行数清理、包装层继续劫持 ↑↓
+func TestPaletteCtlClearAll(t *testing.T) {
+	c, _ := newVisibleCtl(t, "/")
+	var b bytes.Buffer
+	c.clearAll(&b)
+	if got := b.String(); got != "\x1b[3J\x1b[2J\x1b[H" {
+		t.Fatalf("erase sequence = %q", got)
+	}
+	if c.rows != 0 || c.visible() {
+		t.Fatalf("rows = %d visible = %v after clearAll", c.rows, c.visible())
+	}
+	// 复位后包装层不再拦截方向键（归还历史导航）
+	n := &newlineKeyReader{ctl: c}
+	if got := n.translateMenuKeys([]byte("\x1b[A")); string(got) != "\x1b[A" {
+		t.Fatalf("arrow should pass through after clearAll, got %q", got)
+	}
+}
+
+// 主题切换族回归：Listener 构造时拿不到新样式表，必须经指针读实时样式——
+// 否则切主题后菜单仍按旧色表绘制（pr-agent 采纳项）。
+// 测试环境默认无色：临时打开 ANSI 色档，才能从输出字节区分新旧色表
+func TestPaletteListenerFollowsTheme(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+
+	dark, light := mustLoadStyles("dark"), mustLoadStyles("light")
+	rstate := &inlineRenderState{st: dark, theme: "dark", width: 80}
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	l := paletteListener(c, &b, rstate)
+
+	// 切主题后同一 Listener 回调：输出须用亮色主题的菜单色
+	rstate.st, rstate.theme = light, "light"
+	l([]rune("/"), 1, 'x')
+	// 首行是选中项（menuSelected 色），取未选中的第二行比 menu 色
+	const row = "  /sessions  列出历史会话（* 为当前）"
+	if !strings.Contains(b.String(), light.menu.Render(row)) {
+		t.Fatalf("menu should render with the active theme: %q", b.String())
+	}
+	if strings.Contains(b.String(), dark.menu.Render(row)) {
+		t.Fatal("menu still rendered with the startup theme")
 	}
 }

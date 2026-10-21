@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/session"
@@ -331,5 +335,67 @@ func TestInlineStructuredResult(t *testing.T) {
 		if strings.Count(out.String(), text) != 1 {
 			t.Fatalf("missing or repeated result: %q", out.String())
 		}
+	}
+}
+
+// 命令效果应用：先清屏后换主题，两者都在渲染输出行之前（确认行不会被
+// 擦屏抹掉、切换后的确认行用新色表）
+func TestInlineApplyCommandEffects(t *testing.T) {
+	t.Run("清屏在换主题之前", func(t *testing.T) {
+		s := &inlineRenderState{st: mustLoadStyles("dark"), theme: "dark", width: 80}
+		c, _ := newVisibleCtl(t, "/")
+		var b bytes.Buffer
+		res, themed := s.applyCommandEffects(commandResult{clearDisplay: true, theme: "light", lines: []renderLine{{text: "ok"}}}, &b, c, "")
+		if !themed {
+			t.Fatal("theme change should report themed=true")
+		}
+		if got := b.String(); got != "\x1b[3J\x1b[2J\x1b[H" {
+			t.Fatalf("clearAll must be written first: %q", got)
+		}
+		if s.theme != "light" || c.rows != 0 {
+			t.Fatalf("state = theme %q rows %d", s.theme, c.rows)
+		}
+		if got, want := s.st.prompt.Render("x"), mustLoadStyles("light").prompt.Render("x"); got != want {
+			t.Fatalf("style not switched: got %q want %q", got, want)
+		}
+		if len(res.lines) != 1 || res.lines[0].text != "ok" {
+			t.Fatalf("lines = %+v", res.lines)
+		}
+	})
+
+	t.Run("主题加载失败保持原样式", func(t *testing.T) {
+		s := &inlineRenderState{st: mustLoadStyles("dark"), theme: "dark", width: 80}
+		c, _ := newVisibleCtl(t, "/")
+		var b bytes.Buffer
+		res, themed := s.applyCommandEffects(commandResult{theme: "light", lines: []renderLine{{text: "已切换主题 light"}}}, &b, c, writeTheme(t, "styles:\n  user:\n    foreground: \"#zzzzzz\"\n"))
+		if themed || s.theme != "dark" {
+			t.Fatalf("failure must keep the old theme: themed=%v theme=%q", themed, s.theme)
+		}
+		if res.theme != "" {
+			t.Fatalf("res.theme should be cleared on failure: %q", res.theme)
+		}
+		if len(res.lines) != 1 || !res.lines[0].isError || !strings.Contains(res.lines[0].text, "切换主题失败") {
+			t.Fatalf("lines = %+v (misleading success line must be replaced)", res.lines)
+		}
+	})
+}
+
+// 用户回显随主题：/theme 之后的输入行必须用新样式，而不是启动时的样式快照
+// （启动快照族回归；默认无色环境需临时开色档才可比字节）
+func TestInlineEchoUserFollowsTheme(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+
+	dark, light := mustLoadStyles("dark"), mustLoadStyles("light")
+	rstate := &inlineRenderState{st: dark, theme: "dark", width: 80}
+
+	rstate.st = light
+	var b bytes.Buffer
+	rstate.echoUser(&b, "hi")
+	if !strings.Contains(b.String(), light.user.Render("hi")) {
+		t.Fatalf("echo should use the active theme: %q", b.String())
+	}
+	if strings.Contains(b.String(), dark.user.Render("hi")) {
+		t.Fatal("echo still used the startup theme")
 	}
 }

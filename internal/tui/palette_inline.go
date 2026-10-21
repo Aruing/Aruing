@@ -284,15 +284,16 @@ func (c *paletteCtl) forceRepaint(out io.Writer, st styles) {
 // paletteListener 构造 readline 逐键回调：普通键重算菜单、Tab 补全改写缓冲、
 // 注入键（MetaShiftTab）消费意图。readline 保证普通键先处理缓冲后回调、
 // Enter/EOF/Interrupt 不回调；初始回调 (nil,0,0) 由 onLine 按空行处理。
-// 所有菜单终端写都经此入口（主 goroutine），与 readline 自身重绘串行
-func paletteListener(c *paletteCtl, out io.Writer, st styles) readline.Listener {
+// 所有菜单终端写都经此入口（主 goroutine），与 readline 自身重绘串行。
+// 样式表经指针读取（Listener 构造后无法替换）：/theme 切换后菜单立即用新色表
+func paletteListener(c *paletteCtl, out io.Writer, theme *inlineRenderState) readline.Listener {
 	return func(line []rune, pos int, key rune) ([]rune, int, bool) {
 		switch key {
 		case readline.MetaShiftTab:
 			// 注入键：消费翻译器入队的意图（↑↓/Esc/重画）；真实 shift+tab
 			// 无意图时纯 no-op，无副作用
 			if intent, ok := c.popIntent(); ok {
-				c.applyIntent(out, st, line, pos, intent)
+				c.applyIntent(out, theme.st, line, pos, intent)
 			}
 			return nil, 0, false
 		case '\t':
@@ -302,16 +303,16 @@ func paletteListener(c *paletteCtl, out io.Writer, st styles) readline.Listener 
 				return newLine, newPos, true
 			}
 			// 不可补全：tab 已进缓冲，按普通键重算（过滤口径不含空白，不受影响）
-			c.onLine(out, st, line, pos)
+			c.onLine(out, theme.st, line, pos)
 			return nil, 0, false
 		case readline.CharCtrlL, readline.CharCtrlZ:
 			// 清屏 / 挂起恢复整体重绘输入区并擦掉菜单，签名比对会误判无变化，
 			// 强制全量重画
-			c.onLine(out, st, line, pos)
-			c.forceRepaint(out, st)
+			c.onLine(out, theme.st, line, pos)
+			c.forceRepaint(out, theme.st)
 			return nil, 0, false
 		default:
-			c.onLine(out, st, line, pos)
+			c.onLine(out, theme.st, line, pos)
 			return nil, 0, false
 		}
 	}
@@ -327,6 +328,17 @@ func submitWithPalette(c *paletteCtl, text string) string {
 		}
 	}
 	return text
+}
+
+// clearAll /clear 命令擦屏：清可视屏与回滚区并把光标归位。屏上不再有
+// 菜单残迹，行数 / 绘制签名 / 视图一并归零——否则下次重绘会按旧行数清理，
+// 且 visible() 残留会让包装层继续把 ↑↓ 当菜单意图（擦除/复位成对）
+func (c *paletteCtl) clearAll(out io.Writer) {
+	fmt.Fprint(out, "\x1b[3J\x1b[2J\x1b[H")
+	c.rows = 0
+	c.lastPaint = paintSig{}
+	c.setView(paletteView{}, false)
+	c.line, c.pos = nil, 0
 }
 
 // clearTail 退出路径清残迹：EOF / ErrInterrupt 后 readline 写过中断提示、

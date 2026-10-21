@@ -47,7 +47,10 @@ type turnMsg struct {
 type Model struct {
 	svc       *session.Service
 	sessionID string
-	tuiTheme  string // 配置主题（dark | light | auto）；空同 auto
+	// 配置主题（dark | light | auto）；空同 auto。运行时 /theme 切换后就地更新
+	tuiTheme string
+	// 主题覆盖文件路径；运行时切换主题需重载样式，故要留着（启动时已校验）
+	themeFile string
 	// 会话发现能力（运行时命令 /sessions、/session 用）；可空，缺能力时命令报不可用
 	lister session.SessionLister
 
@@ -181,6 +184,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else {
 					res = runCommand(m.ctx, m.commandEnv(), name, args)
 				}
+				// 效果应用次序与 inline 一致：清屏 → 换主题 → 追加输出行
+				if res.clearDisplay {
+					// 只清视图历史：Store 全量保留，切回即恢复语义与 /session 切换同口径
+					m.messages = nil
+				}
+				if res.theme != "" {
+					res = m.applyTheme(res)
+				}
 				if res.quit {
 					m.quit = true
 					m.input.Reset()
@@ -248,7 +259,28 @@ func (m Model) commandEnv() commandEnv {
 		lister:           m.lister,
 		newSession:       m.svc.NewSession,
 		currentSessionID: func() string { return m.sessionID },
+		currentTheme:     func() string { return m.tuiTheme },
 	}
+}
+
+// 应用主题切换效果：重载样式表并重建 markdown 渲染器；失败则保持原主题并把
+// 「已切换」行换成错误行（误导性确认不能留）。已渲染的历史不重排：inline 无法
+// 回溯旧输出，双模式语义保持一致
+func (m *Model) applyTheme(res commandResult) commandResult {
+	st, md, err := switchTheme(res.theme, m.themeFile, m.width)
+	if err != nil {
+		res.theme = ""
+		res.lines = []renderLine{{text: "切换主题失败：" + err.Error(), isError: true}}
+		return res
+	}
+	m.styles, m.tuiTheme = st, res.theme
+	// spinner 在构造时把样式表拷进 Bubble 组件，不会自己跟主题走，须显式同步
+	m.spinner.Style = st.spinner
+	if m.width > 0 {
+		// 宽度已知才重建：WindowSizeMsg 会按新 tuiTheme 再建一次
+		m.md = md
+	}
+	return res
 }
 
 // menuVisible 报告菜单当前是否显示（有过滤结果且未被 Esc 抑制）

@@ -96,6 +96,17 @@ func lightStyles() styles {
 	}
 }
 
+// 运行时切换主题：重载样式表并按给定宽度重建 markdown 渲染器（两模式的
+// /theme 共用）。样式加载失败即返回错误，调用方保持原主题；渲染器建不起来
+// 沿 buildRenderer 既有降级（nil = 渲染回原文），不把主题切换判为失败
+func switchTheme(theme, themeFile string, width int) (styles, *markdownRenderer, error) {
+	st, err := loadStyles(theme, themeFile)
+	if err != nil {
+		return styles{}, nil, err
+	}
+	return st, buildRenderer(theme, width), nil
+}
+
 // 测试便利：加载失败即 Fatal（测试用；产品路径须经 loadStyles 显式处理错误）
 func mustLoadStyles(theme string) styles {
 	st, err := loadStyles(theme, "")

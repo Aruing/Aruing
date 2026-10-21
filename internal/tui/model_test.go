@@ -396,3 +396,69 @@ func TestUpdatePaletteEnterWithArgsAndBusy(t *testing.T) {
 		t.Fatalf("busy enter must not execute: %+v", um.messages)
 	}
 }
+
+// app 模式 /clear：只清视图历史，不退出、不进 Turn
+func TestUpdateEnterClear(t *testing.T) {
+	m := newTestModel()
+	m.messages = []msgView{{kind: "user", text: "hi"}, {kind: "assistant", text: "yo"}}
+	m.input.SetValue("/clear")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if cmd != nil || um.busy || um.quit {
+		t.Fatalf("clear must stay in session: cmd=%v busy=%v quit=%v", cmd, um.busy, um.quit)
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "system" {
+		t.Fatalf("messages = %+v (history cleared, confirmation kept)", um.messages)
+	}
+}
+
+// app 模式 /theme：切换后样式与主题字段生效，历史不重排（双模式一致语义）
+func TestUpdateEnterTheme(t *testing.T) {
+	m := newTestModel()
+	m.messages = []msgView{{kind: "user", text: "hi"}}
+	m.input.SetValue("/theme light")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.tuiTheme != "light" {
+		t.Fatalf("tuiTheme = %q, want light", um.tuiTheme)
+	}
+	if got, want := um.styles.prompt.Render("x"), mustLoadStyles("light").prompt.Render("x"); got != want {
+		t.Fatalf("prompt style not switched: got %q want %q", got, want)
+	}
+	if len(um.messages) != 2 || um.messages[0].kind != "user" {
+		t.Fatalf("history must be kept: %+v", um.messages)
+	}
+	// spinner 样式在构造时被拷贝进组件，切换后必须同步（否则下一轮 spinner 仍旧色）
+	if got, want := um.spinner.Style.Render("x"), mustLoadStyles("light").spinner.Render("x"); got != want {
+		t.Fatalf("spinner style not switched: got %q want %q", got, want)
+	}
+}
+
+// app 模式 /theme 非法值：样式不变，只多一条错误行
+func TestUpdateEnterThemeInvalid(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/theme blue")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.tuiTheme != "dark" {
+		t.Fatalf("tuiTheme = %q, want unchanged dark", um.tuiTheme)
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "error" {
+		t.Fatalf("messages = %+v", um.messages)
+	}
+}
+
+// app 模式 /theme 切换失败（主题文件已坏）：保持原主题，确认行换成错误行
+func TestUpdateEnterThemeLoadFailure(t *testing.T) {
+	m := newTestModel()
+	m.themeFile = writeTheme(t, "styles:\n  user:\n    foreground: \"#zzzzzz\"\n")
+	m.input.SetValue("/theme light")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.tuiTheme != "dark" {
+		t.Fatalf("tuiTheme = %q, want unchanged dark", um.tuiTheme)
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "error" || !strings.Contains(um.messages[0].text, "切换主题失败") {
+		t.Fatalf("messages = %+v", um.messages)
+	}
+}

@@ -250,7 +250,8 @@ func TestRunCommandTheme(t *testing.T) {
 	})
 }
 
-// inline 分支：命令渲染留痕、普通输入不拦截、未知命令渲染错误（三者都不发送）
+// inline 分支：命令只渲染不留发送（完成标志 1/2）、普通输入不拦截、
+// 未知命令渲染错误；效果应用与渲染分属两步，此处按主循环次序组装
 func TestRunInlineCommand(t *testing.T) {
 	st := mustLoadStyles("dark")
 	cases := []struct {
@@ -266,11 +267,15 @@ func TestRunInlineCommand(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var out strings.Builder
-			_, handled := runInlineCommand(context.Background(), &out, st, commandEnv{}, c.text)
+			res, handled := execInlineCommand(context.Background(), commandEnv{}, c.text)
 			if handled != c.handled {
 				t.Fatalf("handled = %v, want %v", handled, c.handled)
 			}
-			if c.handled && !strings.Contains(stripANSI(out.String()), c.want) {
+			if !handled {
+				return
+			}
+			renderCommandLines(&out, st, res.lines)
+			if !strings.Contains(stripANSI(out.String()), c.want) {
 				t.Fatalf("output = %q, want %q", stripANSI(out.String()), c.want)
 			}
 		})
