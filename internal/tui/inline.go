@@ -51,13 +51,17 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	fmt.Fprint(out, modifyOtherKeysOn)
 	defer fmt.Fprint(out, modifyOtherKeysOff)
 
-	keys := &newlineKeyReader{r: os.Stdin}
+	// 命令面板会话状态：包装层（菜单键翻译，ioloop goroutine）与 Listener
+	// （重算与绘制，主 goroutine）共用；绘制只经 Listener 与提交/退出路径
+	ctl := &paletteCtl{}
+	keys := &newlineKeyReader{r: os.Stdin, ctl: ctl}
 
 	rl, err := readline.NewFromConfig(&readline.Config{
-		Prompt: st.prompt.Render("❯ "),
-		Stdin:  keys,
-		Stdout: out,
-		Stderr: os.Stderr,
+		Prompt:   st.prompt.Render("❯ "),
+		Stdin:    keys,
+		Stdout:   out,
+		Stderr:   os.Stderr,
+		Listener: paletteListener(ctl, out, st),
 	})
 	if err != nil {
 		return fmt.Errorf("init readline: %w", err)
@@ -87,7 +91,8 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		}
 		text, err := readMultiline(rl, keys)
 		if err != nil {
-			// io.EOF（Ctrl+D）或 ErrInterrupt（Ctrl+C）：正常退出
+			// io.EOF（Ctrl+D）或 ErrInterrupt（Ctrl+C）：正常退出；先清菜单残迹
+			ctl.clearTail(out)
 			fmt.Fprintln(out)
 			return nil
 		}
@@ -98,6 +103,12 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		if text == "exit" || text == "quit" {
 			return nil
 		}
+		// 提交前菜单收尾：可见时裸命令片段替换为选中规范名（含参原样，多行
+		// 草稿末行非 / 开头视图不可见不替换）；随后擦净菜单再渲染——Enter 后
+		// 光标停在输入末行下一行（恰为菜单首行位置），clearBelow 从当前行清起，
+		// 无半截消息、无菜单残骸进渲染流（与流式共存，完成标志 3）
+		text = submitWithPalette(ctl, text)
+		ctl.clearBelow(out)
 		// 每轮重取终端宽：变了则重建 renderer，后续 divider 与 markdown 都用新宽
 		if w := terminalWidth(); w != width {
 			width = w

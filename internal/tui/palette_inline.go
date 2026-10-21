@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"sync"
+
+	"github.com/ergochat/readline"
 )
 
 // 菜单意图：包装层拦截到键后入队，Listener 消费注入键时弹出执行。
@@ -46,10 +48,24 @@ type paletteCtl struct {
 	off bool
 	// 上次绘制的菜单行数（含键位自述行），重绘/擦除按此清理防残留
 	rows int
+	// 上次成功绘制的签名；与本次一致时跳过重绘，消除光标在同一显示行内
+	// 移动（← → Home End 等）时菜单无意义的擦画闪烁。任何擦除路径置零值
+	lastPaint paintSig
 	// 最近一次回调的行内容与光标位（锚定与列恢复的几何输入；只读拷贝）
 	line []rune
 	// 光标在行内的 rune 下标
 	pos int
+}
+
+// paintSig 菜单绘制签名：行数 + 选中下标 + 锚定下移量三者一致即视为屏上
+// 内容未变，可跳过重绘。零值永不匹配有效签名（rows > 0）
+type paintSig struct {
+	// 菜单行数（含键位自述行）；0 = 未绘制
+	rows int
+	// 选中下标（选中变化需重绘选中前缀）
+	sel int
+	// 锚定下移量（输入折行或光标跨显示行时菜单物理位置变化需重绘）
+	down int
 }
 
 // visible 报告菜单当前是否显示（锁内快照）；供包装层（ioloop goroutine）
@@ -94,11 +110,12 @@ func (c *paletteCtl) setView(v paletteView, off bool) {
 func (c *paletteCtl) onLine(out io.Writer, st styles, line []rune, pos int) {
 	if line == nil {
 		// 无论是否残留：视图必须复位——提交路径 clearBelow 只清屏上菜单，
-		// 不复位视图会让 visible() 恒真、包装层在新提示符继续拦截 ↑↓（历史
+		// 不复位会让 visible() 恒真、包装层在新提示符继续拦截 ↑↓（历史
 		// 导航被劫持直到下一个普通键）
 		if c.rows > 0 {
 			fmt.Fprint(out, "\x1b[J")
 			c.rows = 0
+			c.lastPaint = paintSig{}
 		}
 		c.setView(paletteView{}, false)
 		c.line, c.pos = nil, 0
@@ -188,6 +205,13 @@ func (c *paletteCtl) repaint(out io.Writer, st styles, rows []paletteLine) {
 	}
 	width := terminalWidth()
 	down := anchorDownMoves(string(c.line), pos, width)
+	// 签名一致且屏上仍有菜单：内容与位置均未变，跳过重绘（防光标移动闪烁）
+	c.mu.Lock()
+	sel := c.view.sel
+	c.mu.Unlock()
+	if len(rows) > 0 && (paintSig{rows: len(rows), sel: sel, down: down} == c.lastPaint) {
+		return
+	}
 	// 光标还原列 = 光标前逻辑列数落在其显示行上的余数（折行续行时用全宽
 	// 会钳在右边距错位列）；恰为整数倍时余数为 width（行末悬挂换行位），
 	// CUF 钳在右边距属既有折行估算容忍
@@ -226,6 +250,7 @@ func (c *paletteCtl) repaint(out io.Writer, st styles, rows []paletteLine) {
 	// 回到光标行与列：上移 (down + sweep - 1) 行后归零列、右移恢复列位
 	fmt.Fprintf(out, "\x1b[%dA\r\x1b[%dC", down+sweep-1, restoreCol)
 	c.rows = len(rows)
+	c.lastPaint = paintSig{rows: len(rows), sel: sel, down: down}
 }
 
 // clearBelow 提交路径擦除：Enter 后 readline 回显换行，光标已在输入末行
@@ -243,8 +268,78 @@ func (c *paletteCtl) clearBelow(out io.Writer) {
 	}
 	fmt.Fprintf(out, "\x1b[%dA", c.rows)
 	c.rows = 0
-	// 屏上已无菜单：视图一并复位（否则下个提示符 visible() 恒真，包装层
-	// 劫持 ↑↓ 历史导航）
+	// 屏上已无菜单：签名作废（防后续同形菜单被误跳过），视图一并复位
+	// （否则下个提示符 visible() 恒真，包装层劫持 ↑↓ 历史导航）
+	c.lastPaint = paintSig{}
+	c.setView(paletteView{}, false)
+}
+
+// forceRepaint 绕过签名跳过优化全量重画：清屏（Ctrl+L）/ 挂起恢复（Ctrl+Z）
+// 等 readline 整体重绘会擦掉菜单而行内容与光标不变，签名比对会误判无变化
+func (c *paletteCtl) forceRepaint(out io.Writer, st styles) {
+	c.lastPaint = paintSig{}
+	c.repaintByVisibility(out, st)
+}
+
+// paletteListener 构造 readline 逐键回调：普通键重算菜单、Tab 补全改写缓冲、
+// 注入键（MetaShiftTab）消费意图。readline 保证普通键先处理缓冲后回调、
+// Enter/EOF/Interrupt 不回调；初始回调 (nil,0,0) 由 onLine 按空行处理。
+// 所有菜单终端写都经此入口（主 goroutine），与 readline 自身重绘串行
+func paletteListener(c *paletteCtl, out io.Writer, st styles) readline.Listener {
+	return func(line []rune, pos int, key rune) ([]rune, int, bool) {
+		switch key {
+		case readline.MetaShiftTab:
+			// 注入键：消费翻译器入队的意图（↑↓/Esc/重画）；真实 shift+tab
+			// 无意图时纯 no-op，无副作用
+			if intent, ok := c.popIntent(); ok {
+				c.applyIntent(out, st, line, pos, intent)
+			}
+			return nil, 0, false
+		case '\t':
+			if newLine, newPos, ok := c.tab(line, pos); ok {
+				// 补全改写缓冲：readline 随后的全量重绘会清掉菜单，由翻译器
+				// 紧跟本键注入的重画意图恢复
+				return newLine, newPos, true
+			}
+			// 不可补全：tab 已进缓冲，按普通键重算（过滤口径不含空白，不受影响）
+			c.onLine(out, st, line, pos)
+			return nil, 0, false
+		case readline.CharCtrlL, readline.CharCtrlZ:
+			// 清屏 / 挂起恢复整体重绘输入区并擦掉菜单，签名比对会误判无变化，
+			// 强制全量重画
+			c.onLine(out, st, line, pos)
+			c.forceRepaint(out, st)
+			return nil, 0, false
+		default:
+			c.onLine(out, st, line, pos)
+			return nil, 0, false
+		}
+	}
+}
+
+// submitWithPalette 提交前菜单收尾的替换面：菜单可见时裸命令片段替换为
+// 选中规范名再交既有命令分支，含参输入原样；不可见（含多行草稿，末行非 /
+// 开头）不替换，与 app 模式同口径
+func submitWithPalette(c *paletteCtl, text string) string {
+	if c.visible() {
+		if execLine, handled := paletteSubmit(text, c.view); handled {
+			return execLine
+		}
+	}
+	return text
+}
+
+// clearTail 退出路径清残迹：EOF / ErrInterrupt 后 readline 写过中断提示、
+// 光标精确位置不可知，清当前行行首到屏尾——退出时刻输入行之下只可能是
+// 菜单残迹，不会误伤其他内容
+func (c *paletteCtl) clearTail(out io.Writer) {
+	if c.rows == 0 {
+		return
+	}
+	fmt.Fprint(out, "\r\x1b[J")
+	c.rows = 0
+	c.lastPaint = paintSig{}
+	// 退出前同样复位视图，与 clearBelow 同口径（擦除/复位成对）
 	c.setView(paletteView{}, false)
 }
 
