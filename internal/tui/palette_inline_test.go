@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/ergochat/readline"
 )
 
 // 快捷构造：已按行激活菜单的 ctl（画过一次，rows 已记账）
@@ -344,6 +346,148 @@ func TestTranslateMenuKeys(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Listener 装配：普通键重算菜单、Tab 补全改写缓冲、注入键消费意图、
+// 真实 shift+tab 无意图时无副作用、清屏键强制重画
+func TestPaletteListener(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	l := paletteListener(c, &b, st)
+
+	// 初始回调（nil,0,0）：视为空行，零输出
+	l(nil, 0, 0)
+	if b.Len() != 0 {
+		t.Fatalf("initial callback wrote %q", b.String())
+	}
+
+	// 普通键：/ 激活菜单
+	l([]rune("/"), 1, '/')
+	if !c.visible() {
+		t.Fatal("plain key should activate the menu")
+	}
+
+	// 注入键（↓ 意图）：选中下移并重绘
+	c.pushIntent(intentDown)
+	l([]rune("/"), 1, readline.MetaShiftTab)
+	if doc, _ := c.view.selectedDoc(); doc.name != "sessions" {
+		t.Fatalf("after down = %q, want sessions", doc.name)
+	}
+
+	// 真实 shift+tab（无意图）：纯 no-op，无输出、菜单不变
+	before := b.Len()
+	l([]rune("/"), 1, readline.MetaShiftTab)
+	if b.Len() != before {
+		t.Fatalf("no-intent shift+tab should write nothing, got %q", b.String()[before:])
+	}
+
+	// Tab 补全：可见时改写缓冲（返回 ok=true，行与光标行尾）
+	c2, _ := newVisibleCtl(t, "/se")
+	l2 := paletteListener(c2, &b, st)
+	line, pos, ok := l2([]rune("/se\t"), 4, '\t')
+	if !ok || string(line) != "/sessions" || pos != len("/sessions") {
+		t.Fatalf("listener tab = (%q, %d, %v), want (/sessions, %d, true)", line, pos, ok, len("/sessions"))
+	}
+	// 补全后的重画意图：按新行重算，菜单存活
+	c2.pushIntent(intentRedraw)
+	l2([]rune("/sessions"), 9, readline.MetaShiftTab)
+	if !c2.visible() {
+		t.Fatal("redraw intent after completion should keep the menu alive")
+	}
+
+	// 不可见时 Tab：不改写、不补全
+	c3 := &paletteCtl{}
+	l3 := paletteListener(c3, &b, st)
+	if line, _, ok := l3([]rune("hi\t"), 3, '\t'); ok || line != nil {
+		t.Fatalf("invisible tab = (%q, %v), want (nil, false)", line, ok)
+	}
+
+	// 清屏键：强制全量重画（签名跳过优化不生效）
+	c4, _ := newVisibleCtl(t, "/")
+	var b4 bytes.Buffer
+	l4 := paletteListener(c4, &b4, st)
+	l4([]rune("/"), 1, '/') // 同签名：被跳过，无输出
+	if b4.Len() != 0 {
+		t.Fatalf("identical repaint should be skipped, wrote %q", b4.String())
+	}
+	l4([]rune("/"), 1, readline.CharCtrlL)
+	if b4.Len() == 0 {
+		t.Fatal("ctrl+l should force a full repaint")
+	}
+}
+
+// 重绘签名跳过：同内容同位置不重复输出；擦除后同形菜单必须重画
+func TestPaletteRepaintSkip(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c, b := newVisibleCtl(t, "/")
+
+	// 光标在同一显示行内移动（行值与折行几何未变）：跳过重绘，零输出
+	b.Reset()
+	c.onLine(b, st, []rune("/"), 0)
+	if b.Len() != 0 {
+		t.Fatalf("same-signature repaint should write nothing, got %q", b.String())
+	}
+
+	// 擦除（提交路径）后同形菜单重开：签名已作废，必须重画
+	c.clearBelow(bytes.NewBuffer(nil))
+	b.Reset()
+	c.onLine(b, st, []rune("/"), 1)
+	if b.Len() == 0 || c.rows == 0 {
+		t.Fatal("repaint after erase must not be skipped")
+	}
+
+	// 选中变化（↑↓）改变签名：重画
+	b.Reset()
+	c.applyIntent(b, st, []rune("/"), 1, intentDown)
+	if b.Len() == 0 {
+		t.Fatal("selection change should repaint")
+	}
+}
+
+// 提交替换面：可见裸命令替换选中名、含参原样、不可见不替换、多行草稿不替换
+func TestSubmitWithPalette(t *testing.T) {
+	c, _ := newVisibleCtl(t, "/se") // 选中 sessions
+	if got := submitWithPalette(c, "/se"); got != "/sessions" {
+		t.Fatalf("bare submit = %q, want /sessions", got)
+	}
+	if got := submitWithPalette(c, "/se abc"); got != "/se abc" {
+		t.Fatalf("args submit = %q, want unchanged", got)
+	}
+
+	// 菜单不可见：不替换（未知命令走既有错误路径）
+	c2 := &paletteCtl{}
+	if got := submitWithPalette(c2, "/se"); got != "/se" {
+		t.Fatalf("invisible submit = %q, want unchanged", got)
+	}
+
+	// 多行草稿：软换行后视图已重置（初始回调），不替换
+	c3, _ := newVisibleCtl(t, "/se")
+	c3.onLine(bytes.NewBuffer(nil), mustLoadStyles("dark"), nil, 0)
+	if got := submitWithPalette(c3, "/se\nabc"); got != "/se\nabc" {
+		t.Fatalf("multiline submit = %q, want unchanged", got)
+	}
+}
+
+// clearTail 退出路径：有菜单清到屏尾并复位视图，无菜单零输出
+func TestPaletteCtlClearTail(t *testing.T) {
+	c, _ := newVisibleCtl(t, "/")
+	var b bytes.Buffer
+	c.clearTail(&b)
+	if out := b.String(); out != "\r\x1b[J" {
+		t.Fatalf("clearTail = %q, want \\r\\x1b[J", out)
+	}
+	if c.rows != 0 {
+		t.Fatalf("rows = %d after clearTail, want 0", c.rows)
+	}
+	if c.visible() {
+		t.Fatal("clearTail must reset the view (erase/reset paired)")
+	}
+	b.Reset()
+	c.clearTail(&b)
+	if b.Len() != 0 {
+		t.Fatalf("no-op clearTail wrote %q", b.String())
 	}
 }
 
