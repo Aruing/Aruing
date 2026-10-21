@@ -470,7 +470,7 @@ func TestSubmitWithPalette(t *testing.T) {
 	}
 }
 
-// clearTail 退出路径：有菜单清到屏尾，无菜单零输出
+// clearTail 退出路径：有菜单清到屏尾并复位视图，无菜单零输出
 func TestPaletteCtlClearTail(t *testing.T) {
 	c, _ := newVisibleCtl(t, "/")
 	var b bytes.Buffer
@@ -480,6 +480,9 @@ func TestPaletteCtlClearTail(t *testing.T) {
 	}
 	if c.rows != 0 {
 		t.Fatalf("rows = %d after clearTail, want 0", c.rows)
+	}
+	if c.visible() {
+		t.Fatal("clearTail must reset the view (erase/reset paired)")
 	}
 	b.Reset()
 	c.clearTail(&b)
