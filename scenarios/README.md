@@ -43,7 +43,7 @@ make lab-down NAME=crashloop-bad-image # 拆集群 + 清理 kubeconfig
 | `prompts.md` | 固定用户问法（按顺序发给 `chat`） |
 | `expect.md` | 验收：应出现 / 不应出现（人/AI 对照，非自动评分） |
 | `manifests/` | 故障清单（kubectl apply） |
-| `scenario.yaml` | 场景元数据 + 真值四元组（`ground_truth`；judge 判分与 probe 真值展开消费，集群命名按约定 `aruing-sc-<name>`） |
+| `scenario.yaml` | 场景元数据 + 真值四元组（`ground_truth`；judge 判分与 probe 真值展开消费，集群命名按约定 `aruing-sc-<name>`）+ 难度理论值（`difficulty`，见下） |
 | `probe.yaml` | 长会话维素材（诊断请求 + 问答池 + 尾部探针，`aruing probe` / 基准 probe 维消费；缺文件时 bench-run 跳过该维度） |
 
 标准流程（`lab-chat` / `lab-kube` 已自动注入 KUBECONFIG，无需手动 export）：
@@ -62,6 +62,31 @@ make lab-down NAME=crashloop-bad-image
 make lab-kube NAME=crashloop-bad-image CMD="get po -A"
 make lab-kube NAME=crashloop-bad-image CMD="describe pod -n demo -l app=demo-api"
 ```
+
+### 难度理论值（`difficulty` 段）
+
+`scenario.yaml` 的 `difficulty` 段只存**原子事实**（能从场景文件数出来的量），六维分数由 `aruing scenarios` 机械派生：分数不写进文件，避免人直接给分无法复现。
+
+| 字段 | 含义 |
+| --- | --- |
+| `faults` | 真故障个数（不含诱饵），至少 1 |
+| `evidence_sources` | 闭环所需不同来源证据种数（事件 / 容器状态 / 日志 / 配置 / 网络策略…） |
+| `decoys` | 故意埋的假线索个数 |
+| `output_scale` | `plain` 或 `large`：是否逼出投影 / 分片 / 落盘页式路径 |
+| `capability_restricted` | 是否权限或能力受限（如 RBAC 拒绝读、数据面无法实测） |
+| `layers` | 跨层数（命名空间 / 节点 / CRD / 控制面与数据面） |
+| `session_rounds` | 设计所需会话轮数，单轮记 1 |
+| `info_gap` | 横切标记：正确答案是否要求主动澄清或明确报缺口（不进总分） |
+
+派生规则（每维 0–3 分，总分 = 六维之和）：计数类 1 / 2 / 3+ 折 1 / 2 / 3 分；会话长度单轮 1 分、2–3 轮 2 分、4 轮以上 3 分；环境严苛度 `large` 2 分 + 受限 1 分。
+
+```bash
+make build
+make lab-list                 # 场景列表 + 每个场景的六维难度分
+./bin/aruing scenarios        # 或直接调用（--format json 供机器消费）
+```
+
+未标注 `difficulty` 的场景在列表里显示 `-`（回填进度可见）；标注越界（负数、未知 `output_scale`）会在 stderr 报警，判分与对比报告侧则直接报错。
 
 ### 同集群多 case（cases/）
 

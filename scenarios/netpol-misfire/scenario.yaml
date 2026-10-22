@@ -13,6 +13,18 @@ namespace: edge
 #（networkpolicy/netpol/网络策略/ingress）被同型诱饵污染不进 signature——
 # 停在 deny-all 的结论必 miss（判分锚设计见步骤 plan 决策 4）
 notes: "症状：edge ns frontend×2 CrashLoop（日志 dial tcp api.core.svc.cluster.local:80: i/o timeout）。根因：core ns NetworkPolicy allow-frontend-to-api 的 ingress from podSelector 标签 frontend-web 与 frontend 实际标签 app=frontend 不匹配 → 规则匹配空集 → api 入站对所有人关闭。诱饵：sandbox 的 deny-all，作用域管不着。数据面模拟：kind 不 enforce netpol，症状由脚本重放。"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 诱饵一个（sandbox deny-all）；闭环需 策略 spec / pod 标签 / 日志 三种来源
+# capability_restricted：kind 默认 CNI 不 enforce NetworkPolicy，数据面无法实测（见上方声明）
+difficulty:
+  faults: 1
+  evidence_sources: 3
+  decoys: 1
+  output_scale: plain
+  capability_restricted: true
+  layers: 2
+  session_rounds: 2
+  info_gap: true
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
 ground_truth:
   resource_type: networkpolicy
