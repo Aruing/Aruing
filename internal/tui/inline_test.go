@@ -403,13 +403,11 @@ func TestInlineEchoUserFollowsTheme(t *testing.T) {
 // /session 无参会话选择器打开路径：有列表能力则打开并绘制，缺能力 / 列举失败
 // 只报错不开选择器（与 /sessions 同文案）
 func TestOpenInlinePicker(t *testing.T) {
-	st := mustLoadStyles("dark")
 	summaries := []session.SessionSummary{{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"}}
 
 	t.Run("打开", func(t *testing.T) {
 		c := &paletteCtl{}
-		var b bytes.Buffer
-		res := openInlinePicker(context.Background(), &b, c, fakeLister{summaries: summaries}, "sess_a", st, commandResult{pickSession: true})
+		res := openInlinePicker(context.Background(), c, fakeLister{summaries: summaries}, "sess_a", commandResult{pickSession: true})
 		if res.pickSession || len(res.lines) != 0 {
 			t.Fatalf("res = %+v, want plain success", res)
 		}
@@ -427,8 +425,7 @@ func TestOpenInlinePicker(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			c := &paletteCtl{}
-			var b bytes.Buffer
-			res := openInlinePicker(context.Background(), &b, c, tc.lister, "", st, commandResult{pickSession: true})
+			res := openInlinePicker(context.Background(), c, tc.lister, "", commandResult{pickSession: true})
 			if c.pickerVisible() {
 				t.Fatal("picker must stay closed on failure")
 			}
@@ -452,7 +449,7 @@ func TestInlinePickerEnter(t *testing.T) {
 	t.Run("切换到选中会话", func(t *testing.T) {
 		c := &paletteCtl{}
 		var b bytes.Buffer
-		c.openPicker(&b, st, sessionItems(summaries, "sess_a"))
+		c.openPicker(sessionItems(summaries, "sess_a"))
 		c.applyIntent(&b, st, nil, 0, intentDown)
 		sessionID := "sess_a"
 		if !inlinePickerEnter(&b, st, c, &sessionID) {
@@ -472,7 +469,7 @@ func TestInlinePickerEnter(t *testing.T) {
 	t.Run("选中当前会话不切换", func(t *testing.T) {
 		c := &paletteCtl{}
 		var b bytes.Buffer
-		c.openPicker(&b, st, sessionItems(summaries, "sess_a"))
+		c.openPicker(sessionItems(summaries, "sess_a"))
 		sessionID := "sess_a"
 		if !inlinePickerEnter(&b, st, c, &sessionID) {
 			t.Fatal("Enter must be consumed")
@@ -485,7 +482,7 @@ func TestInlinePickerEnter(t *testing.T) {
 	t.Run("空视图只提示", func(t *testing.T) {
 		c := &paletteCtl{}
 		var b bytes.Buffer
-		c.openPicker(&b, st, nil)
+		c.openPicker(nil)
 		sessionID := "sess_a"
 		if !inlinePickerEnter(&b, st, c, &sessionID) {
 			t.Fatal("Enter must be consumed even with an empty view")

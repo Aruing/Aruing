@@ -564,18 +564,24 @@ func TestPaletteListenerFollowsTheme(t *testing.T) {
 	}
 }
 
-// 选择器：打开即绘制条目、↑↓ 改选中、回车确认返回目标并关闭擦除；
-// 打开期间 Tab 被包装层吞掉（过滤词里不该插制表符）
+// 选择器：打开只置状态（绘制交给下个提示符的初始回调，避免被 prompt 覆盖）、
+// 初始回调绘制条目、↑↓ 改选中、回车确认返回目标并关闭擦除、Esc 关闭不产出目标
 func TestPaletteCtlPicker(t *testing.T) {
 	st := mustLoadStyles("dark")
 	c := &paletteCtl{}
 	var b bytes.Buffer
-	c.openPicker(&b, st, sessionItems(testSummaries(), "sess_a"))
-	if !c.pickerVisible() || c.rows != 3 {
-		t.Fatalf("after open: visible=%v rows=%d, want true/3", c.pickerVisible(), c.rows)
+	c.openPicker(sessionItems(testSummaries(), "sess_a"))
+	if !c.pickerVisible() || c.rows != 0 {
+		t.Fatalf("after open: visible=%v rows=%d, want true/0 (draw is deferred)", c.pickerVisible(), c.rows)
 	}
-	if !strings.Contains(stripANSI(b.String()), pickerKeyHint) {
-		t.Fatalf("picker must render the key hint: %q", stripANSI(b.String()))
+
+	// 新提示符的初始回调负责绘制；画完把光标交回行首（prompt 还没打印）
+	c.onLine(&b, st, nil, 0)
+	if c.rows != 3 || !strings.Contains(stripANSI(b.String()), pickerKeyHint) {
+		t.Fatalf("initial callback must draw the picker: rows=%d out=%q", c.rows, stripANSI(b.String()))
+	}
+	if !strings.HasSuffix(b.String(), "\r") {
+		t.Fatalf("cursor must return to column 0 before the prompt is printed: %q", b.String())
 	}
 
 	// ↓ 移动选中后确认：目标为第二条（sess_a，当前会话）
@@ -589,7 +595,7 @@ func TestPaletteCtlPicker(t *testing.T) {
 	}
 
 	// Esc 关闭：不产出目标
-	c.openPicker(&b, st, sessionItems(testSummaries(), "sess_a"))
+	c.openPicker(sessionItems(testSummaries(), "sess_a"))
 	c.applyIntent(&b, st, nil, 0, intentEsc)
 	if c.pickerVisible() {
 		t.Fatal("Esc must close the picker")
@@ -599,10 +605,31 @@ func TestPaletteCtlPicker(t *testing.T) {
 	}
 }
 
+// 选择器跨提示符存活：初始回调不能把刚画好的列表当残留擦掉（pr-agent 采纳项），
+// 否则 /session 之后要等首个按键才看得到会话列表
+func TestPalettePickerSurvivesNewPrompt(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	c.openPicker(sessionItems(testSummaries(), "sess_a"))
+
+	var b bytes.Buffer
+	c.onLine(&b, st, nil, 0)
+	if !strings.Contains(stripANSI(b.String()), pickerKeyHint) {
+		t.Fatalf("first prompt must draw the picker: %q", stripANSI(b.String()))
+	}
+
+	// 再来一个新提示符（例如切换会话后又回车）：应重画，而不是只清屏尾
+	b.Reset()
+	c.onLine(&b, st, nil, 0)
+	if c.rows == 0 || !strings.Contains(stripANSI(b.String()), pickerKeyHint) {
+		t.Fatalf("picker must be redrawn on every new prompt: rows=%d out=%q", c.rows, stripANSI(b.String()))
+	}
+}
+
 // 选择器打开时包装层吞掉 Tab、仍拦截 ↑↓（选择器占用方向键）
 func TestPaletteCtlPickerKeyTranslation(t *testing.T) {
 	c := &paletteCtl{}
-	c.openPicker(bytes.NewBuffer(nil), mustLoadStyles("dark"), sessionItems(testSummaries(), ""))
+	c.openPicker(sessionItems(testSummaries(), ""))
 	n := &newlineKeyReader{ctl: c}
 	if got := n.translateMenuKeys([]byte("\t")); len(got) != 0 {
 		t.Fatalf("Tab must be swallowed while picker is open, got %q", got)
@@ -621,7 +648,7 @@ func TestPalettePickerEscapeClearsFilter(t *testing.T) {
 	st := mustLoadStyles("dark")
 	c := &paletteCtl{}
 	var b bytes.Buffer
-	c.openPicker(&b, st, sessionItems(testSummaries(), "sess_a"))
+	c.openPicker(sessionItems(testSummaries(), "sess_a"))
 	l := paletteListener(c, &b, &inlineRenderState{st: st})
 
 	// 真实路径由包装层把 Esc 翻译成注入键并入队意图

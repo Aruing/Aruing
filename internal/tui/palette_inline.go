@@ -102,8 +102,10 @@ func (c *paletteCtl) active() bool {
 }
 
 // openPicker 打开会话选择器：items 为打开瞬间的会话快照（一次 ListSessions），
-// 之后的过滤都在内存里做。打开时清掉菜单的 Esc 抑制，两者互斥
-func (c *paletteCtl) openPicker(out io.Writer, st styles, items []sessionItem) {
+// 之后的过滤都在内存里做。打开时清掉菜单的 Esc 抑制，两者互斥。
+// 这里只置状态不绘制：输入提交后光标已在新行，而 prompt 还没打印，此时画出的
+// 行会被随后的 prompt 覆盖；绘制统一由下个提示符的初始回调完成
+func (c *paletteCtl) openPicker(items []sessionItem) {
 	c.pickerItems = items
 	c.picker = pickerView{items: items}
 	c.mu.Lock()
@@ -111,7 +113,6 @@ func (c *paletteCtl) openPicker(out io.Writer, st styles, items []sessionItem) {
 	c.off = false
 	c.setViewLocked(paletteView{}, false)
 	c.mu.Unlock()
-	c.repaintByVisibility(out, st)
 }
 
 // closePicker 关闭并擦除选择器（Esc / 回车确认 / 空视图）：行数与绘制签名
@@ -162,14 +163,23 @@ func (c *paletteCtl) setViewLocked(v paletteView, off bool) {
 }
 
 // onLine 处理一次普通键回调：重算过滤视图并按可见性重画或擦除。
-// line 为 nil 是 readline 的初始回调（prompt 打印前、行为空）：此时光标在
-// 新行 prompt 之后且下方只可能是上一行遗留的菜单残迹（软换行进草稿下一行
-// 的场景），清到屏尾安全；空行不折行，不会误伤输入显示
+// line 为 nil 是 readline 的初始回调（prompt 打印前、行为空，光标在新行行首）
 func (c *paletteCtl) onLine(out io.Writer, st styles, line []rune, pos int) {
 	if line == nil {
-		// 无论是否残留：视图必须复位——提交路径 clearBelow 只清屏上菜单，
+		// 会话选择器跨提示符存活：新提示符到来时把它重画到新行之下，不能当
+		// 上一轮残留擦掉（那样列表要等首个按键才出现）。重画后把光标交回行首：
+		// 初始回调发生在 prompt 打印前，重画的列恢复按「prompt 已打印」估算
+		if c.pickerVisible() {
+			c.line, c.pos = nil, 0
+			c.lastPaint = paintSig{}
+			c.repaintByVisibility(out, st)
+			fmt.Fprint(out, "\r")
+			return
+		}
+		// 无选择器：视图必须复位——提交路径 clearBelow 只清屏上菜单，
 		// 不复位会让 visible() 恒真、包装层在新提示符继续拦截 ↑↓（历史
-		// 导航被劫持直到下一个普通键）
+		// 导航被劫持直到下一个普通键）。此时下方只可能是上一轮菜单残迹
+		// （软换行进草稿下一行的场景），清到屏尾安全
 		if c.rows > 0 {
 			fmt.Fprint(out, "\x1b[J")
 			c.rows = 0

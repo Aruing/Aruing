@@ -127,7 +127,7 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		// 否则确认行会被随后的擦屏抹掉、换成新主题的确认行也用旧色表
 		if res, handled := execInlineCommand(ctx, cmdEnv, text); handled {
 			// 会话选择器：列表由模态绘制，不另印文本；取列表失败只报错不开选择器
-			res = openInlinePicker(ctx, out, ctl, lister, sessionID, rstate.st, res)
+			res = openInlinePicker(ctx, ctl, lister, sessionID, res)
 			var themed bool
 			res, themed = rstate.applyCommandEffects(res, out, ctl, themeFile)
 			if themed {
@@ -238,7 +238,7 @@ func (s *inlineRenderState) echoUser(out io.Writer, text string) {
 
 // openInlinePicker 处理 /session 无参：同步取一次会话列表快照并打开选择器。
 // 能力缺失或列举失败只把原因作为输出行，不打开选择器（与 /sessions 同文案）
-func openInlinePicker(ctx context.Context, out io.Writer, ctl *paletteCtl, lister session.SessionLister, current string, st styles, res commandResult) commandResult {
+func openInlinePicker(ctx context.Context, ctl *paletteCtl, lister session.SessionLister, current string, res commandResult) commandResult {
 	if !res.pickSession {
 		return res
 	}
@@ -252,7 +252,7 @@ func openInlinePicker(ctx context.Context, out io.Writer, ctl *paletteCtl, liste
 		res.lines = append(res.lines, renderLine{text: "列出会话失败：" + err.Error(), isError: true})
 		return res
 	}
-	ctl.openPicker(out, st, sessionItems(summaries, current))
+	ctl.openPicker(sessionItems(summaries, current))
 	return res
 }
 
