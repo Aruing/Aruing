@@ -10,6 +10,17 @@ namespace: shop
 # resource_name 取 v2 容器名 web-api-v2（诱饵答案必点名 Deployment 名、不涉容器名，
 # manifest 实名兼判分锚）——停在诱饵的结论必 miss（判分锚设计见步骤 plan 决策 4）
 notes: "症状：web-api 新版本滚动发布卡死（3×v1 Ready + 1×v2 Running 0/1 永卡）。根因：v2 模板就绪探针自检端口抄错（httpGet /healthz 8081，容器实际监听 8080 → connection refused）。诱饵：HPA 报 no metrics-server，与发布卡死无关，须证据排除。"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 诱饵一个（HPA 红鲱鱼）；闭环需 部署 spec / pod 事件 / endpoints 三种来源
+difficulty:
+  faults: 1
+  evidence_sources: 3
+  decoys: 1
+  output_scale: plain
+  capability_restricted: false
+  layers: 2
+  session_rounds: 2
+  info_gap: false
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；resource_name 与 manifests 实名一致
 ground_truth:
   resource_type: deployment-container

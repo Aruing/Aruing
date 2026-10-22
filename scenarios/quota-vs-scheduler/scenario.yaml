@@ -8,6 +8,17 @@ namespace: billing
 # （ResourceQuota 满导致 Pod 准入被拒）；诱饵词（nodeSelector/节点/调度/标签）
 # 不进 signature——停在诱饵的结论必 miss（机械判分粗粒度残差见步骤 plan）
 notes: "症状：billing ns 新 Deployment payment-svc 副本恒 0、无 Pod 对象。根因：ResourceQuota compute-resources 已满（ledger-api 占用 requests.cpu 1/1），payment-svc 单 pod 请求 2 CPU 在准入阶段被拒（RS FailedCreate: exceeded quota）。诱饵：nodeSelector 指向真实存在的标签，须证据排除。"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 诱饵一个（nodeSelector）；闭环需 事件 / ResourceQuota / 部署 spec 三种来源
+difficulty:
+  faults: 1
+  evidence_sources: 3
+  decoys: 1
+  output_scale: plain
+  capability_restricted: false
+  layers: 2
+  session_rounds: 2
+  info_gap: false
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
 ground_truth:
   resource_type: resourcequota

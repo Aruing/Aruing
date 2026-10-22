@@ -8,6 +8,18 @@ namespace: demo
 # signature 唯一性：DB_HOST / app-config 只属于根因对象；诱饵词（OOMKilled / 镜像类）不进
 # signature，停在诱饵的结论必 miss（冻结决策 7：半对答含 signature 词判 hit 属机械判分接受口径）
 notes: "症状：demo ns orders-api CrashLoop（日志 fatal: cannot reach database）。根因：共享 ConfigMap app-config 的 DB_HOST 漂移指向 payments ns 的 payments-db（本该连 demo ns 的 orders-db）。双诱饵须证据排除：canary 坏镜像（诱饵①）+ payments-db OOM（诱饵②）。"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 诱饵两个（canary 坏镜像 + payments-db OOM）；闭环需 配置内容 / 部署 env / 日志 三种来源
+# 跨层：demo ns 配置 ↔ payments ns 数据库（同一次查询里跨命名空间比对）
+difficulty:
+  faults: 1
+  evidence_sources: 3
+  decoys: 2
+  output_scale: plain
+  capability_restricted: false
+  layers: 2
+  session_rounds: 2
+  info_gap: false
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
 ground_truth:
   resource_type: configmap

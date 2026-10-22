@@ -11,12 +11,9 @@ package eval
 import (
 	"fmt"
 	"math/rand"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"gopkg.in/yaml.v3"
 )
 
 // GroundTruth 场景真值；scenario.yaml 的 ground_truth 段
@@ -35,28 +32,15 @@ type GroundTruth struct {
 	FaultSignature []string `yaml:"fault_signature"`
 }
 
-// scenario 文件的顶层形状；只取 ground_truth 段，其余字段忽略
-type scenarioFile struct {
-	// 场景真值段；判分①②的输入
-	GroundTruth GroundTruth `yaml:"ground_truth"`
-}
-
 // LoadGroundTruth 从场景 manifest（scenario.yaml）读取真值四元组
 // 缺段或资源名为空时报错：真值是判分前提，不允许静默空判
+// 顶层形状与难度段由 scenario.go 解析，这里只取判分需要的真值
 func LoadGroundTruth(path string) (GroundTruth, error) {
-	raw, err := os.ReadFile(path)
+	spec, err := parseScenarioFile(path)
 	if err != nil {
-		return GroundTruth{}, fmt.Errorf("read scenario: %w", err)
+		return GroundTruth{}, err
 	}
-	var sf scenarioFile
-	if err := yaml.Unmarshal(raw, &sf); err != nil {
-		return GroundTruth{}, fmt.Errorf("parse scenario %s: %w", path, err)
-	}
-	gt := sf.GroundTruth
-	if strings.TrimSpace(gt.ResourceName) == "" {
-		return GroundTruth{}, fmt.Errorf("scenario %s: ground_truth.resource_name is required", path)
-	}
-	return gt, nil
+	return spec.GroundTruth, nil
 }
 
 // JudgeResult 一份记录的判分结果（①②层全自动）
