@@ -22,8 +22,10 @@ const previewMaxRunes = 40
 type commandDoc struct {
 	// 规范名：小写、无斜杠（如 "session"），解析按精确匹配、不做前缀或大小写归一
 	name string
-	// 参数形状说明（空 = 不接受参数），如 "<id>"；当前只支持恰好一个参数的形状
+	// 参数形状说明（空 = 不接受参数），如 "<id>"；当前只支持至多一个参数的形状
 	args string
+	// 参数可省略：args 非空但允许零参调用（如 /theme 无参显示当前值）
+	optionalArgs bool
 	// 一句话用途，进 /help 输出
 	usage string
 }
@@ -32,8 +34,10 @@ type commandDoc struct {
 var commandDocs = []commandDoc{
 	{name: "help", usage: "显示命令表"},
 	{name: "sessions", usage: "列出历史会话（* 为当前）"},
-	{name: "session", args: "<id>", usage: "切换到指定会话"},
+	{name: "session", args: "<id>", optionalArgs: true, usage: "切换会话（无参则列出会话供选择）"},
 	{name: "new", usage: "新建会话并切换（原会话可 /session 切回）"},
+	{name: "clear", usage: "清屏（只清展示，会话数据仍全量保留）"},
+	{name: "theme", args: "[dark|light|auto]", optionalArgs: true, usage: "切换主题（仅本进程；持久化改 tui.theme）"},
 	{name: "exit", usage: "退出 chat（同 exit/quit）"},
 }
 
@@ -60,7 +64,12 @@ func parseCommand(line string) (name string, args []string, ok bool, err error) 
 	if doc.args == "" && len(args) > 0 {
 		return name, args, true, fmt.Errorf("/%s 不接受参数（/help 查看用法）", name)
 	}
-	if doc.args != "" && len(args) != 1 {
+	// 参数形状只有「至多一参」一种：多参一律用法错误（可选参数命令同样不放开）
+	if len(args) > 1 {
+		return name, args, true, fmt.Errorf("/%s 用法：/%s %s", name, name, doc.args)
+	}
+	// 必参命令缺参走同一用法错误；可选参数命令允许零参（由执行分支决定零参语义）
+	if doc.args != "" && len(args) == 0 && !doc.optionalArgs {
 		return name, args, true, fmt.Errorf("/%s 用法：/%s %s", name, name, doc.args)
 	}
 	return name, args, true, nil
@@ -85,6 +94,8 @@ type commandEnv struct {
 	newSession func(ctx context.Context) (*session.Session, error)
 	// 返回当前会话编号（闭包读模式本地状态，切换后即时生效）
 	currentSessionID func() string
+	// 返回当前主题配置值（空 = 由终端背景自动选）；nil 时无参 /theme 不报错、只列候选
+	currentTheme func() string
 }
 
 // 命令输出的一行：isError 决定各模式用错误样式渲染；文本自足（含提示语）
@@ -100,6 +111,12 @@ type commandResult struct {
 	quit bool
 	// 非空 = 切换到该会话（仅改本地编号，Turn 每轮带编号，无需重载历史）
 	switchTo string
+	// /clear 置位：调用方擦除本模式的展示层（Store / RunLedger 不动）
+	clearDisplay bool
+	// 非空 = 目标主题名（已过白名单）：调用方重载样式与渲染器后生效
+	theme string
+	// /session 无参置位：调用方打开会话选择器（列表由选择器画，不另印文本）
+	pickSession bool
 	// 待渲染输出行，顺序即展示顺序
 	lines []renderLine
 }
@@ -126,10 +143,16 @@ func runCommand(ctx context.Context, env commandEnv, name string, args []string)
 			}
 			b.WriteString("  " + d.usage)
 		}
+		// 面板键位自述与菜单底行同源：命令表与键位在 /help 一处可查（完成标志 2）
+		b.WriteString("\n" + paletteKeyHint)
 		return commandResult{lines: []renderLine{{text: b.String()}}}
 	case "sessions":
 		return listSessions(ctx, env)
 	case "session":
+		// 无参：不打印列表——列表由各模式的会话选择器画，避免文本与模态双份
+		if len(args) == 0 {
+			return commandResult{pickSession: true}
+		}
 		// parseCommand 已保证恰好一参；此处防御内部直呼时的越界，不信任调用方形状
 		if len(args) != 1 {
 			return errResult("/session 用法：/session <id>")
@@ -137,6 +160,10 @@ func runCommand(ctx context.Context, env commandEnv, name string, args []string)
 		return switchSession(ctx, env, args[0])
 	case "new":
 		return newSessionCmd(ctx, env)
+	case "clear":
+		return clearCmd()
+	case "theme":
+		return themeCmd(env, args)
 	case "exit":
 		return commandResult{quit: true}
 	}
@@ -181,6 +208,38 @@ func switchSession(ctx context.Context, env commandEnv, target string) commandRe
 		}
 	}
 	return errResult(fmt.Sprintf("会话 %s 不存在（/sessions 查看列表；未切换）", target))
+}
+
+// /clear：只置展示层擦除效果，不触碰存储。确认行自带恢复出口，
+// 避免用户以为数据被删（权威数据仍全量保留，#18）
+func clearCmd() commandResult {
+	return commandResult{
+		clearDisplay: true,
+		lines:        []renderLine{{text: "已清屏（会话数据全量保留：/sessions 查看，chat --session 续聊）"}},
+	}
+}
+
+// /theme：无参显示当前配置值与候选（可发现性）；有参在白名单内则置切换效果，
+// 不在白名单只报用法错误、不置 theme（模式层据此保持原样式）。
+// 白名单在此收口而非交给样式层：非法主题名不该走到 loadStyles 的失败路径
+func themeCmd(env commandEnv, args []string) commandResult {
+	if len(args) == 0 {
+		current := "auto"
+		if env.currentTheme != nil {
+			if v := strings.TrimSpace(env.currentTheme()); v != "" {
+				current = v
+			}
+		}
+		return commandResult{lines: []renderLine{{text: "当前主题：" + current + "（可 /theme dark|light|auto；持久化改 tui.theme）"}}}
+	}
+	switch args[0] {
+	case "dark", "light", "auto":
+		return commandResult{
+			theme: args[0],
+			lines: []renderLine{{text: "已切换主题 " + args[0] + "（仅本进程；持久化改 config tui.theme）"}},
+		}
+	}
+	return errResult("/theme 用法：/theme [dark|light|auto]")
 }
 
 // /new：经 Service.NewSession 新建并切换；原会话留存可切回，不丢数据

@@ -85,6 +85,7 @@ func newModel(ctx context.Context, svc *session.Service, sessionID, format, tuiT
 		svc:       svc,
 		sessionID: sessionID,
 		tuiTheme:  tuiTheme,
+		themeFile: themeFile,
 		lister:    lister,
 		styles:    st,
 		input:     ta,

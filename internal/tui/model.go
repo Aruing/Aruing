@@ -47,7 +47,10 @@ type turnMsg struct {
 type Model struct {
 	svc       *session.Service
 	sessionID string
-	tuiTheme  string // 配置主题（dark | light | auto）；空同 auto
+	// 配置主题（dark | light | auto）；空同 auto。运行时 /theme 切换后就地更新
+	tuiTheme string
+	// 主题覆盖文件路径；运行时切换主题需重载样式，故要留着（启动时已校验）
+	themeFile string
 	// 会话发现能力（运行时命令 /sessions、/session 用）；可空，缺能力时命令报不可用
 	lister session.SessionLister
 
@@ -59,6 +62,16 @@ type Model struct {
 	viewport  viewport.Model
 	spinner   spinner.Model
 	streaming streamingBuffer
+
+	// 命令面板（/ 菜单）：palette 为按当前输入推导的视图；paletteOff 为
+	// Esc 抑制（菜单关闭，任意编辑后重开）
+	palette    paletteView
+	paletteOff bool
+	// 会话选择器（/session 无参）：pickerOn 为模态开关，pickerItems 为打开
+	// 瞬间的会话快照（之后的过滤都在内存里做），picker 为当前过滤视图
+	pickerOn    bool
+	picker      pickerView
+	pickerItems []sessionItem
 
 	busy   bool
 	quit   bool
@@ -135,6 +148,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// 会话选择器是模态，优先级最高：↑↓/Esc/Enter 由它消费，其余编辑键
+		// 进输入框作为过滤词
+		if m.pickerOn {
+			if handled, cmd := m.updatePicker(msg); handled {
+				return m, cmd
+			}
+		}
+		// 菜单激活时的专属键位：↑↓/Tab/Esc 不进 textarea（消费）；
+		// busy 中仍可浏览导航，Enter 不执行由下方既有 busy 拦截承接（设计钉死）
+		if m.updatePaletteKeys(msg) {
+			return m, nil
+		}
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			if m.busy && m.cancelTurn != nil {
@@ -155,6 +180,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quit = true
 				return m, tea.Quit
 			}
+			// 菜单激活时回车：裸命令（无空白）替换为选中规范名再走既有命令路径；
+			// 已在输参数（含空白）原样提交（设计钉死的 Enter 语义）
+			if m.menuVisible() {
+				if execLine, handled := paletteSubmit(m.input.Value(), m.palette); handled {
+					text = strings.TrimSpace(execLine)
+				}
+			}
 			// 运行时命令分支：命令不进 Turn、不产生 user 视图，错误同样只渲染不发送
 			// （完成标志 1/2）；busy 已在上方拦截，与流式生成互斥不排队（零新状态机）
 			if name, args, ok, perr := parseCommand(text); ok {
@@ -163,6 +195,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					res = errResult(perr.Error())
 				} else {
 					res = runCommand(m.ctx, m.commandEnv(), name, args)
+				}
+				// 效果应用次序与 inline 一致：清屏 → 换主题 → 会话选择器 → 输出行
+				if res.clearDisplay {
+					// 只清视图历史：Store 全量保留，切回即恢复语义与 /session 切换同口径
+					m.messages = nil
+				}
+				if res.theme != "" {
+					res = m.applyTheme(res)
+				}
+				if res.pickSession {
+					res = m.openPicker(res)
 				}
 				if res.quit {
 					m.quit = true
@@ -184,11 +227,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.messages = append(m.messages, msgView{kind: kind, text: ln.text})
 				}
 				m.input.Reset()
+				m.paletteOff = false
+				m.refreshPalette()
 				syncViewport(&m)
 				return m, nil
 			}
 			m.messages = append(m.messages, msgView{kind: "user", text: text})
 			m.input.Reset()
+			m.paletteOff = false
+			m.refreshPalette()
 			m.busy = true
 			syncViewport(&m)
 			turnCtx, cancel := context.WithCancel(m.ctx)
@@ -203,8 +250,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Batch(turn, m.spinner.Tick)
 		default:
+			prev := m.input.Value()
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
+			// 输入值变化（任意编辑）：清除 Esc 抑制并重算菜单；纯光标移动不重开
+			if m.input.Value() != prev {
+				m.paletteOff = false
+				m.refreshPalette()
+			}
 			return m, cmd
 		}
 	}
@@ -221,7 +274,153 @@ func (m Model) commandEnv() commandEnv {
 		lister:           m.lister,
 		newSession:       m.svc.NewSession,
 		currentSessionID: func() string { return m.sessionID },
+		currentTheme:     func() string { return m.tuiTheme },
 	}
+}
+
+// 应用主题切换效果：重载样式表并重建 markdown 渲染器；失败则保持原主题并把
+// 「已切换」行换成错误行（误导性确认不能留）。已渲染的历史不重排：inline 无法
+// 回溯旧输出，双模式语义保持一致
+func (m *Model) applyTheme(res commandResult) commandResult {
+	st, md, err := switchTheme(res.theme, m.themeFile, m.width)
+	if err != nil {
+		res.theme = ""
+		res.lines = []renderLine{{text: "切换主题失败：" + err.Error(), isError: true}}
+		return res
+	}
+	m.styles, m.tuiTheme = st, res.theme
+	// spinner 在构造时把样式表拷进 Bubble 组件，不会自己跟主题走，须显式同步
+	m.spinner.Style = st.spinner
+	if m.width > 0 {
+		// 宽度已知才重建：WindowSizeMsg 会按新 tuiTheme 再建一次
+		m.md = md
+	}
+	return res
+}
+
+// 应用会话选择器打开效果：同步取一次列表快照；能力缺失或列举失败只把原因
+// 作为输出行，不打开选择器（与 /sessions 同文案）
+func (m *Model) openPicker(res commandResult) commandResult {
+	res.pickSession = false
+	if m.lister == nil {
+		res.lines = append(res.lines, renderLine{text: "会话列表不可用（当前存储未提供会话发现能力）", isError: true})
+		return res
+	}
+	summaries, err := m.lister.ListSessions(m.ctx)
+	if err != nil {
+		res.lines = append(res.lines, renderLine{text: "列出会话失败：" + err.Error(), isError: true})
+		return res
+	}
+	m.pickerItems = sessionItems(summaries, m.sessionID)
+	m.picker = pickerView{items: m.pickerItems}
+	m.pickerOn = true
+	return res
+}
+
+// 选择器模态键位：↑↓ 改选中、Esc 关闭、Enter 切换、其余编辑键作为过滤词进
+// 输入框（值变化后重算过滤）。返回 handled 表示该键已被选择器消费
+func (m *Model) updatePicker(msg tea.Msg) (bool, tea.Cmd) {
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false, nil
+	}
+	switch km.Type {
+	case tea.KeyUp:
+		m.picker = m.picker.moveSel(-1)
+		return true, nil
+	case tea.KeyDown:
+		m.picker = m.picker.moveSel(1)
+		return true, nil
+	case tea.KeyEscape:
+		// 过滤词不是待发消息：关闭即清空，避免下一次回车把它当消息发出去
+		m.closePicker()
+		m.input.Reset()
+		return true, nil
+	case tea.KeyEnter:
+		// 生成中不切换：与既有 busy 拦截同语义
+		if m.busy {
+			return true, nil
+		}
+		item, picked := m.picker.selected()
+		m.closePicker()
+		// 过滤词随选择器关闭一起丢弃（同 Esc 口径）
+		m.input.Reset()
+		switch {
+		case picked && item.cur:
+			// 选中当前会话：不清视图历史（与 /session <当前 id> 一致）
+			m.messages = append(m.messages, msgView{kind: "system", text: "已在该会话 " + item.id})
+		case picked:
+			m.sessionID = item.id
+			// 切换后清空视图历史（与 /session <id> 同口径：Store 全量保留）
+			m.messages = nil
+			m.messages = append(m.messages, msgView{kind: "system", text: "已切换到会话 " + item.id})
+		default:
+			m.messages = append(m.messages, msgView{kind: "system", text: "暂无可切换的会话"})
+		}
+		syncViewport(m)
+		return true, nil
+	case tea.KeyCtrlC:
+		// 退出语义归主分支：不在这里吞掉
+		return false, nil
+	}
+	prev := m.input.Value()
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != prev {
+		m.picker = pickerView{items: filterSessions(m.pickerItems, m.input.Value())}
+	}
+	return true, cmd
+}
+
+// 关闭选择器并复位过滤态（输入框由调用方清空：命令分支已统一 Reset）
+func (m *Model) closePicker() {
+	m.pickerOn = false
+	m.picker = pickerView{}
+	m.pickerItems = nil
+}
+
+// menuVisible 报告菜单当前是否显示（有过滤结果且未被 Esc 抑制）
+func (m *Model) menuVisible() bool {
+	return m.palette.active() && !m.paletteOff
+}
+
+// refreshPalette 按输入当前值重算菜单视图（输入变化后调用）
+func (m *Model) refreshPalette() {
+	m.palette = filterPalette(m.input.Value())
+}
+
+// updatePaletteKeys 菜单激活时的专属键位：↑↓ 移动选中、Tab 把选中规范名补全进
+// 输入框（需参命令带尾空格）、Esc 关闭菜单。消费的键不进 textarea；未激活返回
+// false 走原路径。busy（生成中）可浏览导航，Enter 不执行由主分支既有 busy 拦截
+// 承接（设计钉死）
+func (m *Model) updatePaletteKeys(msg tea.Msg) bool {
+	if !m.menuVisible() {
+		return false
+	}
+	km, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false
+	}
+	switch km.Type {
+	case tea.KeyUp:
+		m.palette = m.palette.moveSel(-1)
+		return true
+	case tea.KeyDown:
+		m.palette = m.palette.moveSel(1)
+		return true
+	case tea.KeyTab:
+		if line, _, ok := completePaletteLine(m.input.Value(), m.palette); ok {
+			m.input.SetValue(line)
+			m.input.CursorEnd()
+			m.paletteOff = false
+			m.refreshPalette()
+		}
+		return true
+	case tea.KeyEscape:
+		m.paletteOff = true
+		return true
+	}
+	return false
 }
 
 func (m Model) View() string {
@@ -238,6 +437,23 @@ func (m Model) View() string {
 		w = 1
 	}
 	b.WriteString("\n" + m.styles.divider.Render(strings.Repeat("─", w)) + "\n")
+	// 命令面板：菜单行在分割线与输入框之间，行正文与 /help 同形（#20：样式
+	// 只经 menu / menu_selected 主题 token）。会话选择器与菜单互斥：打开时
+	// 只画会话条目（行类型与样式 token 同源）
+	var panelRows []paletteLine
+	switch {
+	case m.pickerOn:
+		panelRows = pickerRows(m.picker)
+	case m.menuVisible():
+		panelRows = paletteRows(m.palette)
+	}
+	for _, ln := range panelRows {
+		st := m.styles.menu
+		if ln.selected {
+			st = m.styles.menuSelected
+		}
+		b.WriteString(st.Render(ln.text) + "\n")
+	}
 	b.WriteString(m.styles.prompt.Render("❯ ") + m.input.View())
 	return b.String()
 }
