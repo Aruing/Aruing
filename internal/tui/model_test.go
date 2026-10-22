@@ -283,3 +283,327 @@ func TestUpdateStreamingCancel(t *testing.T) {
 		t.Fatal("next turn must remain available")
 	}
 }
+
+// 命令面板：'/' 即菜单（含键位自述行）；↑↓ 改选中并钳制；Esc 关闭后编辑重开
+func TestUpdatePaletteMenuAndKeys(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/")
+	m.refreshPalette()
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "/sessions") || !strings.Contains(view, "/exit") {
+		t.Fatalf("menu missing commands: %q", view)
+	}
+	if !strings.Contains(view, paletteKeyHint) {
+		t.Fatalf("menu missing key hint: %q", view)
+	}
+
+	m.input.SetValue("/s")
+	m.refreshPalette()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if doc, ok := m.palette.selectedDoc(); !ok || doc.name != "session" {
+		t.Fatalf("selected after down = %+v", doc)
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp}) // 钳制：仍停在顶部
+	m = updated.(Model)
+	if doc, _ := m.palette.selectedDoc(); doc.name != "sessions" {
+		t.Fatalf("selection should clamp at top, got %+v", doc)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.menuVisible() || strings.Contains(stripANSI(m.View()), paletteKeyHint) {
+		t.Fatal("esc should hide menu")
+	}
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	m = updated.(Model)
+	if !m.menuVisible() {
+		t.Fatal("edit should reopen menu")
+	}
+}
+
+// Tab 补全：选中命令名写入输入框，需参命令带尾空格
+func TestUpdatePaletteTabComplete(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/se")
+	m.refreshPalette()
+	m.palette = m.palette.moveSel(1) // → session
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	m = updated.(Model)
+	if got := m.input.Value(); got != "/session " {
+		t.Fatalf("tab complete = %q", got)
+	}
+}
+
+// Enter 执行选中项：裸命令替换后走既有命令分支，输出入历史、不进 Turn、菜单随提交消失
+func TestUpdatePaletteEnterExecutesSelected(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/hel")
+	m.refreshPalette()
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.busy || cmd != nil {
+		t.Fatal("palette enter on command must not start a turn")
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "system" {
+		t.Fatalf("command output missing: %+v", um.messages)
+	}
+	if !strings.Contains(um.messages[0].text, "/sessions") {
+		t.Fatalf("help output = %q", um.messages[0].text)
+	}
+	if um.menuVisible() {
+		t.Fatal("menu should close after command submit")
+	}
+}
+
+// 裸 /session 回车：打开会话选择器而不是用法错误；缺会话发现能力时明确报错
+func TestUpdatePaletteEnterBareSession(t *testing.T) {
+	m := newTestModel()
+	m.lister = fakeLister{summaries: []session.SessionSummary{
+		{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"},
+		{ID: "sess_b", MessageCount: 1, FirstQuestion: "为什么 demo-api 起不来"},
+	}}
+	m.sessionID = "sess_a"
+	m.input.SetValue("/se")
+	m.refreshPalette()
+	m.palette = m.palette.moveSel(1)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.busy {
+		t.Fatal("picker must not start turn")
+	}
+	if !um.pickerOn || len(um.picker.items) != 2 {
+		t.Fatalf("picker = on %v items %d, want opened with 2 items", um.pickerOn, len(um.picker.items))
+	}
+	if len(um.messages) != 0 {
+		t.Fatalf("picker opening must not print text lines: %+v", um.messages)
+	}
+	if !strings.Contains(um.View(), pickerKeyHint) {
+		t.Fatalf("view must show picker key hint: %q", um.View())
+	}
+
+	m2 := newTestModel()
+	m2.input.SetValue("/session")
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um2 := updated.(Model)
+	if um2.pickerOn {
+		t.Fatal("picker must not open without the session lister")
+	}
+	if len(um2.messages) != 1 || um2.messages[0].kind != "error" || !strings.Contains(um2.messages[0].text, "不可用") {
+		t.Fatalf("messages = %+v", um2.messages)
+	}
+}
+
+// 选择器导航与切换：↑↓ 改选中、Enter 切换会话（清视图历史并提示）
+func TestPickerNavigateSwitch(t *testing.T) {
+	m := newTestModel()
+	m.lister = fakeLister{summaries: []session.SessionSummary{
+		{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"},
+		{ID: "sess_b", MessageCount: 1, FirstQuestion: "为什么 demo-api 起不来"},
+	}}
+	m.sessionID = "sess_a"
+	m.messages = []msgView{{kind: "user", text: "旧会话内容"}}
+	m.input.SetValue("/session")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	// ↓ 选中第二条（列表顺序沿用 lister：sess_a 在前）
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.pickerOn {
+		t.Fatal("picker must close after switching")
+	}
+	if m.sessionID != "sess_b" {
+		t.Fatalf("sessionID = %q, want sess_b", m.sessionID)
+	}
+	if len(m.messages) != 1 || m.messages[0].kind != "system" || !strings.Contains(m.messages[0].text, "已切换到会话 sess_b") {
+		t.Fatalf("messages = %+v", m.messages)
+	}
+}
+
+// 过滤：输入行作为过滤词收窄条目；无命中时保留空视图而不崩
+func TestPickerFilter(t *testing.T) {
+	m := newTestModel()
+	m.lister = fakeLister{summaries: []session.SessionSummary{
+		{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"},
+		{ID: "sess_b", MessageCount: 1, FirstQuestion: "为什么 demo-api 起不来"},
+	}}
+	m.input.SetValue("/session")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+
+	m.input.SetValue("")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("redis")})
+	m = updated.(Model)
+	if len(m.picker.items) != 1 || m.picker.items[0].id != "sess_a" {
+		t.Fatalf("filtered items = %+v, want only sess_a", m.picker.items)
+	}
+
+	m.input.SetValue("")
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("zzz")})
+	m = updated.(Model)
+	if len(m.picker.items) != 0 {
+		t.Fatalf("no-match filter should yield empty view: %+v", m.picker.items)
+	}
+	if !strings.Contains(m.View(), pickerKeyHint) {
+		t.Fatal("empty view still shows the picker hint row")
+	}
+}
+
+// Esc 关闭选择器；生成中 Enter 不切换（busy 拦截同语义）
+func TestPickerEscapeAndBusy(t *testing.T) {
+	m := newTestModel()
+	m.lister = fakeLister{summaries: []session.SessionSummary{{ID: "sess_b"}}}
+	m.input.SetValue("/session")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	m = updated.(Model)
+	if m.pickerOn {
+		t.Fatal("Esc must close the picker")
+	}
+
+	m2 := newTestModel()
+	m2.lister = fakeLister{summaries: []session.SessionSummary{{ID: "sess_b"}}}
+	m2.input.SetValue("/session")
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 = updated.(Model)
+	m2.busy = true
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 = updated.(Model)
+	if !m2.pickerOn || m2.sessionID == "sess_b" {
+		t.Fatalf("busy Enter must not switch: pickerOn=%v sessionID=%q", m2.pickerOn, m2.sessionID)
+	}
+}
+
+// 已输参数时 Enter 原样提交（不替换为选中项）；busy 时 Enter 不执行
+func TestUpdatePaletteEnterWithArgsAndBusy(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/session abc")
+	m.refreshPalette()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	// lister 未注入：走既有 switchSession 路径报不可用（证明未被替换成裸命令）
+	if len(um.messages) != 1 || !strings.Contains(um.messages[0].text, "不可用") {
+		t.Fatalf("messages = %+v", um.messages)
+	}
+
+	m2 := newTestModel()
+	m2.busy = true
+	m2.input.SetValue("/hel")
+	m2.refreshPalette()
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um = updated.(Model)
+	if len(um.messages) != 0 {
+		t.Fatalf("busy enter must not execute: %+v", um.messages)
+	}
+}
+
+// app 模式 /clear：只清视图历史，不退出、不进 Turn
+func TestUpdateEnterClear(t *testing.T) {
+	m := newTestModel()
+	m.messages = []msgView{{kind: "user", text: "hi"}, {kind: "assistant", text: "yo"}}
+	m.input.SetValue("/clear")
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if cmd != nil || um.busy || um.quit {
+		t.Fatalf("clear must stay in session: cmd=%v busy=%v quit=%v", cmd, um.busy, um.quit)
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "system" {
+		t.Fatalf("messages = %+v (history cleared, confirmation kept)", um.messages)
+	}
+}
+
+// app 模式 /theme：切换后样式与主题字段生效，历史不重排（双模式一致语义）
+func TestUpdateEnterTheme(t *testing.T) {
+	m := newTestModel()
+	m.messages = []msgView{{kind: "user", text: "hi"}}
+	m.input.SetValue("/theme light")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.tuiTheme != "light" {
+		t.Fatalf("tuiTheme = %q, want light", um.tuiTheme)
+	}
+	if got, want := um.styles.prompt.Render("x"), mustLoadStyles("light").prompt.Render("x"); got != want {
+		t.Fatalf("prompt style not switched: got %q want %q", got, want)
+	}
+	if len(um.messages) != 2 || um.messages[0].kind != "user" {
+		t.Fatalf("history must be kept: %+v", um.messages)
+	}
+	// spinner 样式在构造时被拷贝进组件，切换后必须同步（否则下一轮 spinner 仍旧色）
+	if got, want := um.spinner.Style.Render("x"), mustLoadStyles("light").spinner.Render("x"); got != want {
+		t.Fatalf("spinner style not switched: got %q want %q", got, want)
+	}
+}
+
+// app 模式 /theme 非法值：样式不变，只多一条错误行
+func TestUpdateEnterThemeInvalid(t *testing.T) {
+	m := newTestModel()
+	m.input.SetValue("/theme blue")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.tuiTheme != "dark" {
+		t.Fatalf("tuiTheme = %q, want unchanged dark", um.tuiTheme)
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "error" {
+		t.Fatalf("messages = %+v", um.messages)
+	}
+}
+
+// app 模式 /theme 切换失败（主题文件已坏）：保持原主题，确认行换成错误行
+func TestUpdateEnterThemeLoadFailure(t *testing.T) {
+	m := newTestModel()
+	m.themeFile = writeTheme(t, "styles:\n  user:\n    foreground: \"#zzzzzz\"\n")
+	m.input.SetValue("/theme light")
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	um := updated.(Model)
+	if um.tuiTheme != "dark" {
+		t.Fatalf("tuiTheme = %q, want unchanged dark", um.tuiTheme)
+	}
+	if len(um.messages) != 1 || um.messages[0].kind != "error" || !strings.Contains(um.messages[0].text, "切换主题失败") {
+		t.Fatalf("messages = %+v", um.messages)
+	}
+}
+
+// 选择器关闭时过滤词不残留：回车切换与 Esc 取消都要清空输入行，
+// 否则下一次回车会把过滤词当消息发出去（pr-agent 采纳项）
+func TestPickerClearsFilterOnClose(t *testing.T) {
+	newPicker := func() Model {
+		m := newTestModel()
+		m.lister = fakeLister{summaries: []session.SessionSummary{
+			{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"},
+			{ID: "sess_b", MessageCount: 1, FirstQuestion: "为什么 demo-api 起不来"},
+		}}
+		m.input.SetValue("/session")
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		m.input.SetValue("")
+		updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("redis")})
+		return updated.(Model)
+	}
+
+	t.Run("回车切换后清空", func(t *testing.T) {
+		m := newPicker()
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		m = updated.(Model)
+		if got := m.input.Value(); got != "" {
+			t.Fatalf("input = %q after switching, want empty", got)
+		}
+		if m.pickerOn {
+			t.Fatal("picker must close")
+		}
+	})
+
+	t.Run("Esc 取消后清空", func(t *testing.T) {
+		m := newPicker()
+		updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+		m = updated.(Model)
+		if got := m.input.Value(); got != "" {
+			t.Fatalf("input = %q after Esc, want empty", got)
+		}
+	})
+}

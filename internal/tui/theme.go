@@ -117,6 +117,7 @@ type themeOverrides struct {
 var knownStyleRoles = map[string]struct{}{
 	"user": {}, "assistant": {}, "err": {}, "system": {},
 	"spinner": {}, "prompt": {}, "divider": {},
+	"menu": {}, "menu_selected": {},
 }
 
 // 读并解析主题覆盖文件：文件不存在/格式错/未知角色/非法值都返回带定位信息的人话错误
@@ -138,7 +139,7 @@ func loadThemeOverrides(path string) (*themeOverrides, error) {
 	}
 	for role, spec := range ov.styles {
 		if _, ok := knownStyleRoles[role]; !ok {
-			return nil, fmt.Errorf("theme file %s: unknown style role %q (known: user, assistant, err, system, spinner, prompt, divider)", path, role)
+			return nil, fmt.Errorf("theme file %s: unknown style role %q (known: user, assistant, err, system, spinner, prompt, divider, menu, menu_selected)", path, role)
 		}
 		if err := validateStyleSpec(path, role, spec); err != nil {
 			return nil, err
@@ -226,6 +227,10 @@ func applyThemeOverrides(base styles, ov *themeOverrides, path string) (styles, 
 			mutate(&out.prompt)
 		case "divider":
 			mutate(&out.divider)
+		case "menu":
+			mutate(&out.menu)
+		case "menu_selected":
+			mutate(&out.menuSelected)
 		}
 	}
 	for role, spec := range ov.styles {

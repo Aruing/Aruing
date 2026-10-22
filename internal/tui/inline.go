@@ -51,24 +51,30 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 	fmt.Fprint(out, modifyOtherKeysOn)
 	defer fmt.Fprint(out, modifyOtherKeysOff)
 
-	keys := &newlineKeyReader{r: os.Stdin}
+	// 命令面板会话状态：包装层（菜单键翻译，ioloop goroutine）与 Listener
+	// （重算与绘制，主 goroutine）共用；绘制只经 Listener 与提交/退出路径
+	ctl := &paletteCtl{}
+	keys := &newlineKeyReader{r: os.Stdin, ctl: ctl}
+
+	// 终端宽度、主题与 markdown 渲染器的可写状态：每轮提交时重取宽度（ioctl
+	// 开销可忽略），宽度或主题变了才重建 renderer（重建需解析 style 配置，
+	// 毫秒级，仅在变化时付）。这样会话中途调整终端宽 / 主题后，markdown
+	// 换行宽、divider 宽与配色都能自适应。
+	// 先于 readline 构造：Listener 持有它的指针，/theme 切换后菜单立刻用新色表
+	rstate := inlineRenderState{st: st, theme: tuiTheme, width: terminalWidth()}
+	rstate.md = buildRenderer(rstate.theme, rstate.width)
 
 	rl, err := readline.NewFromConfig(&readline.Config{
-		Prompt: st.prompt.Render("❯ "),
-		Stdin:  keys,
-		Stdout: out,
-		Stderr: os.Stderr,
+		Prompt:   rstate.st.prompt.Render("❯ "),
+		Stdin:    keys,
+		Stdout:   out,
+		Stderr:   os.Stderr,
+		Listener: paletteListener(ctl, out, &rstate),
 	})
 	if err != nil {
 		return fmt.Errorf("init readline: %w", err)
 	}
 	defer rl.Close()
-
-	// 终端宽度与 markdown 渲染器：每轮提交时重取宽度（ioctl 开销可忽略），
-	// 宽度变了才重建 renderer（重建需解析 style 配置，毫秒级，仅在变化时付）。
-	// 这样会话中途调整终端宽，markdown 换行宽与 divider 宽都能自适应
-	width := terminalWidth()
-	md := buildRenderer(tuiTheme, width)
 
 	// 命令执行环境：闭包引用 sessionID 变量，/session、/new 切换后即时生效；
 	// lister 缺能力时会话类命令报不可用（步骤设计决策 7）
@@ -76,6 +82,7 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		lister:           lister,
 		newSession:       svc.NewSession,
 		currentSessionID: func() string { return sessionID },
+		currentTheme:     func() string { return rstate.theme },
 	}
 
 	// 一次性交互提示（系统样式，留痕）
@@ -87,9 +94,14 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		}
 		text, err := readMultiline(rl, keys)
 		if err != nil {
-			// io.EOF（Ctrl+D）或 ErrInterrupt（Ctrl+C）：正常退出
+			// io.EOF（Ctrl+D）或 ErrInterrupt（Ctrl+C）：正常退出；先清菜单残迹
+			ctl.clearTail(out)
 			fmt.Fprintln(out)
 			return nil
+		}
+		// 选择器模态优先：回车 = 确认选中（输入行是过滤词，不是消息）
+		if inlinePickerEnter(out, rstate.st, ctl, &sessionID) {
+			continue
 		}
 		text = strings.TrimSpace(text)
 		if text == "" {
@@ -98,55 +110,181 @@ func inlineRun(ctx context.Context, svc *session.Service, sessionID, format, tui
 		if text == "exit" || text == "quit" {
 			return nil
 		}
+		// 提交前菜单收尾：可见时裸命令片段替换为选中规范名（含参原样，多行
+		// 草稿末行非 / 开头视图不可见不替换）；随后擦净菜单再渲染——Enter 后
+		// 光标停在输入末行下一行（恰为菜单首行位置），clearBelow 从当前行清起，
+		// 无半截消息、无菜单残骸进渲染流（与流式共存，完成标志 3）
+		text = submitWithPalette(ctl, text)
+		ctl.clearBelow(out)
 		// 每轮重取终端宽：变了则重建 renderer，后续 divider 与 markdown 都用新宽
-		if w := terminalWidth(); w != width {
-			width = w
-			md = buildRenderer(tuiTheme, width)
+		if w := terminalWidth(); w != rstate.width {
+			rstate.width = w
+			rstate.md = buildRenderer(rstate.theme, rstate.width)
 		}
 		// 运行时命令分支：命中命令语法只解析执行与渲染，不 echo 用户行、不进 Turn；
-		// 未知命令报错同样只渲染不发送（完成标志 1），命令轮零业务写入（完成标志 2）
-		if res, handled := runInlineCommand(ctx, out, st, cmdEnv, text); handled {
+		// 未知命令报错同样只渲染不发送（完成标志 1），命令轮零业务写入（完成标志 2）。
+		// 效果应用次序固定：清屏 → 换主题 → 渲染输出行 —— 渲染必须排在两者之后，
+		// 否则确认行会被随后的擦屏抹掉、换成新主题的确认行也用旧色表
+		if res, handled := execInlineCommand(ctx, cmdEnv, text); handled {
+			// 会话选择器：列表由模态绘制，不另印文本；取列表失败只报错不开选择器
+			res = openInlinePicker(ctx, ctl, lister, sessionID, res)
+			var themed bool
+			res, themed = rstate.applyCommandEffects(res, out, ctl, themeFile)
+			if themed {
+				// 样式换了：所有启动时定格过色表的消费点都要跟新——进度协调器
+				// （spinner 与进度行）与 readline 提示符（它把 prompt 字符串存下来）
+				prog.bind(out, rstate.st)
+				rl.SetPrompt(rstate.st.prompt.Render("❯ "))
+			}
+			renderCommandLines(out, rstate.st, res.lines)
 			if res.quit {
 				return nil
 			}
 			if res.switchTo != "" {
 				sessionID = res.switchTo
 			}
-			renderMessageDivider(out, st, width)
+			// 清屏即新起点：不在空屏上先画一条分割线
+			if !res.clearDisplay {
+				renderMessageDivider(out, rstate.st, rstate.width)
+			}
 			continue
 		}
 		// 提交后把 readline 裸回显的输入行替换为主题渲染的留痕（user 样式项与
 		// 称呼开关在此消费，守 #20：与 app 模式 viewport 历史同规则）
-		echoUserMessage(out, st, text)
-		waitTurn(ctx, out, st, md, svc, sessionID, text, prog)
+		rstate.echoUser(out, text)
+		waitTurn(ctx, out, rstate.st, rstate.md, svc, sessionID, text, prog)
 		// 轮间分割：一轮（用户输入 + 助手输出/错误）结束后与下一轮之间加分割线
-		renderMessageDivider(out, st, width)
+		renderMessageDivider(out, rstate.st, rstate.width)
 	}
 }
 
-// inline 模式的命令分支：命中命令语法时立即执行并渲染输出，返回效果供主循环
-// 应用（quit / 切换）；普通输入 handled=false 交回主循环走 Turn。命令与错误
-// 都只渲染不发送、不写 Store、不进 Turn（#20，完成标志 1/2）
-func runInlineCommand(ctx context.Context, out io.Writer, st styles, env commandEnv, text string) (commandResult, bool) {
+// inline 模式的命令执行：命中命令语法时只解析与执行，返回效果供主循环应用
+// （渲染与效果次序归主循环：清屏 / 换主题必须早于输出行）。普通输入
+// handled=false 交回主循环走 Turn。命令与错误都不发送、不写 Store、不进 Turn
+// （#20，完成标志 1/2）
+func execInlineCommand(ctx context.Context, env commandEnv, text string) (commandResult, bool) {
 	name, args, ok, err := parseCommand(text)
 	if !ok {
 		return commandResult{}, false
 	}
-	var res commandResult
 	if err != nil {
-		// 解析错误（未知命令 / 参数非法）与执行错误同一路径：错误样式留痕，不当消息发送
-		res = errResult(err.Error())
-	} else {
-		res = runCommand(ctx, env, name, args)
+		// 解析错误（未知命令 / 参数非法）与执行错误同一路径：错误样式留痕
+		return errResult(err.Error()), true
 	}
-	for _, ln := range res.lines {
+	return runCommand(ctx, env, name, args), true
+}
+
+// inlineRenderState inline 循环里会被运行时命令改写的渲染状态：样式表、
+// markdown 渲染器、生效主题与终端宽。集中在一处，避免换主题后各处局部变量
+// 出现新旧不一致（风格 token、渲染宽、主题查询三者必须同源）
+type inlineRenderState struct {
+	// 当前生效样式表；/theme 成功后整体替换
+	st styles
+	// markdown 渲染器；随生效主题与终端宽重建
+	md *markdownRenderer
+	// 当前生效主题名（dark / light / auto 或配置原值）
+	theme string
+	// 终端显示宽；每轮提交时重取，宽变则重建渲染器与分割线
+	width int
+}
+
+// applyCommandEffects 按固定次序应用命令效果：先清屏（若有）再换主题，返回
+// 调整后的结果与「样式是否已更换」（调用方据此重绑进度协调器的色表）。
+// 次序不能颠倒：主题切换失败时要保留原样式，而清屏与主题无关。
+// 主题加载失败时把命令自带的「已切换」行换成错误行——切换没成时的确认行是误导
+func (s *inlineRenderState) applyCommandEffects(res commandResult, out io.Writer, ctl *paletteCtl, themeFile string) (commandResult, bool) {
+	if res.clearDisplay {
+		ctl.clearAll(out)
+	}
+	if res.theme == "" {
+		return res, false
+	}
+	newSt, newMd, err := switchTheme(res.theme, themeFile, s.width)
+	if err != nil {
+		res.theme = ""
+		res.lines = []renderLine{{text: "切换主题失败：" + err.Error(), isError: true}}
+		return res, false
+	}
+	s.st, s.md, s.theme = newSt, newMd, res.theme
+	return res, true
+}
+
+// inlinePickerEnter 选择器模态下的回车：取选中会话并切换，渲染确认行后再画
+// 分割线；返回本次输入是否已被选择器消费（过滤词绝不当消息发送）。
+// 选中当前会话不重建视图（与 /session <当前 id> 同语义），空视图只提示
+func inlinePickerEnter(out io.Writer, st styles, ctl *paletteCtl, sessionID *string) bool {
+	if !ctl.pickerVisible() {
+		return false
+	}
+	item, picked := ctl.takePicker()
+	// 选择器行在光标下方（回车后光标已落到首行选择器条目上），按光标位置清；
+	// 过滤词回显在光标上方，单独擦掉——它是查询词不是待发消息，不能留在屏上
+	ctl.clearBelow(out)
+	eraseEchoRows(out, ctl.pickerFilter())
+	switch {
+	case picked && item.cur:
+		fmt.Fprintln(out, st.system.Render("已在该会话 "+item.id))
+	case picked:
+		*sessionID = item.id
+		fmt.Fprintln(out, st.system.Render("已切换到会话 "+item.id))
+	default:
+		fmt.Fprintln(out, st.system.Render("暂无可切换的会话"))
+	}
+	renderMessageDivider(out, st, terminalWidth())
+	return true
+}
+
+// eraseEchoRows 擦掉 readline 回显的输入行（长行可能折行）：光标在回显行
+// 下一行时调用，清完把光标送回原行。选择器的过滤词不是待发消息，确认或
+// 取消后都不该留在屏上冒充已发送内容
+func eraseEchoRows(out io.Writer, text string) {
+	rows := rowsFor(promptCols+displayCols(text), terminalWidth())
+	fmt.Fprintf(out, "\x1b[%dA", rows)
+	for i := 0; i < rows; i++ {
+		clearLine(out)
+		if i < rows-1 {
+			fmt.Fprint(out, "\x1b[1B")
+		}
+	}
+	// 循环结束时停在回显末行，再下移一行回到调用点所在的空行
+	fmt.Fprint(out, "\x1b[1B")
+}
+
+// echoUser 用当前样式表重印用户消息留痕。主题切换后必须走这里：直接拿启动时
+// 的样式快照会让 /theme 之后的第一条用户消息仍是旧色（启动快照族）
+func (s *inlineRenderState) echoUser(out io.Writer, text string) {
+	echoUserMessage(out, s.st, text)
+}
+
+// openInlinePicker 处理 /session 无参：同步取一次会话列表快照并打开选择器。
+// 能力缺失或列举失败只把原因作为输出行，不打开选择器（与 /sessions 同文案）
+func openInlinePicker(ctx context.Context, ctl *paletteCtl, lister session.SessionLister, current string, res commandResult) commandResult {
+	if !res.pickSession {
+		return res
+	}
+	res.pickSession = false
+	if lister == nil {
+		res.lines = append(res.lines, renderLine{text: "会话列表不可用（当前存储未提供会话发现能力）", isError: true})
+		return res
+	}
+	summaries, err := lister.ListSessions(ctx)
+	if err != nil {
+		res.lines = append(res.lines, renderLine{text: "列出会话失败：" + err.Error(), isError: true})
+		return res
+	}
+	ctl.openPicker(sessionItems(summaries, current))
+	return res
+}
+
+// renderCommandLines 渲染命令输出：错误行走错误样式，其余走系统样式
+func renderCommandLines(out io.Writer, st styles, lines []renderLine) {
+	for _, ln := range lines {
 		if ln.isError {
 			fmt.Fprintln(out, st.err.Render("错误 "+ln.text))
 		} else {
 			fmt.Fprintln(out, st.system.Render(ln.text))
 		}
 	}
-	return res, true
 }
 
 // 提交后重印用户消息留痕：清除 readline 已回显的原始输入行（可能多行、长行在终端折行），
@@ -343,15 +481,25 @@ var newlineSeqs = [][]byte{
 	[]byte("\x1b\r"),        // option/alt + enter（多数 mac 终端原生，无需协议）
 }
 
-// newlineKeyReader 包在 stdin 外，把 shift+enter / option+enter 序列翻译成普通回车
-// 并计数（软换行）：readline 收到回车提交当前行，readMultiline 据计数判定是换行
-// 还是提交，反斜杠不进缓冲区、屏幕无残留。普通字节（含方向键等其它 ESC 序列）原样透传。
-// 限制：终端通常一次下发完整序列；若序列被拆到两次 Read，会退化为普通回车提交（可接受）。
+// newlineKeyReader 包在 stdin 外的两段字节翻译（ioloop goroutine 上被读）：
+// 先菜单翻译（菜单可见时把 ↑↓/孤立 Esc/Tab 换成 MetaShiftTab 注入序列并把
+// 意图入队，见 translateMenuKeys），再把 shift+enter / option+enter 序列翻译成
+// 普通回车并计数（软换行）：readline 收到回车提交当前行，readMultiline 据计数
+// 判定是换行还是提交。其余字节原样透传。
+// 限制：终端通常一次下发完整序列；若序列被拆到两次 Read，换行序列退化为普通
+// 回车提交、孤立 \x1b 被当 Esc 键处理（均文档化容忍）。
 type newlineKeyReader struct {
-	r   io.Reader
+	r io.Reader
+	// 尚未交付给 readline 的翻译产物，Read 按块消费
 	buf []byte
-	// 未消费的软换行计数；readline 在同一线程内同步读 stdin，无并发竞争
+	// 未消费的软换行计数。并发事实：本包装层在 readline 的 ioloop goroutine
+	// 上被读（经 bufio），计数消费在主 goroutine；Enter 字节的 channel 传递
+	// 建立先于关系、类型上无同步保护——存量债务，本步不扩大（菜单状态的跨
+	// goroutine 访问走 paletteCtl 内锁）
 	soft int
+	// 菜单会话状态；nil = 不做菜单翻译（未装配路径与既有测试）。ioloop 侧
+	// 只经锁访问其意图队列与可见性快照，不触碰绘制
+	ctl *paletteCtl
 }
 
 func (n *newlineKeyReader) Read(p []byte) (int, error) {
@@ -359,7 +507,8 @@ func (n *newlineKeyReader) Read(p []byte) (int, error) {
 		var tmp [256]byte
 		rn, err := n.r.Read(tmp[:])
 		if rn > 0 {
-			out, soft := translateNewlineSeqs(tmp[:rn])
+			// 两段翻译：先菜单（注入 + 意图），再软换行序列；其余透传
+			out, soft := translateNewlineSeqs(n.translateMenuKeys(tmp[:rn]))
 			n.buf = out
 			n.soft += soft
 		}
@@ -370,6 +519,75 @@ func (n *newlineKeyReader) Read(p []byte) (int, error) {
 	copied := copy(p, n.buf)
 	n.buf = n.buf[copied:]
 	return copied, nil
+}
+
+// 菜单拦截键与注入序列：↑↓ 为 CSI A/B；注入 \x1b[Z 是 readline 的
+// MetaShiftTab——ioloop 按显式 no-op 处理且必回调 Listener，真实 shift+tab
+// 无意图入队时在 Listener 侧被忽略，无副作用
+var (
+	menuUpSeq     = []byte("\x1b[A")
+	menuDownSeq   = []byte("\x1b[B")
+	menuInjectSeq = []byte("\x1b[Z")
+)
+
+// translateMenuKeys 菜单可见或会话选择器打开时把 ↑↓/孤立 Esc/Tab 翻译为注入序列
+// 并把意图入队，其余字节原样透传（含换行序列，交后续 translateNewlineSeqs）；
+// 两者都不可见时整体原样返回，保留 ↑↓ 历史导航、Tab 插字符、Esc 的既有
+// readline 行为。选择器下 Tab 直接吞掉（输入行是过滤词，无补全语义）。
+// 注入的序列只追加到输出、不回扫，不会被二次翻译。
+// 只在本包装层 Read（ioloop goroutine）内调用，经 ctl 锁与主 goroutine 交互
+func (n *newlineKeyReader) translateMenuKeys(in []byte) []byte {
+	if n.ctl == nil || !n.ctl.active() {
+		return in
+	}
+	// 选择器是模态：它的键位语义与命令菜单不同（Tab 无意义），逐键判定
+	picker := n.ctl.pickerVisible()
+	out := make([]byte, 0, len(in)+len(menuInjectSeq))
+	// 块内顺序可见性：Esc 关闭菜单后，同读块内后续键不再拦截（归还历史
+	// 导航）；本块内不会重新激活（激活依赖 Listener 重算，块级模拟只需关闭方向）
+	vis := true
+	for len(in) > 0 {
+		switch {
+		case vis && bytes.HasPrefix(in, menuUpSeq):
+			// ↑ 不进 readline：菜单激活时防历史导航接管方向键
+			n.ctl.pushIntent(intentUp)
+			out = append(out, menuInjectSeq...)
+			in = in[len(menuUpSeq):]
+		case vis && bytes.HasPrefix(in, menuDownSeq):
+			n.ctl.pushIntent(intentDown)
+			out = append(out, menuInjectSeq...)
+			in = in[len(menuDownSeq):]
+		case vis && in[0] == '\x1b' && len(in) > 1 && in[1] == '\x1b':
+			// 同读块内 Esc 后随另一按键（如 Esc+↑ 批量到达，终端把两次按键
+			// 合进一次 Read）：首字节按 Esc 键关闭菜单，后续键不再拦截。真
+			// alt+方向键（\x1b\x1b[A）同编码命中此分支——alt+方向罕见，让位
+			// 保 Esc 语义（pr-agent 批量路径）
+			n.ctl.pushIntent(intentEsc)
+			out = append(out, menuInjectSeq...)
+			in = in[1:]
+			vis = false
+		case vis && len(in) == 1 && in[0] == '\x1b':
+			// 孤立 Esc：剩余恰为单字节 \x1b 视为 Esc 键；与被拆包的序列头
+			// 无法区分，退化沿既有拆包容忍（文档化）
+			n.ctl.pushIntent(intentEsc)
+			out = append(out, menuInjectSeq...)
+			in = nil
+		case vis && picker && in[0] == '\t':
+			// 选择器下 Tab 无补全语义：吞掉，避免在过滤词里插入制表符
+			in = in[1:]
+		case vis && in[0] == '\t':
+			// Tab 透传（readline 插入 '\t' 后回调 Listener 补全）+ 注入重画
+			// 意图：补全改写缓冲触发的全量重绘会把菜单清掉，由注入键重画
+			n.ctl.pushIntent(intentRedraw)
+			out = append(out, '\t')
+			out = append(out, menuInjectSeq...)
+			in = in[1:]
+		default:
+			out = append(out, in[0])
+			in = in[1:]
+		}
+	}
+	return out
 }
 
 // consumeSoft 报告并满耗一个软换行计数

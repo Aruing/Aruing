@@ -1,10 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/Aruing/Aruing/internal/core"
 	"github.com/Aruing/Aruing/internal/session"
@@ -331,5 +335,196 @@ func TestInlineStructuredResult(t *testing.T) {
 		if strings.Count(out.String(), text) != 1 {
 			t.Fatalf("missing or repeated result: %q", out.String())
 		}
+	}
+}
+
+// 命令效果应用：先清屏后换主题，两者都在渲染输出行之前（确认行不会被
+// 擦屏抹掉、切换后的确认行用新色表）
+func TestInlineApplyCommandEffects(t *testing.T) {
+	t.Run("清屏在换主题之前", func(t *testing.T) {
+		s := &inlineRenderState{st: mustLoadStyles("dark"), theme: "dark", width: 80}
+		c, _ := newVisibleCtl(t, "/")
+		var b bytes.Buffer
+		res, themed := s.applyCommandEffects(commandResult{clearDisplay: true, theme: "light", lines: []renderLine{{text: "ok"}}}, &b, c, "")
+		if !themed {
+			t.Fatal("theme change should report themed=true")
+		}
+		if got := b.String(); got != "\x1b[3J\x1b[2J\x1b[H" {
+			t.Fatalf("clearAll must be written first: %q", got)
+		}
+		if s.theme != "light" || c.rows != 0 {
+			t.Fatalf("state = theme %q rows %d", s.theme, c.rows)
+		}
+		if got, want := s.st.prompt.Render("x"), mustLoadStyles("light").prompt.Render("x"); got != want {
+			t.Fatalf("style not switched: got %q want %q", got, want)
+		}
+		if len(res.lines) != 1 || res.lines[0].text != "ok" {
+			t.Fatalf("lines = %+v", res.lines)
+		}
+	})
+
+	t.Run("主题加载失败保持原样式", func(t *testing.T) {
+		s := &inlineRenderState{st: mustLoadStyles("dark"), theme: "dark", width: 80}
+		c, _ := newVisibleCtl(t, "/")
+		var b bytes.Buffer
+		res, themed := s.applyCommandEffects(commandResult{theme: "light", lines: []renderLine{{text: "已切换主题 light"}}}, &b, c, writeTheme(t, "styles:\n  user:\n    foreground: \"#zzzzzz\"\n"))
+		if themed || s.theme != "dark" {
+			t.Fatalf("failure must keep the old theme: themed=%v theme=%q", themed, s.theme)
+		}
+		if res.theme != "" {
+			t.Fatalf("res.theme should be cleared on failure: %q", res.theme)
+		}
+		if len(res.lines) != 1 || !res.lines[0].isError || !strings.Contains(res.lines[0].text, "切换主题失败") {
+			t.Fatalf("lines = %+v (misleading success line must be replaced)", res.lines)
+		}
+	})
+}
+
+// 用户回显随主题：/theme 之后的输入行必须用新样式，而不是启动时的样式快照
+// （启动快照族回归；默认无色环境需临时开色档才可比字节）
+func TestInlineEchoUserFollowsTheme(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.ANSI256)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+
+	dark, light := mustLoadStyles("dark"), mustLoadStyles("light")
+	rstate := &inlineRenderState{st: dark, theme: "dark", width: 80}
+
+	rstate.st = light
+	var b bytes.Buffer
+	rstate.echoUser(&b, "hi")
+	if !strings.Contains(b.String(), light.user.Render("hi")) {
+		t.Fatalf("echo should use the active theme: %q", b.String())
+	}
+	if strings.Contains(b.String(), dark.user.Render("hi")) {
+		t.Fatal("echo still used the startup theme")
+	}
+}
+
+// /session 无参会话选择器打开路径：有列表能力则打开并绘制，缺能力 / 列举失败
+// 只报错不开选择器（与 /sessions 同文案）
+func TestOpenInlinePicker(t *testing.T) {
+	summaries := []session.SessionSummary{{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"}}
+
+	t.Run("打开", func(t *testing.T) {
+		c := &paletteCtl{}
+		res := openInlinePicker(context.Background(), c, fakeLister{summaries: summaries}, "sess_a", commandResult{pickSession: true})
+		if res.pickSession || len(res.lines) != 0 {
+			t.Fatalf("res = %+v, want plain success", res)
+		}
+		if !c.pickerVisible() {
+			t.Fatal("picker should be open")
+		}
+	})
+
+	for name, tc := range map[string]struct {
+		lister session.SessionLister
+		want   string
+	}{
+		"缺能力":  {nil, "不可用"},
+		"列举失败": {fakeLister{err: errBoom}, "列出会话失败"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := &paletteCtl{}
+			res := openInlinePicker(context.Background(), c, tc.lister, "", commandResult{pickSession: true})
+			if c.pickerVisible() {
+				t.Fatal("picker must stay closed on failure")
+			}
+			if len(res.lines) != 1 || !res.lines[0].isError || !strings.Contains(res.lines[0].text, tc.want) {
+				t.Fatalf("lines = %+v, want error containing %q", res.lines, tc.want)
+			}
+		})
+	}
+}
+
+// 选择器模态回车（inline）：选中即切换并渲染确认行，返回「已消费」使过滤词
+// 绝不当消息发送；选中当前会话只提示；空视图只提示。回归：这段处理曾在
+// rebase 冲突里丢失而单测未覆盖（只有 app 侧有覆盖）
+func TestInlinePickerEnter(t *testing.T) {
+	st := mustLoadStyles("dark")
+	summaries := []session.SessionSummary{
+		{ID: "sess_a", MessageCount: 2, FirstQuestion: "查 redis"},
+		{ID: "sess_b", MessageCount: 1, FirstQuestion: "为什么 demo-api 起不来"},
+	}
+
+	t.Run("切换到选中会话", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		c.openPicker(sessionItems(summaries, "sess_a"))
+		// 初始回调绘制列表，随后用户输入过滤词（回车前光标在回显行）
+		c.onLine(&b, st, nil, 0)
+		c.onLine(&b, st, []rune("s"), 1)
+		c.applyIntent(&b, st, []rune("s"), 1, intentDown)
+		b.Reset()
+		sessionID := "sess_a"
+		if !inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter with a visible picker must be consumed")
+		}
+		if sessionID != "sess_b" {
+			t.Fatalf("sessionID = %q, want sess_b", sessionID)
+		}
+		if c.pickerVisible() {
+			t.Fatal("picker must close after switching")
+		}
+		if !strings.Contains(stripANSI(b.String()), "已切换到会话 sess_b") {
+			t.Fatalf("output = %q", stripANSI(b.String()))
+		}
+		// 过滤词回显必须被擦掉：它是查询词，不能留在屏上冒充已发送消息
+		if !strings.Contains(b.String(), "\x1b[1A\r\x1b[2K") {
+			t.Fatalf("filter echo must be erased before the confirmation: %q", b.String())
+		}
+	})
+
+	t.Run("选中当前会话不切换", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		c.openPicker(sessionItems(summaries, "sess_a"))
+		c.onLine(&b, st, nil, 0)
+		sessionID := "sess_a"
+		if !inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter must be consumed")
+		}
+		if sessionID != "sess_a" || !strings.Contains(stripANSI(b.String()), "已在该会话 sess_a") {
+			t.Fatalf("sessionID = %q out = %q", sessionID, stripANSI(b.String()))
+		}
+	})
+
+	t.Run("空视图只提示", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		c.openPicker(nil)
+		c.onLine(&b, st, nil, 0)
+		sessionID := "sess_a"
+		if !inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter must be consumed even with an empty view")
+		}
+		if sessionID != "sess_a" || !strings.Contains(stripANSI(b.String()), "暂无可切换的会话") {
+			t.Fatalf("sessionID = %q out = %q", sessionID, stripANSI(b.String()))
+		}
+	})
+
+	t.Run("未打开选择器不消费", func(t *testing.T) {
+		c := &paletteCtl{}
+		var b bytes.Buffer
+		sessionID := "sess_a"
+		if inlinePickerEnter(&b, st, c, &sessionID) {
+			t.Fatal("Enter must fall through when the picker is closed")
+		}
+	})
+}
+
+// 长过滤词折行时同样整段擦干净：行数按 prompt + 显示宽估算（CJK 2 列），
+// 少清一行就会残留半行「已发送」假象
+func TestEraseEchoRowsWrapped(t *testing.T) {
+	var b bytes.Buffer
+	eraseEchoRows(&b, "redis")
+	if got := b.String(); !strings.HasPrefix(got, "\x1b[1A") {
+		t.Fatalf("single-row echo erase = %q", got)
+	}
+
+	b.Reset()
+	// 折算成 2 行以上：80 列下 40 个 CJK 字符即可（2 列/字），这里用 90 个 ASCII 保险
+	eraseEchoRows(&b, strings.Repeat("a", 90))
+	if got := b.String(); !strings.HasPrefix(got, "\x1b[2A") {
+		t.Fatalf("wrapped echo erase must move up by the wrapped row count: %q", got)
 	}
 }
