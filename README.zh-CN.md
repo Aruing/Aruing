@@ -28,7 +28,7 @@
 
 尚未构建：带审批的写工具、多集群、Web UI（计划 0.3+）。路线图见 [`docs/project-state.md`](docs/project-state.md)。
 
-已随 [`v0.1.6`](https://github.com/Aruing/Aruing/releases/tag/v0.1.6) 发布（2026-10-21）。
+已随 [`v0.1.6`](https://github.com/Aruing/Aruing/releases/tag/v0.1.6) 发布（2026-10-22）。
 
 ⚠️ 当前仅支持简单试用 / 测试——未达生产可用。
 
