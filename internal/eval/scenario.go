@@ -28,21 +28,21 @@ const (
 // 只放能从场景文件数出来的量，不放结论性评分
 type Difficulty struct {
 	// 真故障个数，不含诱饵
-	Faults int `yaml:"faults"`
+	Faults int `yaml:"faults" json:"faults"`
 	// 闭环所需不同来源证据的种数（事件 / 容器状态 / 日志 / 配置 / 网络策略等）
-	EvidenceSources int `yaml:"evidence_sources"`
+	EvidenceSources int `yaml:"evidence_sources" json:"evidence_sources"`
 	// 故意埋的假线索个数
-	Decoys int `yaml:"decoys"`
+	Decoys int `yaml:"decoys" json:"decoys"`
 	// 输出体量档位：plain | large
-	OutputScale string `yaml:"output_scale"`
+	OutputScale string `yaml:"output_scale" json:"output_scale"`
 	// 是否权限或能力受限（如 RBAC 拒绝读、数据面无法实测）
-	CapabilityRestricted bool `yaml:"capability_restricted"`
+	CapabilityRestricted bool `yaml:"capability_restricted" json:"capability_restricted"`
 	// 跨层数：命名空间 / 节点 / CRD / 控制面与数据面之间跨越的层数
-	Layers int `yaml:"layers"`
+	Layers int `yaml:"layers" json:"layers"`
 	// 设计所需会话轮数，单轮记 1
-	SessionRounds int `yaml:"session_rounds"`
+	SessionRounds int `yaml:"session_rounds" json:"session_rounds"`
 	// 信息缺口：正确答案是否要求主动澄清或明确报缺口；横切标记，不进总分
-	InfoGap bool `yaml:"info_gap"`
+	InfoGap bool `yaml:"info_gap" json:"info_gap"`
 }
 
 // DifficultyScore 六维派生分数与总分；字段顺序即展示顺序

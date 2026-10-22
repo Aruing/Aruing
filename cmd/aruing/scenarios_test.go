@@ -108,6 +108,57 @@ func TestRunScenariosJSON(t *testing.T) {
 	if unscored.Error != "" {
 		t.Fatalf("unscored error = %q, want empty (missing difficulty is not an error)", unscored.Error)
 	}
+
+	// difficulty 的键名必须与 yaml 侧一致：Decode 到结构体会因为 json 不区分
+	// 键大小写而掩盖驼峰键，故按字面键断言
+	assertJSONKeys(t, stdout.Bytes(), "scored", "difficulty", []string{
+		"faults", "evidence_sources", "decoys", "output_scale",
+		"capability_restricted", "layers", "session_rounds", "info_gap",
+	})
+}
+
+// 断言指定场景行的指定对象的键集合与期望完全一致
+func assertJSONKeys(t *testing.T, raw []byte, sceneName, object string, want []string) {
+	t.Helper()
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("unmarshal rows: %v", err)
+	}
+	var row map[string]json.RawMessage
+	for _, r := range rows {
+		var name string
+		if err := json.Unmarshal(r["name"], &name); err != nil {
+			t.Fatalf("unmarshal name: %v", err)
+		}
+		if name == sceneName {
+			row = r
+			break
+		}
+	}
+	if row == nil {
+		t.Fatalf("row %q not found", sceneName)
+	}
+	var nested map[string]json.RawMessage
+	if err := json.Unmarshal(row[object], &nested); err != nil {
+		t.Fatalf("unmarshal %s: %v", object, err)
+	}
+	for _, key := range want {
+		if _, ok := nested[key]; !ok {
+			t.Fatalf("%s key %q missing; got %v", object, key, keysOf(nested))
+		}
+	}
+	if len(nested) != len(want) {
+		t.Fatalf("%s keys = %v, want %v", object, keysOf(nested), want)
+	}
+}
+
+// 取 map 的键（仅用于失败信息）
+func keysOf(m map[string]json.RawMessage) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // 位置参数与非法格式都走明确报错
