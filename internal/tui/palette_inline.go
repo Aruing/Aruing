@@ -473,15 +473,25 @@ func (c *paletteCtl) clearTail(out io.Writer) {
 	c.setView(paletteView{}, false)
 }
 
-// confirmPicker 选择器回车：取选中条目并关闭选择器（无条目也算已处理，
-// 调用方据此提示空列表）。先关闭（擦除）再返回，确认行从干净行位开始
-func (c *paletteCtl) confirmPicker(out io.Writer) (sessionItem, bool) {
+// takePicker 回车确认：取选中条目并只关状态，不在此绘制。回车后光标已在
+// 输入行下一行，就地重绘的相对位移不可靠——调用方用 clearBelow 按光标位置
+// 清掉选择器行，再擦掉输入回显，确认行从干净行位开始
+func (c *paletteCtl) takePicker() (sessionItem, bool) {
 	if !c.pickerVisible() {
 		return sessionItem{}, false
 	}
 	item, ok := c.picker.selected()
-	c.closePicker(out)
+	c.picker = pickerView{}
+	c.pickerItems = nil
+	c.mu.Lock()
+	c.pickerOn = false
+	c.mu.Unlock()
 	return item, ok
+}
+
+// pickerFilter 最近一次按键回调的行内容；选择器期间即过滤词（擦回显用）
+func (c *paletteCtl) pickerFilter() string {
+	return string(c.line)
 }
 
 // promptCols 输入行 prompt（「❯ 」）的显示列数，折行与列恢复估算用

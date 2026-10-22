@@ -450,7 +450,11 @@ func TestInlinePickerEnter(t *testing.T) {
 		c := &paletteCtl{}
 		var b bytes.Buffer
 		c.openPicker(sessionItems(summaries, "sess_a"))
-		c.applyIntent(&b, st, nil, 0, intentDown)
+		// 初始回调绘制列表，随后用户输入过滤词（回车前光标在回显行）
+		c.onLine(&b, st, nil, 0)
+		c.onLine(&b, st, []rune("s"), 1)
+		c.applyIntent(&b, st, []rune("s"), 1, intentDown)
+		b.Reset()
 		sessionID := "sess_a"
 		if !inlinePickerEnter(&b, st, c, &sessionID) {
 			t.Fatal("Enter with a visible picker must be consumed")
@@ -464,12 +468,17 @@ func TestInlinePickerEnter(t *testing.T) {
 		if !strings.Contains(stripANSI(b.String()), "已切换到会话 sess_b") {
 			t.Fatalf("output = %q", stripANSI(b.String()))
 		}
+		// 过滤词回显必须被擦掉：它是查询词，不能留在屏上冒充已发送消息
+		if !strings.Contains(b.String(), "\x1b[1A\r\x1b[2K") {
+			t.Fatalf("filter echo must be erased before the confirmation: %q", b.String())
+		}
 	})
 
 	t.Run("选中当前会话不切换", func(t *testing.T) {
 		c := &paletteCtl{}
 		var b bytes.Buffer
 		c.openPicker(sessionItems(summaries, "sess_a"))
+		c.onLine(&b, st, nil, 0)
 		sessionID := "sess_a"
 		if !inlinePickerEnter(&b, st, c, &sessionID) {
 			t.Fatal("Enter must be consumed")
@@ -483,6 +492,7 @@ func TestInlinePickerEnter(t *testing.T) {
 		c := &paletteCtl{}
 		var b bytes.Buffer
 		c.openPicker(nil)
+		c.onLine(&b, st, nil, 0)
 		sessionID := "sess_a"
 		if !inlinePickerEnter(&b, st, c, &sessionID) {
 			t.Fatal("Enter must be consumed even with an empty view")
@@ -500,4 +510,21 @@ func TestInlinePickerEnter(t *testing.T) {
 			t.Fatal("Enter must fall through when the picker is closed")
 		}
 	})
+}
+
+// 长过滤词折行时同样整段擦干净：行数按 prompt + 显示宽估算（CJK 2 列），
+// 少清一行就会残留半行「已发送」假象
+func TestEraseEchoRowsWrapped(t *testing.T) {
+	var b bytes.Buffer
+	eraseEchoRows(&b, "redis")
+	if got := b.String(); !strings.HasPrefix(got, "\x1b[1A") {
+		t.Fatalf("single-row echo erase = %q", got)
+	}
+
+	b.Reset()
+	// 折算成 2 行以上：80 列下 40 个 CJK 字符即可（2 列/字），这里用 90 个 ASCII 保险
+	eraseEchoRows(&b, strings.Repeat("a", 90))
+	if got := b.String(); !strings.HasPrefix(got, "\x1b[2A") {
+		t.Fatalf("wrapped echo erase must move up by the wrapped row count: %q", got)
+	}
 }

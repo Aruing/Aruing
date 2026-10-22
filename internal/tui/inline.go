@@ -216,7 +216,11 @@ func inlinePickerEnter(out io.Writer, st styles, ctl *paletteCtl, sessionID *str
 	if !ctl.pickerVisible() {
 		return false
 	}
-	item, picked := ctl.confirmPicker(out)
+	item, picked := ctl.takePicker()
+	// 选择器行在光标下方（回车后光标已落到首行选择器条目上），按光标位置清；
+	// 过滤词回显在光标上方，单独擦掉——它是查询词不是待发消息，不能留在屏上
+	ctl.clearBelow(out)
+	eraseEchoRows(out, ctl.pickerFilter())
 	switch {
 	case picked && item.cur:
 		fmt.Fprintln(out, st.system.Render("已在该会话 "+item.id))
@@ -228,6 +232,22 @@ func inlinePickerEnter(out io.Writer, st styles, ctl *paletteCtl, sessionID *str
 	}
 	renderMessageDivider(out, st, terminalWidth())
 	return true
+}
+
+// eraseEchoRows 擦掉 readline 回显的输入行（长行可能折行）：光标在回显行
+// 下一行时调用，清完把光标送回原行。选择器的过滤词不是待发消息，确认或
+// 取消后都不该留在屏上冒充已发送内容
+func eraseEchoRows(out io.Writer, text string) {
+	rows := rowsFor(promptCols+displayCols(text), terminalWidth())
+	fmt.Fprintf(out, "\x1b[%dA", rows)
+	for i := 0; i < rows; i++ {
+		clearLine(out)
+		if i < rows-1 {
+			fmt.Fprint(out, "\x1b[1B")
+		}
+	}
+	// 循环结束时停在回显末行，再下移一行回到调用点所在的空行
+	fmt.Fprint(out, "\x1b[1B")
 }
 
 // echoUser 用当前样式表重印用户消息留痕。主题切换后必须走这里：直接拿启动时

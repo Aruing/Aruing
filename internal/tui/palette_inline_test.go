@@ -586,7 +586,8 @@ func TestPaletteCtlPicker(t *testing.T) {
 
 	// ↓ 移动选中后确认：目标为第二条（sess_a，当前会话）
 	c.applyIntent(&b, st, nil, 0, intentDown)
-	item, ok := c.confirmPicker(&b)
+	item, ok := c.takePicker()
+	c.clearBelow(&b)
 	if !ok || item.id != "sess_a" || !item.cur {
 		t.Fatalf("confirm = (%+v, %v), want sess_a current", item, ok)
 	}
@@ -600,7 +601,7 @@ func TestPaletteCtlPicker(t *testing.T) {
 	if c.pickerVisible() {
 		t.Fatal("Esc must close the picker")
 	}
-	if _, ok := c.confirmPicker(&b); ok {
+	if _, ok := c.takePicker(); ok {
 		t.Fatal("closed picker must not yield a target")
 	}
 }
