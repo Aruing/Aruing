@@ -205,3 +205,44 @@ test('publish timeout that already landed is not published twice', async t => {
   await publishPackages(out, 'v0.1.5', true, { command, metadata, sleep: async () => {} });
   assert.deepEqual(publishes, packageNames, 'each package published exactly once');
 });
+
+// 发布超时但已落地、且 dist-tag 还没跟上：不能重发（npm 拒绝既有版本），
+// 要按「已落地」处理并交给确认阶段等 tag 追平（pr-agent 采纳项）
+test('publish timeout with stale dist-tag is not republished', async t => {
+  const { prepare, packageNames } = await import('../../scripts/npm-prepare-release.mjs');
+  const { publishPackages } = await import('../../scripts/npm-publish.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aruing-stale-tag-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'packages');
+  prepare('v0.1.5', out);
+  t.mock.method(console, 'log', () => {});
+  const old = process.env.NODE_AUTH_TOKEN;
+  process.env.NODE_AUTH_TOKEN = 'fixture-only';
+  t.after(() => { if (old === undefined) delete process.env.NODE_AUTH_TOKEN; else process.env.NODE_AUTH_TOKEN = old; });
+
+  const published = new Map();
+  const tagLag = new Map(); // 版本已在、dist-tag 尚未跟上
+  const publishes = [];
+  const command = (args, cwd) => {
+    const name = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'))).name;
+    if (args[0] === 'pack') return JSON.stringify([{ filename: 'fixture.tgz', integrity: `sha512-${name}` }]);
+    if (args.includes('--dry-run')) return '';
+    publishes.push(name);
+    published.set(name, { versions: { '0.1.5': { dist: { integrity: `sha512-${name}` } } } });
+    tagLag.set(name, 2);
+    if (publishes.length === 1) throw new Error('npm publish failed: spawnSync npm ETIMEDOUT');
+    return '';
+  };
+  const metadata = async name => {
+    const doc = published.get(name);
+    if (!doc) return null;
+    const lag = tagLag.get(name) ?? 0;
+    if (lag > 0) {
+      tagLag.set(name, lag - 1);
+      return { 'dist-tags': { latest: '0.1.4' }, versions: doc.versions };
+    }
+    return { 'dist-tags': { latest: '0.1.5' }, versions: doc.versions };
+  };
+  await publishPackages(out, 'v0.1.5', true, { command, metadata, sleep: async () => {} });
+  assert.deepEqual(publishes, packageNames, 'landed versions must not be republished because the tag lags');
+});

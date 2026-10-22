@@ -91,21 +91,22 @@ async function publishOne(pkg, version, distTag, ctx) {
       ctx.command(['publish', pkg.tarball, '--access', 'public', '--provenance', '--tag', distTag], pkg.cwd, { timeoutMs: PUBLISH_TIMEOUT_MS });
       return;
     } catch (error) {
-      if (await alreadyLanded(pkg, version, distTag, ctx)) return;
+      if (await alreadyLanded(pkg, version, ctx)) return;
       if (attempt === (ctx.publishAttempts ?? PUBLISH_ATTEMPTS)) throw error;
       await ctx.sleep(CONFIRM_BASE_DELAY_MS);
     }
   }
 }
 
-// 单次查询判断本次发布是否已落地（内容不同的硬错误照常抛出）
-async function alreadyLanded(pkg, version, distTag, { metadata }) {
-  try {
-    return checkExisting(await metadata(pkg.name), pkg.name, version, pkg.integrity, distTag);
-  } catch (error) {
-    if (!error.retryable) throw error;
-    return false;
-  }
+// 单次查询判断本次发布是否已落地：只看版本与完整性是否已在 registry，不要求
+// dist-tag 跟上——版本与 tag 的传播可能分先后，把「tag 未跟上」当成未落地会去
+// 重发一个已存在的版本，npm 对既有版本一律拒绝，反而让发布失败。tag 的追平由
+// confirmPublished 继续等待
+async function alreadyLanded(pkg, version, { metadata }) {
+  const existing = (await metadata(pkg.name))?.versions?.[version];
+  if (!existing) return false;
+  if (existing.dist?.integrity !== pkg.integrity) throw new Error(`${pkg.name}@${version}: published content differs`);
+  return true;
 }
 
 // 所有包先完成打包和冲突检查，待发布包再演练；显式发布仅供正式工作流调用
