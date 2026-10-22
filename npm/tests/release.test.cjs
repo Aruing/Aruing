@@ -102,3 +102,147 @@ test('publisher preflights every package before ordered publication and resumes 
   await assert.rejects(publishPackages(out, 'v0.1.5', true, { command, metadata: async n => published.get(n) }), /differs/);
   assert.ok(events.every(x => x.startsWith('dry:')));
 });
+
+// registry 边缘缓存滞后（v0.1.6 首发故障）：发布成功后立即可见的文档还是旧的，
+// 单次查询会把「已发布但读不到」误判为失败并中断后续包
+test('registry propagation lag is retried instead of aborting the run', async t => {
+  const { prepare, packageNames } = await import('../../scripts/npm-prepare-release.mjs');
+  const { publishPackages } = await import('../../scripts/npm-publish.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aruing-lag-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'packages');
+  prepare('v0.1.5', out);
+  t.mock.method(console, 'log', () => {});
+  const old = process.env.NODE_AUTH_TOKEN;
+  process.env.NODE_AUTH_TOKEN = 'fixture-only';
+  t.after(() => { if (old === undefined) delete process.env.NODE_AUTH_TOKEN; else process.env.NODE_AUTH_TOKEN = old; });
+
+  const published = new Map();
+  const staleReads = new Map();
+  const commands = [];
+  const command = (args, cwd) => {
+    const name = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'))).name;
+    if (args[0] === 'pack') return JSON.stringify([{ filename: 'fixture.tgz', integrity: `sha512-${name}` }]);
+    commands.push(`${args.includes('--dry-run') ? 'dry' : 'publish'}:${name}`);
+    if (!args.includes('--dry-run')) {
+      published.set(name, { 'dist-tags': { latest: '0.1.5' }, versions: { '0.1.5': { dist: { integrity: `sha512-${name}` } } } });
+      staleReads.set(name, 2); // 发布后头两次查询仍返回旧文档
+    }
+    return '';
+  };
+  const metadata = async name => {
+    const stale = staleReads.get(name);
+    if (stale) {
+      staleReads.set(name, stale - 1);
+      return { 'dist-tags': { latest: '0.1.4' }, versions: { '0.1.4': { dist: { integrity: 'sha512-old' } } } };
+    }
+    return published.get(name);
+  };
+  const sleeps = [];
+  await publishPackages(out, 'v0.1.5', true, { command, metadata, sleep: async ms => { sleeps.push(ms); } });
+
+  assert.deepEqual(commands.filter(c => c.startsWith('publish:')), packageNames.map(n => `publish:${n}`));
+  assert.equal(published.size, packageNames.length);
+  assert.ok(sleeps.length >= packageNames.length * 2, 'confirmation should back off before concluding');
+});
+
+// 内容不同属于硬错误：不重试、不静默放过（重试不会自愈）
+test('content mismatch fails fast without retry backoff', async t => {
+  const { prepare } = await import('../../scripts/npm-prepare-release.mjs');
+  const { publishPackages } = await import('../../scripts/npm-publish.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aruing-mismatch-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'packages');
+  prepare('v0.1.5', out);
+  t.mock.method(console, 'log', () => {});
+  const old = process.env.NODE_AUTH_TOKEN;
+  process.env.NODE_AUTH_TOKEN = 'fixture-only';
+  t.after(() => { if (old === undefined) delete process.env.NODE_AUTH_TOKEN; else process.env.NODE_AUTH_TOKEN = old; });
+
+  const command = (args, cwd) => {
+    const name = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'))).name;
+    if (args[0] === 'pack') return JSON.stringify([{ filename: 'fixture.tgz', integrity: 'sha512-other' }]);
+    return '';
+  };
+  const metadata = async () => ({ 'dist-tags': { latest: '0.1.5' }, versions: { '0.1.5': { dist: { integrity: 'sha512-published' } } } });
+  const sleeps = [];
+  await assert.rejects(
+    publishPackages(out, 'v0.1.5', true, { command, metadata, sleep: async ms => { sleeps.push(ms); } }),
+    /differs/,
+  );
+  assert.deepEqual(sleeps, [], 'hard conflicts must not be retried');
+});
+
+// 发布命令超时被杀不代表没发出去：先查 registry，已落地就不再重复发
+test('publish timeout that already landed is not published twice', async t => {
+  const { prepare, packageNames } = await import('../../scripts/npm-prepare-release.mjs');
+  const { publishPackages } = await import('../../scripts/npm-publish.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aruing-timeout-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'packages');
+  prepare('v0.1.5', out);
+  t.mock.method(console, 'log', () => {});
+  const old = process.env.NODE_AUTH_TOKEN;
+  process.env.NODE_AUTH_TOKEN = 'fixture-only';
+  t.after(() => { if (old === undefined) delete process.env.NODE_AUTH_TOKEN; else process.env.NODE_AUTH_TOKEN = old; });
+
+  const published = new Map();
+  const publishes = [];
+  const command = (args, cwd, options = {}) => {
+    const name = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'))).name;
+    if (args[0] === 'pack') return JSON.stringify([{ filename: 'fixture.tgz', integrity: `sha512-${name}` }]);
+    if (args.includes('--dry-run')) return '';
+    publishes.push(name);
+    // 首个包：上传成功但本地超时被杀（v0.1.6 第二次失败形态）
+    published.set(name, { 'dist-tags': { latest: '0.1.5' }, versions: { '0.1.5': { dist: { integrity: `sha512-${name}` } } } });
+    if (publishes.length === 1) {
+      assert.equal(options.timeoutMs, 600000, 'publish must use the long timeout');
+      throw new Error('npm publish failed: spawnSync npm ETIMEDOUT');
+    }
+    return '';
+  };
+  const metadata = async name => published.get(name);
+  await publishPackages(out, 'v0.1.5', true, { command, metadata, sleep: async () => {} });
+  assert.deepEqual(publishes, packageNames, 'each package published exactly once');
+});
+
+// 发布超时但已落地、且 dist-tag 还没跟上：不能重发（npm 拒绝既有版本），
+// 要按「已落地」处理并交给确认阶段等 tag 追平（pr-agent 采纳项）
+test('publish timeout with stale dist-tag is not republished', async t => {
+  const { prepare, packageNames } = await import('../../scripts/npm-prepare-release.mjs');
+  const { publishPackages } = await import('../../scripts/npm-publish.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aruing-stale-tag-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'packages');
+  prepare('v0.1.5', out);
+  t.mock.method(console, 'log', () => {});
+  const old = process.env.NODE_AUTH_TOKEN;
+  process.env.NODE_AUTH_TOKEN = 'fixture-only';
+  t.after(() => { if (old === undefined) delete process.env.NODE_AUTH_TOKEN; else process.env.NODE_AUTH_TOKEN = old; });
+
+  const published = new Map();
+  const tagLag = new Map(); // 版本已在、dist-tag 尚未跟上
+  const publishes = [];
+  const command = (args, cwd) => {
+    const name = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'))).name;
+    if (args[0] === 'pack') return JSON.stringify([{ filename: 'fixture.tgz', integrity: `sha512-${name}` }]);
+    if (args.includes('--dry-run')) return '';
+    publishes.push(name);
+    published.set(name, { versions: { '0.1.5': { dist: { integrity: `sha512-${name}` } } } });
+    tagLag.set(name, 2);
+    if (publishes.length === 1) throw new Error('npm publish failed: spawnSync npm ETIMEDOUT');
+    return '';
+  };
+  const metadata = async name => {
+    const doc = published.get(name);
+    if (!doc) return null;
+    const lag = tagLag.get(name) ?? 0;
+    if (lag > 0) {
+      tagLag.set(name, lag - 1);
+      return { 'dist-tags': { latest: '0.1.4' }, versions: doc.versions };
+    }
+    return { 'dist-tags': { latest: '0.1.5' }, versions: doc.versions };
+  };
+  await publishPackages(out, 'v0.1.5', true, { command, metadata, sleep: async () => {} });
+  assert.deepEqual(publishes, packageNames, 'landed versions must not be republished because the tag lags');
+});
