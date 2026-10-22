@@ -43,6 +43,31 @@ ground_truth:
 	}
 }
 
+// 难度段写坏不得阻塞判分：真值与难度是两条独立数据，
+// 判分只解 ground_truth 段（类型错误的 difficulty 整段忽略）
+func TestLoadGroundTruthIgnoresBrokenDifficulty(t *testing.T) {
+	path := writeTemp(t, "scenario.yaml", `
+name: demo
+ground_truth:
+  resource_type: pod
+  resource_name: demo-api
+difficulty:
+  faults: 1
+  layers: nope
+`)
+	gt, err := LoadGroundTruth(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if gt.ResourceName != "demo-api" {
+		t.Fatalf("真值解析错误：%+v", gt)
+	}
+	// 同一文件在严格口径下应报错：判分宽松不等于难度数据合法
+	if _, err := LoadScenarioSpec(path); err == nil {
+		t.Fatal("LoadScenarioSpec 应拒绝类型错误的 difficulty")
+	}
+}
+
 // 判分①：supported 结论机械包含匹配；大小写不敏感；refuted 提及不算命中
 func TestJudgeRootCause(t *testing.T) {
 	gt := GroundTruth{ResourceType: "deployment", ResourceName: "demo-api", Namespace: "demo", FaultType: "x"}

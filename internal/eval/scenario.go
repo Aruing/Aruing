@@ -131,12 +131,21 @@ type ScenarioSpec struct {
 	Difficulty *Difficulty `yaml:"difficulty"`
 }
 
+// 读入场景文件原始字节，统一包装读取错误
+func readScenarioFile(path string) ([]byte, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read scenario: %w", err)
+	}
+	return raw, nil
+}
+
 // 宽松读入场景文件，只校验 YAML 形状与必填真值
 // 判分与展示两条口径共用，差异只在是否进一步校验 difficulty
 func parseScenarioFile(path string) (ScenarioSpec, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := readScenarioFile(path)
 	if err != nil {
-		return ScenarioSpec{}, fmt.Errorf("read scenario: %w", err)
+		return ScenarioSpec{}, err
 	}
 	var spec ScenarioSpec
 	if err := yaml.Unmarshal(raw, &spec); err != nil {
@@ -191,6 +200,14 @@ func validateDifficulty(d Difficulty) error {
 		return fmt.Errorf("difficulty.session_rounds must be at least 1")
 	}
 	return nil
+}
+
+// groundTruthOnly 判分侧的形状：只解 ground_truth 段，difficulty 段整段忽略
+// 难度标注与判分真值是两条独立数据，难度写坏不得让场景变得不可判分
+// （unmarshal 仍会标记未知字段为忽略，但不会因未知字段的类型报错）
+type groundTruthOnly struct {
+	// 场景真值段；判分①②的输入
+	GroundTruth GroundTruth `yaml:"ground_truth"`
 }
 
 // ScenarioEntry 场景发现结果；单场景失败不影响其他场景
