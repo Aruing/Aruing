@@ -662,3 +662,30 @@ func TestPalettePickerEscapeClearsFilter(t *testing.T) {
 		t.Fatal("picker must be closed")
 	}
 }
+
+// 换过滤词后行数不变、选中不变，但行内容全变：必须重绘（只比行数的签名会把
+// 旧行留在屏上，pr-agent 采纳项）
+func TestPalettePickerRepaintsOnFilterChange(t *testing.T) {
+	st := mustLoadStyles("dark")
+	c := &paletteCtl{}
+	var b bytes.Buffer
+	c.openPicker(sessionItems(testSummaries(), ""))
+	c.onLine(&b, st, nil, 0)
+
+	// filters: "redis" → 只命中 sess_a；"demo" → 只命中 sess_b（行数同为 1、选中同为 0）
+	b.Reset()
+	c.onLine(&b, st, []rune("redis"), 5)
+	if !strings.Contains(stripANSI(b.String()), "sess_a") {
+		t.Fatalf("filter redis must paint sess_a: %q", stripANSI(b.String()))
+	}
+
+	b.Reset()
+	c.onLine(&b, st, []rune("demo"), 4)
+	out := stripANSI(b.String())
+	if !strings.Contains(out, "sess_b") {
+		t.Fatalf("filter demo must repaint with sess_b instead of reusing the old rows: %q", out)
+	}
+	if strings.Contains(out, "redis") {
+		t.Fatalf("stale row from the previous filter still painted: %q", out)
+	}
+}
