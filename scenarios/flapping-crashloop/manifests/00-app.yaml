@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-api
+  namespace: demo
+  labels:
+    app: demo-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-api
+  template:
+    metadata:
+      labels:
+        app: demo-api
+    spec:
+      containers:
+        - name: demo-api
+          # 间歇性崩溃：启动后跑一阵才崩，间隔由当前秒数取模决定（15-44s，每次重启不同）
+          # 任一时刻抓一次 logs 更像「正常启动」，FATAL 只留在更早的重启周期里
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          env:
+            # 真根因：重试预算被配成 0，一次上游握手失败即致命
+            - name: RETRY_BUDGET
+              value: "0"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "[boot] demo-api starting"
+              echo "[boot] config loaded, retry budget=$RETRY_BUDGET"
+              # 容器内 $$ 恒为 1，不能用 PID 造间隔差异；改用当前秒数取模，重启时刻不同即间隔不同
+              delay=$(( $(date +%s) % 30 + 15 ))
+              echo "[boot] simulated work started (next crash in ${delay}s)"
+              sleep "$delay"
+              echo "FATAL: upstream cache handshake failed: retry budget exhausted (RETRY_BUDGET=$RETRY_BUDGET)" >&2
+              exit 1

@@ -11,7 +11,7 @@
 | 长会话（probe） | `scripts/probe-sweep.sh` | 场景 × 记忆方法臂 × 轮数 × 重复 | 探针①层（含内嵌诊断复判）+ 会话级记录 |
 | ③层抽样 | `aruing judge --sample-total` | diag 维记录逐场景池化抽 N 行 | supports / partial / not_supports（待回填或 LLM 辅助评） |
 
-`make bench-run`（`scripts/bench-run.sh`）编排以上全部：逐场景 **fresh-up**（已存在同场景集群先拆再建；一次只存一个 kind 集群；不碰默认 kubecontext，复现者无须手动 `lab-up`）→ 两维单元 → ③层抽样 → 聚合。场景声明的 `chat-env`（如 `bigtable-fleet` 的 map-reduce 投影）自动注入该场景两维单元，留痕 `scenario-env.txt`。probe 维仅对带 `probe.yaml` 的场景生效（当前 12 个场景均带）。
+`make bench-run`（`scripts/bench-run.sh`）编排以上全部：逐场景 **fresh-up**（已存在同场景集群先拆再建；一次只存一个 kind 集群；不碰默认 kubecontext，复现者无须手动 `lab-up`）→ 两维单元 → ③层抽样 → 聚合。场景声明的 `chat-env`（如 `bigtable-fleet` 的 map-reduce 投影）自动注入该场景两维单元，留痕 `scenario-env.txt`。probe 维仅对带 `probe.yaml` 的场景生效（当前 13 个场景均带）。
 
 ## 依赖
 
