@@ -5,6 +5,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [`architecture.md`](architecture.md) | 架构事实：模块职责、数据结构、信任边界、硬约束清单 |
+| [`architecture-diagram.md`](architecture-diagram.md) | 架构图交互版（`aruing-architecture.html`）：生成工具、代码基线、覆盖范围与重生成方式 |
 | [`project-state.md`](project-state.md) | 当前阶段、工作单元状态、下一步 |
 | [`benchmark.md`](benchmark.md) | 评测基准复现：依赖、从零步骤、参数、产物与开源清洗 |
 | [`skills/`](skills) | 项目级 skill（文档 / 测试 / 注释规范、PR 描述、里程碑收尾、自检、真集群测试、回顾审计） |
