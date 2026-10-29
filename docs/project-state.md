@@ -1,6 +1,6 @@
 # 项目当前状态
 
-> 最后更新：2026-10-22（`0.1.7` 能力验证与加固：步骤 1「难度字段 schema + 派生规则 + 纯读展示」与步骤 2「12 个既有场景难度回填」均已合入功能分支，下一项 = 4 个新场景）
+> 最后更新：2026-10-29（`0.1.7` 能力验证与加固：难度字段 + 12 个既有场景回填已合入功能分支；新场景 `flapping-crashloop` 五件套已落地，待上集群实测定稿判据）
 
 ## 当前阶段
 
@@ -37,14 +37,15 @@
 | - | --- | --- | --- |
 | 1 | `internal/eval` 场景规格与难度派生 + `aruing scenarios` 子命令 | ✅ 已完成（PR #213） | 步骤 1：`scenario.yaml` 的 `difficulty` 段原子事实 + `DeriveDifficulty` 六维机械派生（严格 / 宽松两条读取口径）+ 纯读子命令；4 个老高难场景落地标注 |
 | 2 | 其余 8 个场景难度回填（12 既有 − 4 已标注） | ✅ 已完成（PR #215） | 步骤 2：计数口径（证据来源分类）+ 8 个场景原子事实 + 全库回填守卫测试；`aruing scenarios` 12 行难度表完整 |
-| 3–6 | 4 个新场景（间歇崩溃环 / 双真故障分主次 / PVC / RBAC） | 未开始 | 每场景一个 PR，设计现场写；新场景须同 PR 带 `difficulty`（守卫测试强制） |
+| 3 | 新场景 `flapping-crashloop`（间歇性崩溃环） | ⏳ 进行中（PR #216，draft） | 五件套已落地；`fault_signature` 与 `expect.md` 判据为上集群前初值，待 `lab-up` / `lab-chat` / `judge` 实测定稿后合并 |
+| 4–6 | 其余 3 个新场景（双真故障分主次 / PVC / RBAC） | 未开始 | 每场景一个 PR，设计现场写；新场景须同 PR 带 `difficulty`（守卫测试强制） |
 | 7 | `internal/telemetry` OTel 接入与对比报告 | 未开始 | 笔记 `plan/0.1.7/telemetry/`（步骤待立项） |
 
 产品路径（`run`/`chat`）须 LLM 齐全；单元测试用 `agenttest`/`toolstest` 假实现，不依赖 CLI 假闭环。
 
 ## 下一步
 
-**下一项**：`0.1.7` 步骤 3——新场景「间歇性崩溃环」的设计与落地（12 个既有场景难度表已完整，新场景各自带 `difficulty`）。
+**下一项**：上集群复核新场景 `flapping-crashloop`（`make lab-up` 观察 ≥3 个重启周期 → `lab-chat` 对照 `expect.md` → `judge` 跑判分 → 定稿 `fault_signature`），复核通过后合并 PR；随后进入下一个新场景「双真故障分主次」。
 
 **候选方向**（远景与排序依据见笔记 `plan/version/0.2.0.md`；遗留清单见笔记 `plan/archive/0.2.0/0.1.3/2026-8-31-open-issues.md`）：
 
