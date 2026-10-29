@@ -3,6 +3,18 @@ kind_cluster_name: aruing-sc-crashloop-bad-image
 namespace: demo
 # 给人看的坏态提示；脚本不解析本文件
 notes: "Pod 应处于 ImagePullBackOff（引用了不存在的镜像 tag）"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 无诱饵；闭环需 容器状态（ImagePullBackOff）+ 事件（Failed to pull image）两种来源，
+# 坏 tag 就写在事件正文里，不额外需要配置源；单 ns 单 Deployment，单轮
+difficulty:
+  faults: 1
+  evidence_sources: 2
+  decoys: 0
+  output_scale: plain
+  capability_restricted: false
+  layers: 1
+  session_rounds: 1
+  info_gap: false
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
 ground_truth:
   resource_type: deployment

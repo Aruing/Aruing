@@ -2,6 +2,19 @@ name: same-name-multi-ns
 kind_cluster_name: aruing-sc-same-name-multi-ns
 namespace: ""
 notes: "两个 ns 各有同名 demo-api：team-a 正常、team-b 坏镜像；提示词不带 ns 制造歧义"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 诱饵一个（team-a 同名健康副本：同型歧义，须证据排除后锁定 team-b）；
+# 闭环需 两侧副本状态对比（对象状态）+ 事件 / describe 里的坏 tag（事件）两种来源；
+# 跨两个 ns = 2；cases/02-investigate-clarify 设计两轮（挂起-回复链），取 max；答案要求先澄清 ns
+difficulty:
+  faults: 1
+  evidence_sources: 2
+  decoys: 1
+  output_scale: plain
+  capability_restricted: false
+  layers: 2
+  session_rounds: 2
+  info_gap: true
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；根因是 team-b 的坏镜像副本
 ground_truth:
   resource_type: deployment

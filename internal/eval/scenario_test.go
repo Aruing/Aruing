@@ -259,14 +259,58 @@ difficulty:
 	}
 }
 
-// 已标注的四个高难场景必须始终可严格读取（回填完整性守卫）
-func TestLoadScenarioSpecAnnotatedScenarios(t *testing.T) {
+// 全库回填守卫：每个含 manifests/ 的场景都必须带合法的 difficulty 段
+// 新增场景漏标注时本用例直接失败，回填债不能靠人记得
+func TestScenariosAnnotated(t *testing.T) {
 	root := filepath.Join("..", "..", "scenarios")
-	names := []string{"shared-config-drift", "rollout-stuck", "quota-vs-scheduler", "netpol-misfire"}
+	entries, err := LoadScenarioSpecs(root)
+	if err != nil {
+		t.Skipf("scenarios dir absent: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Skip("no scenarios found")
+	}
 
-	for _, name := range names {
-		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(root, name, "scenario.yaml")
+	for _, e := range entries {
+		t.Run(e.Name, func(t *testing.T) {
+			// 严格口径同时校验缺段与越界：展示侧的宽松口径会默默显示占位
+			spec, err := LoadScenarioSpec(e.Path)
+			if err != nil {
+				t.Fatalf("LoadScenarioSpec: %v", err)
+			}
+			if spec.Difficulty == nil {
+				t.Fatal("difficulty = nil, want annotated")
+			}
+		})
+	}
+}
+
+// 难度表快照：总分与信息缺口标记一旦被误改（断崖、抄错行）立刻暴露
+// 只钉派生结果不钉原子事实，避免把 yaml 内容复制成第二份事实源
+func TestScenariosDifficultyTable(t *testing.T) {
+	root := filepath.Join("..", "..", "scenarios")
+	cases := []struct {
+		name  string
+		total int
+		gap   bool
+	}{
+		{name: "bigtable-fleet", total: 10},
+		{name: "configmap-missing", total: 6},
+		{name: "crashloop-bad-image", total: 5},
+		{name: "log-time-window", total: 5},
+		{name: "netpol-misfire", total: 10, gap: true},
+		{name: "oom-killed", total: 5},
+		{name: "pending-nodeselector", total: 7},
+		{name: "quota-vs-scheduler", total: 9},
+		{name: "rollout-stuck", total: 9},
+		{name: "same-name-multi-ns", total: 8, gap: true},
+		{name: "shared-config-drift", total: 10},
+		{name: "svc-wrong-selector", total: 5},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(root, tc.name, "scenario.yaml")
 			if _, err := os.Stat(path); err != nil {
 				t.Skipf("scenario file absent: %v", err)
 			}
@@ -274,9 +318,12 @@ func TestLoadScenarioSpecAnnotatedScenarios(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadScenarioSpec: %v", err)
 			}
-			// 高难场景总分落在高段：低于该阈值说明标注被误改
-			if total := DeriveDifficulty(*spec.Difficulty).Total; total < 8 {
-				t.Fatalf("total = %d, want >= 8", total)
+			score := DeriveDifficulty(*spec.Difficulty)
+			if score.Total != tc.total {
+				t.Fatalf("total = %d, want %d", score.Total, tc.total)
+			}
+			if spec.Difficulty.InfoGap != tc.gap {
+				t.Fatalf("info_gap = %v, want %v", spec.Difficulty.InfoGap, tc.gap)
 			}
 		})
 	}

@@ -70,7 +70,7 @@ make lab-kube NAME=crashloop-bad-image CMD="describe pod -n demo -l app=demo-api
 | 字段 | 含义 |
 | --- | --- |
 | `faults` | 真故障个数（不含诱饵），至少 1 |
-| `evidence_sources` | 闭环所需不同来源证据种数（事件 / 容器状态 / 日志 / 配置 / 网络策略…） |
+| `evidence_sources` | 闭环所需不同来源证据种数，按来源类计而不按调用次数：对象/容器状态（get/describe 的 status/conditions/Endpoints）、事件、日志、配置与关联对象（image / env / resources / selector / 配额 / 节点标签）、网络策略、数据面连通性 |
 | `decoys` | 故意埋的假线索个数 |
 | `output_scale` | `plain` 或 `large`：是否逼出投影 / 分片 / 落盘页式路径 |
 | `capability_restricted` | 是否权限或能力受限（如 RBAC 拒绝读、数据面无法实测） |
@@ -86,7 +86,7 @@ make lab-list                 # 场景列表 + 每个场景的六维难度分
 ./bin/aruing scenarios        # 或直接调用（--format json 供机器消费）
 ```
 
-未标注 `difficulty` 的场景在列表里显示 `-`（回填进度可见）；标注越界（负数、未知 `output_scale`）会在 stderr 报警，判分与对比报告侧则直接报错。
+全部场景已标注 `difficulty`；**新增场景须在同一个 PR 内标注**，否则列表显示 `-` 且 `internal/eval` 的全库守卫测试失败。标注越界（负数、未知 `output_scale`）会在 stderr 报警，判分与对比报告侧则直接报错。
 
 ### 同集群多 case（cases/）
 
