@@ -3,6 +3,18 @@ kind_cluster_name: aruing-sc-log-time-window
 namespace: demo
 # 给人看的坏态提示；脚本不解析本文件
 notes: "busybox 每 tick 打一行日志后 exit 1 → CrashLoopBackOff 反复重启；日志随重启累积且各重启周期时间戳不同，供 evidence.read since/until 时间窗切片验收"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 无诱饵；闭环需 CrashLoopBackOff / RESTARTS（容器状态）+ 带时间戳日志的时间窗切片
+# （日志）两种来源；日志虽为关键证据，但每重启仅 4 行，不逼出投影 / 分片 / 落盘，故 plain；单 ns，单轮
+difficulty:
+  faults: 1
+  evidence_sources: 2
+  decoys: 0
+  output_scale: plain
+  capability_restricted: false
+  layers: 1
+  session_rounds: 1
+  info_gap: false
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
 ground_truth:
   resource_type: deployment

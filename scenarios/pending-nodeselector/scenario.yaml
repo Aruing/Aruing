@@ -3,6 +3,18 @@ kind_cluster_name: aruing-sc-pending-nodeselector
 namespace: demo
 # 给人看的坏态提示；脚本不解析本文件
 notes: "nodeSelector 指向不存在的节点标签（workload-type=batch-node）→ Pod 永久 Pending，FailedScheduling 事件含节点不匹配"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 无诱饵；闭环需 Pending 状态（对象状态）+ FailedScheduling 事件（事件）
+# + nodeSelector 与节点标签对比（配置）三种来源；跨 ns 与节点两层，单轮
+difficulty:
+  faults: 1
+  evidence_sources: 3
+  decoys: 0
+  output_scale: plain
+  capability_restricted: false
+  layers: 2
+  session_rounds: 1
+  info_gap: false
 # 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
 # 注：本场景 up 后 scenario-up 的稳态等待会满 ~120s 才返回（永久 Pending 永不落稳，属预期不失败）
 ground_truth:
