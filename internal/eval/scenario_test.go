@@ -297,6 +297,7 @@ func TestScenariosDifficultyTable(t *testing.T) {
 		{name: "bigtable-fleet", total: 10},
 		{name: "configmap-missing", total: 6},
 		{name: "crashloop-bad-image", total: 5},
+		{name: "flapping-crashloop", total: 6},
 		{name: "log-time-window", total: 5},
 		{name: "netpol-misfire", total: 10, gap: true},
 		{name: "oom-killed", total: 5},

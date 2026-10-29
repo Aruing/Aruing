@@ -1,0 +1,25 @@
+name: flapping-crashloop
+kind_cluster_name: aruing-sc-flapping-crashloop
+namespace: demo
+# 给人看的坏态提示；脚本不解析本文件
+notes: "间歇性崩溃：容器启动后跑 15-44s（当前秒数取模，每次重启不同）才崩，CrashLoopBackOff 反复重启；任一时刻抓 logs 更像「正常启动」，FATAL 只在更早的重启周期里；真根因 env RETRY_BUDGET=0"
+# 难度理论值：只存原子事实（可数），六维分数由 aruing scenarios 机械派生
+# 无诱饵（「看起来正常」是症状形态，不是埋的假线索）；闭环需 重启计数 / lastState（对象状态）
+# + 跨重启周期日志（日志）+ RETRY_BUDGET 配置（配置）三种来源；规模上仍是单 ns 单 Deployment 单轮
+difficulty:
+  faults: 1
+  evidence_sources: 3
+  decoys: 0
+  output_scale: plain
+  capability_restricted: false
+  layers: 1
+  session_rounds: 1
+  info_gap: false
+# 场景真值四元组：判分器（aruing judge）机械判分的依据；资源名与 manifests 实名一致
+# signature 真词待上集群实测复核（判分靠机械包含匹配，须用真实日志原词）
+ground_truth:
+  resource_type: deployment
+  resource_name: demo-api
+  namespace: demo
+  fault_type: flapping-crashloop-retry-budget
+  fault_signature: [RETRY_BUDGET, retry budget, 重试预算, FATAL]
